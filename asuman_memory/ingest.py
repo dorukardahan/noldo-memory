@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -104,7 +105,6 @@ class Chunk:
         self.md5 = _md5(self.text)
 
 
-from dataclasses import dataclass
 
 
 def _chunk_session(

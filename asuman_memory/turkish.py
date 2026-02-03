@@ -107,7 +107,14 @@ def lemmatize(text: str) -> str:
             results = analyzer.lemmatize(token)
             if results and results[0] and len(results[0]) > 1:
                 # results is list of (word, [lemma1, lemma2, ...])
+                # e.g. ('hatırlıyorum', ['hatırlamak'])
                 lemma = results[0][1][0] if results[0][1] else token
+                # Strip Turkish infinitive suffixes to get the stem
+                # hatırlamak → hatırla, sevmek → sev
+                for suffix in ("mak", "mek"):
+                    if lemma.lower().endswith(suffix) and len(lemma) > len(suffix) + 1:
+                        lemma = lemma[: -len(suffix)]
+                        break
                 lemmas.append(lemma.lower())
             else:
                 lemmas.append(token.lower())
