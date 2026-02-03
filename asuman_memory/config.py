@@ -1,0 +1,108 @@
+"""Configuration for Asuman Memory System.
+
+Loads from environment variables with sensible defaults.
+Optionally reads a config.json file.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+
+@dataclass
+class Config:
+    """Central configuration for all memory sub-systems."""
+
+    # OpenRouter embedding
+    openrouter_api_key: str = ""
+    embedding_model: str = "qwen/qwen3-embedding-8b"
+    embedding_dimensions: int = 4096
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
+    # Storage
+    db_path: str = str(Path.home() / ".asuman" / "memory.sqlite")
+
+    # API
+    api_host: str = "0.0.0.0"
+    api_port: int = 8787
+
+    # Search weights
+    weight_semantic: float = 0.50
+    weight_keyword: float = 0.30
+    weight_recency: float = 0.20
+
+    # Sessions
+    sessions_dir: str = str(Path.home() / ".openclaw" / "agents" / "main" / "sessions")
+
+    # Ingest
+    chunk_gap_hours: float = 4.0
+    max_message_len: int = 2000
+    batch_size: int = 50
+
+    # Embedding retry
+    embed_max_retries: int = 3
+    embed_cache_size: int = 1024
+
+    def validate(self) -> list[str]:
+        """Return a list of validation errors (empty == OK)."""
+        errors: list[str] = []
+        if not self.openrouter_api_key:
+            errors.append("OPENROUTER_API_KEY is required")
+        if self.embedding_dimensions < 1:
+            errors.append("ASUMAN_MEMORY_DIMENSIONS must be >= 1")
+        if self.api_port < 1 or self.api_port > 65535:
+            errors.append("ASUMAN_MEMORY_PORT must be 1-65535")
+        return errors
+
+
+def load_config(config_path: Optional[str] = None) -> Config:
+    """Build a Config from environment variables, optionally overlaid with a JSON file.
+
+    Environment variables (all optional except OPENROUTER_API_KEY):
+        OPENROUTER_API_KEY
+        ASUMAN_MEMORY_DB
+        ASUMAN_MEMORY_MODEL
+        ASUMAN_MEMORY_PORT
+        ASUMAN_MEMORY_DIMENSIONS
+        ASUMAN_MEMORY_HOST
+        ASUMAN_SESSIONS_DIR
+    """
+    cfg = Config()
+
+    # --- JSON file overlay ------------------------------------------------
+    json_path = config_path or os.environ.get("ASUMAN_MEMORY_CONFIG")
+    if json_path and Path(json_path).is_file():
+        with open(json_path, "r") as fh:
+            data = json.load(fh)
+        for key, val in data.items():
+            if hasattr(cfg, key):
+                expected_type = type(getattr(cfg, key))
+                try:
+                    setattr(cfg, key, expected_type(val))
+                except (ValueError, TypeError):
+                    pass  # skip bad values
+
+    # --- Environment variable overlay -------------------------------------
+    env_map: dict[str, tuple[str, type]] = {
+        "OPENROUTER_API_KEY": ("openrouter_api_key", str),
+        "ASUMAN_MEMORY_DB": ("db_path", str),
+        "ASUMAN_MEMORY_MODEL": ("embedding_model", str),
+        "ASUMAN_MEMORY_PORT": ("api_port", int),
+        "ASUMAN_MEMORY_DIMENSIONS": ("embedding_dimensions", int),
+        "ASUMAN_MEMORY_HOST": ("api_host", str),
+        "ASUMAN_SESSIONS_DIR": ("sessions_dir", str),
+    }
+
+    for env_key, (attr, cast) in env_map.items():
+        val = os.environ.get(env_key)
+        if val is not None:
+            try:
+                setattr(cfg, attr, cast(val))
+            except (ValueError, TypeError):
+                pass
+
+    return cfg

@@ -1,38 +1,17 @@
-# Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.egg-info/
 dist/
 build/
 .eggs/
-*.egg
-venv/
-.venv/
-
-# Database
 *.sqlite
-*.sqlite-journal
 *.db
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment
 .env
-.env.local
-
-# Logs
-*.log
-logs/
-
-# Test
+.venv/
+venv/
+env/
 .pytest_cache/
-htmlcov/
-.coverage
+.mypy_cache/
+*.log
+.realtime_state.json

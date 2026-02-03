@@ -1,39 +1,101 @@
-# 🧠 Asuman Memory
+# Asuman Memory System
 
-Production-ready conversational memory for [Asuman](https://github.com/asuman-project) — an AI assistant running on OpenClaw.
-
-Turkish+English hybrid search, OpenRouter embeddings, knowledge graph, temporal awareness.
+Production-ready conversational memory for Asuman — an AI assistant on OpenClaw that speaks Turkish+English via WhatsApp.
 
 ## Architecture
 
 ```
-OpenClaw Gateway (Node.js, WhatsApp)
-    │
-    │ HTTP localhost:8787
-    ▼
-Asuman Memory (Python)
-├── OpenRouter embeddings (qwen/qwen3-embedding-8b)
-├── sqlite-vec + FTS5 (hybrid search)
-├── Turkish NLP (zeyrek + dateparser)
-├── Trigger patterns (TR+EN)
-├── Knowledge graph (SQLite)
-├── RRF fusion (semantic + BM25 + recency)
-└── Confidence scoring
+┌──────────────────────────────────────────────────────┐
+│                  FastAPI  (:8787)                     │
+│  /v1/recall  /v1/capture  /v1/store  /v1/health      │
+└──────────┬──────────┬──────────┬─────────────────────┘
+           │          │          │
+     ┌─────▼─────┐ ┌──▼───┐ ┌───▼───┐
+     │  Hybrid   │ │Ingest│ │Entity │
+     │  Search   │ │      │ │Extract│
+     │(RRF Fuse) │ │JSONL │ │ KG    │
+     └──┬──┬──┬──┘ └──┬───┘ └───┬───┘
+        │  │  │        │         │
+   ┌────▼┐ │ ┌▼────┐ ┌▼─────────▼─┐
+   │Vec  │ │ │FTS5 │ │   SQLite   │
+   │Srch │ │ │BM25 │ │ (storage)  │
+   └──┬──┘ │ └──┬──┘ └─────┬──────┘
+      │    │    │           │
+      └────┴────┴───────────┘
+         sqlite-vec + FTS5
+         single .sqlite file
+
+   ┌────────────┐   ┌──────────┐
+   │ OpenRouter │   │  Turkish │
+   │ Embeddings │   │   NLP    │
+   │ qwen3-8b   │   │(zeyrek + │
+   │ 4096d      │   │dateparser)│
+   └────────────┘   └──────────┘
 ```
 
-## Based On
+## Quick Start
 
-Enhanced fork inspired by [Mahmory](https://github.com/cryptosquanch/whatsapp-memory) (v6.0) — rebuilt from scratch with:
-- 🪶 **~20MB** dependencies (vs ~4GB original)
-- 🇹🇷 **Turkish NLP** — zeyrek morphology, dateparser temporal, Turkish triggers
-- 🔗 **OpenRouter** embeddings — qwen3-embedding-8b (MTEB Multilingual #1)
-- 💾 **sqlite-vec** — single file, hybrid search, trivial backup
-- ⚡ **FastAPI** — HTTP bridge to OpenClaw
+```bash
+# Install
+pip install -r requirements.txt
 
-## Status
+# Set API key
+export OPENROUTER_API_KEY="sk-or-..."
 
-🚧 Under development — see [BUILD-PLAN.md](BUILD-PLAN.md) for roadmap.
+# Start API
+python -m asuman_memory
 
-## License
+# Health check
+curl http://localhost:8787/v1/health
+```
 
-Private repository.
+## Modules
+
+| Module | Description |
+|--------|-------------|
+| `config.py` | Environment-based configuration |
+| `embeddings.py` | OpenRouter embedding client (qwen3-embedding-8b) |
+| `storage.py` | SQLite + sqlite-vec + FTS5 storage |
+| `search.py` | Hybrid search with RRF fusion |
+| `turkish.py` | Turkish NLP (zeyrek lemmatization, dateparser, ASCII folding) |
+| `triggers.py` | Trigger patterns + importance scoring |
+| `entities.py` | Knowledge graph (entity extraction) |
+| `ingest.py` | Session JSONL ingestion |
+| `api.py` | FastAPI HTTP API |
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/v1/recall` | Search memories (hybrid search) |
+| POST | `/v1/capture` | Ingest messages |
+| POST | `/v1/store` | Store a memory |
+| DELETE | `/v1/forget` | Delete memory |
+| GET | `/v1/search` | Interactive search |
+| GET | `/v1/stats` | Statistics |
+| GET | `/v1/health` | Health check |
+
+## Initial Data Load
+
+```bash
+python scripts/initial_load.py
+```
+
+## Tests
+
+```bash
+pytest tests/ -v
+```
+
+## Configuration
+
+Environment variables:
+- `OPENROUTER_API_KEY` — required
+- `ASUMAN_MEMORY_DB` — SQLite path (default: `~/.asuman/memory.sqlite`)
+- `ASUMAN_MEMORY_MODEL` — embedding model (default: `qwen/qwen3-embedding-8b`)
+- `ASUMAN_MEMORY_PORT` — API port (default: `8787`)
+- `ASUMAN_MEMORY_DIMENSIONS` — vector dimensions (default: `4096`)
+
+## Dependencies
+
+< 25MB total. No torch, no transformers, no heavy ML.
