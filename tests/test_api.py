@@ -8,9 +8,6 @@ pointing it at a temp database so the production DB is untouched.
 from __future__ import annotations
 
 import time
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient, ASGITransport

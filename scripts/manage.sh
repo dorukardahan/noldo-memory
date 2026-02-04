@@ -49,12 +49,18 @@ case "${1}" in
         ;;
     sync)
         echo "Running incremental sync..."
-        export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-REDACTED_API_KEY}"
+        if [ -f /opt/asuman/.env ]; then
+            export $(grep -v '^#' /opt/asuman/.env | grep OPENROUTER_API_KEY | xargs)
+        fi
+        [ -z "$OPENROUTER_API_KEY" ] && echo "ERROR: OPENROUTER_API_KEY not set" && exit 1
         ${VENV}/python ${SCRIPTS}/openclaw_sync.py "${@:2}"
         ;;
     load)
         echo "Running initial data load..."
-        export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-REDACTED_API_KEY}"
+        if [ -f /opt/asuman/.env ]; then
+            export $(grep -v '^#' /opt/asuman/.env | grep OPENROUTER_API_KEY | xargs)
+        fi
+        [ -z "$OPENROUTER_API_KEY" ] && echo "ERROR: OPENROUTER_API_KEY not set" && exit 1
         ${VENV}/python ${SCRIPTS}/initial_load.py "${@:2}"
         ;;
     health)

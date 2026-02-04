@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
-from typing import List, Optional
-from unittest.mock import AsyncMock
+from typing import List
 
 import pytest
 
 from asuman_memory.storage import MemoryStorage
-from asuman_memory.embeddings import OpenRouterEmbeddings
 from asuman_memory.entities import EntityExtractor, KnowledgeGraph
 from asuman_memory.search import HybridSearch
 

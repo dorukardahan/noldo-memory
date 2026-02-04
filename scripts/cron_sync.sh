@@ -8,13 +8,15 @@ LOGFILE="/var/log/asuman-memory-sync.log"
 VENV="/opt/asuman/whatsapp-memory/venv/bin"
 SCRIPT="/opt/asuman/whatsapp-memory/scripts/openclaw_sync.py"
 
-# Load API key from .env
+# Load API key from .env (NEVER hardcode keys in scripts)
 if [ -f /opt/asuman/.env ]; then
     export $(grep -v '^#' /opt/asuman/.env | grep OPENROUTER_API_KEY | xargs)
 fi
 
-# Fallback
-export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-REDACTED_API_KEY}"
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "ERROR: OPENROUTER_API_KEY not set. Check /opt/asuman/.env" >> "$LOGFILE"
+    exit 1
+fi
 
 echo "--- $(date -Iseconds) --- SYNC START ---" >> "$LOGFILE"
 ${VENV}/python ${SCRIPT} 2>&1 >> "$LOGFILE"
