@@ -9,8 +9,12 @@ VENV="/opt/asuman/whatsapp-memory/venv/bin"
 SCRIPT="/opt/asuman/whatsapp-memory/scripts/openclaw_sync.py"
 
 # Load API key from .env (NEVER hardcode keys in scripts)
+# Safer than `export $(grep ... | xargs)` and supports quoted values.
 if [ -f /opt/asuman/.env ]; then
-    export $(grep -v '^#' /opt/asuman/.env | grep OPENROUTER_API_KEY | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    source /opt/asuman/.env
+    set +a
 fi
 
 if [ -z "$OPENROUTER_API_KEY" ]; then

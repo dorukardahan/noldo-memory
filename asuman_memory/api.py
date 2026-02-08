@@ -145,42 +145,63 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
     """Ingest a batch of messages into memory.
 
     Each message dict should have at least ``text`` and ``role``.
+
+    Notes:
+      - Works even when the embedder is not configured (vectors stored as NULL).
+      - Uses a single embed_batch + store_memories_batch for efficiency.
     """
-    if _storage is None or _embedder is None:
-        raise HTTPException(503, "Storage/embedder not initialised")
+    if _storage is None:
+        raise HTTPException(503, "Storage not initialised")
 
-    stored = 0
+    # Pre-filter / normalize
+    cleaned: List[Dict[str, Any]] = []
     for msg in req.messages:
-        text = msg.get("text", "")
-        role = msg.get("role", "user")
-        if not text or len(text.strip()) < 3:
+        text = (msg.get("text") or "").strip()
+        if len(text) < 3:
             continue
+        role = msg.get("role", "user")
+        cleaned.append({
+            "text": text[:2000],
+            "role": role,
+            "session": msg.get("session", ""),
+            "timestamp": msg.get("timestamp", ""),
+        })
 
-        importance = score_importance(text, {"role": role})
+    if not cleaned:
+        return {"stored": 0, "total": len(req.messages)}
 
+    texts = [m["text"] for m in cleaned]
+
+    vectors: List[Optional[List[float]]] = [None] * len(texts)
+    if _embedder is not None:
         try:
-            vector = await _embedder.embed(text)
+            vectors = await _embedder.embed_batch(texts)
         except Exception:
-            vector = None
+            vectors = [None] * len(texts)
 
-        _storage.store_memory(
-            text=text[:2000],
-            vector=vector,
-            category=role,
-            importance=importance,
-            source_session=msg.get("session", ""),
-        )
+    items: List[Dict[str, Any]] = []
+    for m, vec in zip(cleaned, vectors):
+        importance = score_importance(m["text"], {"role": m["role"]})
+        items.append({
+            "text": m["text"],
+            "vector": vec,
+            "category": m["role"],
+            "importance": importance,
+            "source_session": m["session"],
+        })
 
-        # Knowledge graph
-        if _kg:
+    # Store in one transaction
+    _storage.store_memories_batch(items)
+
+    # Knowledge graph (best-effort)
+    if _kg:
+        for m in cleaned:
             try:
-                _kg.process_text(text, timestamp=msg.get("timestamp", ""))
+                _kg.process_text(m["text"], timestamp=m.get("timestamp", ""))
             except Exception:
                 pass
 
-        stored += 1
-
-    return {"stored": stored, "total": len(req.messages)}
+    return {"stored": len(items), "total": len(req.messages)}
 
 
 @app.post("/v1/store")

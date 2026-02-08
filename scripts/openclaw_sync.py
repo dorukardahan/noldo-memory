@@ -137,11 +137,19 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
             errors += 1
             continue
 
-        # Filter out already-stored chunks
-        new_chunks = []
-        for chunk in chunks:
-            if storage.get_memory(chunk.md5) is None:
-                new_chunks.append(chunk)
+        # Filter out already-stored chunks (batch SELECT)
+        chunk_ids = [c.md5 for c in chunks]
+        existing_ids: set[str] = set()
+        if chunk_ids:
+            conn = storage._get_conn()  # internal; used here for performance
+            placeholders = ",".join(["?"] * len(chunk_ids))
+            rows = conn.execute(
+                f"SELECT id FROM memories WHERE id IN ({placeholders})",
+                chunk_ids,
+            ).fetchall()
+            existing_ids = {r["id"] for r in rows}
+
+        new_chunks = [c for c in chunks if c.md5 not in existing_ids]
         skipped = len(chunks) - len(new_chunks)
         total_skipped += skipped
 

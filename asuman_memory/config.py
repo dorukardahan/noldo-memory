@@ -27,7 +27,8 @@ class Config:
     db_path: str = str(Path.home() / ".asuman" / "memory.sqlite")
 
     # API
-    api_host: str = "0.0.0.0"
+    # Security: bind to localhost by default. Override with ASUMAN_MEMORY_HOST if needed.
+    api_host: str = "127.0.0.1"
     api_port: int = 8787
 
     # Search weights

@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _load_vec_extension(conn: sqlite3.Connection) -> None:
-    """Load the sqlite-vec extension into *conn*."""
+    """Load the sqlite-vec extension into *conn*.
+
+    Hardening: only enable extension loading for the duration of the load call.
+    """
     conn.enable_load_extension(True)
     try:
         import sqlite_vec  # noqa: F401
@@ -34,6 +37,12 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
     except Exception as exc:
         logger.error("Failed to load sqlite-vec: %s", exc)
         raise
+    finally:
+        try:
+            conn.enable_load_extension(False)
+        except Exception:
+            # Some sqlite builds may not support toggling; ignore.
+            pass
 
 
 # ---------------------------------------------------------------------------
