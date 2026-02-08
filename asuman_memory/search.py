@@ -103,7 +103,7 @@ def _rrf_fuse(
 
 
 class HybridSearch:
-    """Three-layer hybrid search engine with RRF fusion."""
+    """Four-layer hybrid search engine with RRF fusion."""
 
     def __init__(
         self,

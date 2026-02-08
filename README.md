@@ -1,409 +1,369 @@
-# Asuman Memory System
+# OpenClaw Memory — Persistent Memory for OpenClaw Agents
 
-Production-ready conversational memory for **Asuman** — an AI assistant on [OpenClaw](https://openclaw.com) that speaks Turkish + English via WhatsApp.
+A local-first conversational memory system that gives OpenClaw agents long-term recall across sessions.
 
-Indexes every OpenClaw session into a searchable database with **semantic (vector) + keyword (BM25) + recency** hybrid search, powered by a single SQLite file.
+- **Single SQLite file** (portable, backup-friendly)
+- **Hybrid search** for recall (semantic + keyword + recency + strength)
+- **Zero cloud dependency** for storage and retrieval (embeddings are the only external call)
+
+## Key Features
+
+- **4-layer hybrid search**: semantic (sqlite-vec) + keyword (FTS5 BM25) + recency + Ebbinghaus strength
+- **Reciprocal Rank Fusion (RRF)** for merging results from multiple layers
+- **Write-time semantic merge** (cosine similarity > 0.85 ⇒ merge instead of duplicate)
+- **Ebbinghaus spaced repetition** (frequently retrieved memories strengthen, unused ones decay)
+- **Consolidation endpoint** for bulk dedup + stale cleanup
+- **Multilingual NLP (Turkish + English built-in)**: zeyrek lemmatization, dateparser, stopwords
+- **Knowledge graph**: entities, relationships, temporal facts
+- **OpenClaw session JSONL ingestion** with auto-sync
+- **FastAPI with 9 endpoints** (Swagger UI at `/docs`)
+- **Single SQLite file** — no Docker, no external DB
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                   FastAPI  (:8787)                        │
-│  /v1/recall  /v1/capture  /v1/store  /v1/forget          │
-│  /v1/search  /v1/stats    /v1/health                     │
-└──────────┬──────────┬──────────┬─────────────────────────┘
-           │          │          │
-     ┌─────▼─────┐ ┌──▼───┐ ┌───▼───┐
-     │  Hybrid   │ │Ingest│ │Entity │
-     │  Search   │ │      │ │Extract│
-     │(RRF Fuse) │ │JSONL │ │ KG    │
-     └──┬──┬──┬──┘ └──┬───┘ └───┬───┘
-        │  │  │        │         │
-   ┌────▼┐ │ ┌▼────┐ ┌▼─────────▼─┐
-   │Vec  │ │ │FTS5 │ │   SQLite   │
-   │Srch │ │ │BM25 │ │ (storage)  │
-   └──┬──┘ │ └──┬──┘ └─────┬──────┘
-      │    │    │           │
-      └────┴────┴───────────┘
-         sqlite-vec + FTS5
-         single .sqlite file
+┌────────────────────────────────────────────────────────────────────┐
+│                       FastAPI  (:8787)                             │
+│  /v1/recall  /v1/capture  /v1/store  /v1/forget  /v1/search        │
+│  /v1/stats   /v1/health   /v1/decay  /v1/consolidate               │
+└──────────┬───────────────┬───────────────┬────────────────────────┘
+           │               │               │
+     ┌─────▼─────┐   ┌────▼─────┐   ┌────▼────────┐
+     │  Hybrid   │   │  Ingest  │   │  Knowledge   │
+     │  Search   │   │  JSONL   │   │   Graph      │
+     │ (RRF Fuse)│   │ (auto)   │   │ (entities)   │
+     └──┬──┬──┬──┘   └────┬─────┘   └────┬─────────┘
+        │  │  │           │              │
+   ┌────▼┐ │ ┌▼────┐  ┌──▼──────────────▼──┐
+   │Vec  │ │ │FTS5 │  │       SQLite         │
+   │Srch │ │ │BM25 │  │  memories + vectors  │
+   └──┬──┘ │ └──┬──┘  │  fts + entities/KG   │
+      │    │    │     └─────────┬────────────┘
+      │    │    │               │
+      │    │    │         ┌─────▼─────┐
+      │    │    └────────►│ Recency   │
+      │    │              │  scoring  │
+      │    │              └───────────┘
+      │    │
+      │    │              ┌───────────┐
+      │    └─────────────►│ Strength  │
+      │                   │ (decay +  │
+      └──────────────────►│ boost)    │
+                          └───────────┘
 
-   ┌────────────┐   ┌──────────┐
-   │ OpenRouter │   │  Turkish │
-   │ Embeddings │   │   NLP    │
-   │ qwen3-8b   │   │(zeyrek + │
-   │ 4096d      │   │dateparser)│
-   └────────────┘   └──────────┘
+         sqlite-vec + FTS5 + strength/decay
+         single .sqlite database file
+
+   ┌──────────────┐
+   │ OpenRouter    │
+   │ Embeddings    │
+   │ (optional)    │
+   └──────────────┘
 ```
 
-### Data Flow
+## API (9 Endpoints)
 
-1. **Ingest** — OpenClaw JSONL session files are parsed → chunked into Q&A pairs → MD5 deduped
-2. **Embed** — Chunks are batch-embedded via OpenRouter (qwen3-embedding-8b, 4096 dim)
-3. **Store** — Vectors + metadata go into SQLite (sqlite-vec for ANN, FTS5 for BM25)
-4. **Search** — Queries hit 3 layers (semantic, keyword, recency) fused via Reciprocal Rank Fusion (RRF)
-5. **Entities** — Regex + heuristic NER extracts people, places, orgs, tech terms → knowledge graph
+Swagger UI: **http://localhost:8787/docs**
 
-### Modules
+### 1) `POST /v1/recall` — hybrid search
 
-| Module | Description |
-|--------|-------------|
-| `config.py` | Environment-based configuration with JSON overlay |
-| `embeddings.py` | OpenRouter embedding client — async, batched, cached, retries |
-| `storage.py` | SQLite + sqlite-vec + FTS5 — memories, entities, relationships |
-| `search.py` | 3-layer hybrid search with RRF fusion |
-| `turkish.py` | Turkish NLP: zeyrek lemmatization, dateparser, ASCII folding, stopwords |
-| `triggers.py` | Memory trigger patterns + importance scoring (0.0–1.0) |
-| `entities.py` | Regex + heuristic NER → knowledge graph |
-| `ingest.py` | Session JSONL parser → chunker → batch embedder |
-| `api.py` | FastAPI HTTP API (7 endpoints) |
+Hybrid search across 4 layers (semantic + BM25 + recency + strength), fused via RRF.
 
-## Quick Start
-
-```bash
-# Clone
-git clone https://github.com/dorukardahan/asuman-memory.git
-cd whatsapp-memory
-
-# Create venv and install
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Set API key
-export OPENROUTER_API_KEY="sk-or-..."
-
-# Start API
-python -m asuman_memory
-
-# Health check
-curl http://localhost:8787/v1/health
-```
-
-### Systemd Service
-
-```bash
-# Enable and start
-sudo systemctl enable asuman-memory
-sudo systemctl start asuman-memory
-
-# Check status
-sudo systemctl status asuman-memory
-```
-
-### Initial Data Load
-
-```bash
-# Load all session files
-python scripts/initial_load.py
-
-# Incremental sync (cron runs this every 30 min)
-python scripts/openclaw_sync.py
-```
-
-## API Documentation
-
-Interactive Swagger UI is available at **http://localhost:8787/docs** when the service is running.
-
-### `GET /v1/health`
-
-Health check with uptime and memory count.
-
-**Response:**
+**Request**
 ```json
 {
-  "status": "ok",
-  "uptime_seconds": 3621.5,
-  "storage": true,
-  "embedder": true,
-  "total_memories": 218,
-  "entities": 138
-}
-```
-
-### `POST /v1/recall`
-
-Search memories using hybrid search (semantic + BM25 + recency). The primary search endpoint.
-
-**Request:**
-```json
-{
-  "query": "memory system araştırması",
+  "query": "What did we decide about backups?",
   "limit": 5,
   "min_score": 0.0
 }
 ```
 
-**Response:**
+**Response (example)**
 ```json
 {
-  "query": "memory system araştırması",
-  "count": 3,
+  "query": "What did we decide about backups?",
+  "count": 1,
   "triggered": true,
   "results": [
     {
       "id": "a1b2c3d4e5f6",
-      "text": "User: memory sistemi nasıl çalışıyor?\nAssistant: ...",
-      "category": "qa_pair",
+      "text": "We agreed to run a daily SQLite backup at 04:00...",
+      "category": "assistant",
       "importance": 0.75,
       "created_at": 1706900000.0,
-      "score": 0.0158,
-      "semantic_score": 0.8432,
+      "score": 0.0162,
+      "semantic_score": 0.8421,
       "keyword_score": 0.0,
       "recency_score": 0.9812,
+      "strength_score": 0.9034,
       "confidence_tier": "MEDIUM"
     }
   ]
 }
 ```
 
-The `triggered` field indicates whether the query would naturally trigger a memory lookup (based on Turkish/English trigger patterns). Useful for deciding when to auto-recall.
+### 2) `POST /v1/capture` — batch ingest (write-time merge)
 
-### `POST /v1/capture`
+Ingest a batch of messages. Each message is importance-scored, (optionally) embedded, then **merge-or-insert** is applied to avoid duplicates.
 
-Ingest a batch of messages into memory. Each message gets importance-scored, embedded, and stored.
-
-**Request:**
+**Request**
 ```json
 {
   "messages": [
-    {"text": "User ile yarın toplantı var", "role": "user", "session": "abc123"},
-    {"text": "Tamam, hatırlatırım.", "role": "assistant"}
+    {"text": "We should rotate logs weekly.", "role": "user", "session": "2026-02-08"},
+    {"text": "Agreed — compress and keep 4 weeks.", "role": "assistant", "session": "2026-02-08"}
   ]
 }
 ```
 
-**Response:**
+**Response**
 ```json
 {
-  "stored": 2,
+  "stored": 1,
+  "merged": 1,
   "total": 2
 }
 ```
 
-### `POST /v1/store`
+### 3) `POST /v1/store` — store one memory (write-time merge)
 
-Manually store a single memory (e.g., a fact, decision, or note).
+Store a single memory (fact/decision/note). Uses write-time merge when a near-duplicate already exists.
 
-**Request:**
+**Request**
 ```json
 {
-  "text": "User'ın favori rengi mavi",
+  "text": "Backups: run daily at 04:00; keep last 7 copies.",
   "category": "fact",
   "importance": 0.9
 }
 ```
 
-**Response:**
+**Response**
 ```json
 {
   "id": "f7e8d9c0b1a2",
-  "stored": true
+  "stored": true,
+  "merged": false,
+  "similarity": null
 }
 ```
 
-### `DELETE /v1/forget`
+### 4) `DELETE /v1/forget` — delete
 
-Delete a memory by ID or by searching for it.
+Delete a memory by ID, or by query (deletes first match).
 
-**Request (by ID):**
+**Request (by id)**
 ```json
-{
-  "id": "f7e8d9c0b1a2"
-}
+{ "id": "f7e8d9c0b1a2" }
 ```
 
-**Request (by query):**
+**Request (by query)**
 ```json
-{
-  "query": "favori rengi"
-}
+{ "query": "daily at 04:00" }
 ```
 
-**Response:**
-```json
-{
-  "deleted": true,
-  "id": "f7e8d9c0b1a2"
-}
+### 5) `GET /v1/search` — interactive search
+
+For CLI/debug use.
+
+Example:
+```bash
+curl "http://localhost:8787/v1/search?query=backup&limit=5"
 ```
 
-### `GET /v1/search?query=X&limit=5`
+### 6) `GET /v1/stats` — stats
 
-Interactive search endpoint (for CLI/debug use). Same hybrid search as `/v1/recall` but via GET.
+Returns DB-level stats (counts by category, entities, relationships, temporal facts).
 
-**Response:**
-```json
-{
-  "query": "Python",
-  "count": 3,
-  "results": [...]
-}
+### 7) `GET /v1/health` — health
+
+Includes uptime + whether storage/embedder are available.
+
+### 8) `POST /v1/decay` — run Ebbinghaus decay
+
+Cron-friendly endpoint to apply strength decay to stale, unused memories.
+
+```bash
+curl -X POST http://localhost:8787/v1/decay
 ```
 
-### `GET /v1/stats`
+### 9) `POST /v1/consolidate` — dedup + archive stale
 
-Database statistics.
+Bulk maintenance endpoint:
+- merges duplicates (high cosine similarity)
+- archives stale memories below a minimum strength threshold
 
-**Response:**
-```json
-{
-  "total_memories": 218,
-  "by_category": {
-    "qa_pair": 150,
-    "user": 45,
-    "assistant": 23
-  },
-  "entities": 138,
-  "relationships": 95,
-  "temporal_facts": 12
-}
+```bash
+curl -X POST http://localhost:8787/v1/consolidate
 ```
 
 ## Configuration
 
-### Environment Variables
+Environment variables keep the historical `ASUMAN_MEMORY_*` prefix for compatibility.
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | *(required)* | OpenRouter API key for embeddings |
+|---|---:|---|
+| `OPENROUTER_API_KEY` | *(required for semantic search)* | OpenRouter API key used for embeddings |
 | `ASUMAN_MEMORY_DB` | `~/.asuman/memory.sqlite` | SQLite database path |
 | `ASUMAN_MEMORY_MODEL` | `qwen/qwen3-embedding-8b` | Embedding model name |
-| `ASUMAN_MEMORY_PORT` | `8787` | API server port |
-| `ASUMAN_MEMORY_HOST` | `0.0.0.0` | API bind address |
 | `ASUMAN_MEMORY_DIMENSIONS` | `4096` | Vector dimensions |
-| `ASUMAN_SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | Session JSONL directory |
-| `ASUMAN_MEMORY_CONFIG` | *(none)* | Path to JSON config overlay |
+| `ASUMAN_MEMORY_HOST` | `127.0.0.1` | API bind address |
+| `ASUMAN_MEMORY_PORT` | `8787` | API server port |
+| `ASUMAN_SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | OpenClaw session JSONL directory |
+| `ASUMAN_MEMORY_CONFIG` | *(none)* | Optional JSON config overlay file |
 
-### JSON Config File
+### JSON config overlay
 
-Optionally, set `ASUMAN_MEMORY_CONFIG` to a JSON file to override any `Config` field:
+Set `ASUMAN_MEMORY_CONFIG=/path/to/config.json` to override any `Config` field.
 
 ```json
 {
-  "weight_semantic": 0.50,
-  "weight_keyword": 0.30,
-  "weight_recency": 0.20,
-  "chunk_gap_hours": 4.0,
+  "weight_semantic": 0.40,
+  "weight_keyword": 0.25,
+  "weight_recency": 0.15,
+  "weight_strength": 0.20,
   "batch_size": 50
 }
 ```
 
-## Turkish NLP Features
-
-### Lemmatization (zeyrek)
-
-Turkish morphological analysis strips inflectional suffixes to root forms:
-
-- `hatırlıyorum` → `hatırla` (remember)
-- `çalışıyorsunuz` → `çalış` (work)
-- `konuşmuştuk` → `konuş` (talk)
-
-### ASCII Folding
-
-Turkish special characters are folded for fuzzy matching:
-
-- `çalışıyor` → `calisiyor`
-- `ÇAĞRI` → `CAGRI`
-- `güzel` → `guzel`
-
-Both the original and folded forms are indexed for maximum recall.
-
-### Temporal Parsing (dateparser)
-
-Parses Turkish and English time expressions:
-
-- `geçen hafta` → last 7 days
-- `dün akşam` → yesterday evening
-- `öbür gün` → day after tomorrow
-- `evvelsi gün` → two days ago
-- Standard dateparser expressions (yesterday, last month, etc.)
-
-### Turkish Stopwords
-
-75+ Turkish and English stopwords are removed during normalization (ve, bir, bu, the, a, is, ...).
-
-### Trigger Detection
-
-Intelligent detection of when a query needs memory context:
-
-- **Turkish triggers:** `hatırl-`, `ne konuştuk`, `geçen`, `karar`, `unutma`, ...
-- **English triggers:** `remember`, `last time`, `what did we say`, ...
-- **Anti-triggers:** greetings, single emojis, okays (skipped for efficiency)
-- **Past tense heuristic:** `-mıştı`, `-dık`, `was`, `did`, ...
-
-## Backup & Maintenance
-
-### Automatic Backups
-
-Daily at 04:00, `scripts/backup_db.sh` creates a timestamped copy of the database:
-
-```
-/root/.asuman/backups/memory-2026-02-03.sqlite
-```
-
-Last 7 daily backups are kept; older ones are pruned automatically.
-
-### Log Rotation
-
-`/etc/logrotate.d/asuman-memory` handles weekly rotation of sync logs (4 weeks, compressed).
-
-### Management Script
+## Quick Start
 
 ```bash
-./scripts/manage.sh status    # Service + API + DB stats
-./scripts/manage.sh logs 100  # Follow journal logs
-./scripts/manage.sh sync      # Incremental session sync
-./scripts/manage.sh load      # Full data load
-./scripts/manage.sh health    # Quick health check
-./scripts/manage.sh restart   # Restart the API service
+git clone https://github.com/dorukardahan/asuman-memory.git
+cd whatsapp-memory
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export OPENROUTER_API_KEY="sk-or-..."
+python -m asuman_memory
 ```
 
-### Manual Sync
+Health check:
+```bash
+curl http://localhost:8787/v1/health
+```
+
+## OpenClaw Integration (auto-sync)
+
+This repo includes a session ingester that reads OpenClaw JSONL transcripts and stores them into the SQLite memory DB.
+
+### 1) Cron sync (`scripts/cron_sync.sh`)
+
+- Run incremental sync every 30 minutes
+- Write logs to a file
+
+Example crontab entry:
+```cron
+*/30 * * * * /path/to/whatsapp-memory/scripts/cron_sync.sh
+```
+
+### 2) Systemd service (example)
+
+A minimal service file that runs the API:
+
+```ini
+[Unit]
+Description=OpenClaw Memory API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/whatsapp-memory
+Environment=OPENROUTER_API_KEY=sk-or-...
+ExecStart=/path/to/whatsapp-memory/.venv/bin/python -m asuman_memory
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 3) Calling `/v1/recall` from agent prompts (TOOLS.md-style snippet)
+
+In your agent’s `TOOLS.md` (or a skill), describe the memory call as a tool-like HTTP action:
+
+```markdown
+### Memory recall (HTTP)
+
+When the user asks to remember past decisions, preferences, or prior context, call:
 
 ```bash
-# Incremental sync (only new sessions)
+curl -s -X POST http://127.0.0.1:8787/v1/recall \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"<user question>","limit":5,"min_score":0.0}'
+```
+
+Summarize the returned `results[].text` into 3–7 bullets and cite the memory IDs.
+```
+
+## Search Weights (4 layers)
+
+Default layer weights used in RRF fusion:
+
+- **Semantic:** 0.40
+- **Keyword:** 0.25
+- **Recency:** 0.15
+- **Strength:** 0.20
+
+## Ebbinghaus Strength (spaced repetition)
+
+Each memory has a **strength** value that approximates retention:
+
+- **Default strength:** `1.0`
+- **Retrieval boost:** `+0.3` per access (cap `5.0`)
+- **Weekly decay:** `-0.05` for unused memories (floor `0.3`)
+
+Strength is combined with the other layers via RRF. The `/v1/decay` endpoint applies the decay step; retrieval boosting happens automatically on top hits.
+
+## Write-time Semantic Merge
+
+To prevent “a thousand near-identical memories”:
+
+- On `store` / `capture`, find nearest neighbor in the same **category**
+- If cosine similarity **> 0.85**, **merge** instead of insert
+- Text is appended with `\n• new_text`
+- Embeddings are averaged
+- Strength gets a small boost (`+0.2`)
+
+## Maintenance
+
+### Weekly decay
+
+```bash
+curl -X POST http://localhost:8787/v1/decay
+```
+
+### Consolidation (dedup + stale cleanup)
+
+```bash
+curl -X POST http://localhost:8787/v1/consolidate
+```
+
+### Backups
+
+A backup helper script is included:
+
+```bash
+bash scripts/backup_db.sh
+```
+
+It creates a safe SQLite `.backup` copy (WAL-safe) and prunes old backups.
+
+### Management script
+
+```bash
+./scripts/manage.sh status
 ./scripts/manage.sh sync
-
-# Full reload (re-scan all sessions)
-./scripts/manage.sh sync --full
-
-# Store without embeddings (faster, no API calls)
-./scripts/manage.sh sync --skip-embeddings
+./scripts/manage.sh health
 ```
 
-## Tests
+## Multilingual NLP (Turkish + English)
 
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
+This project includes optional language tooling for better recall on morphologically rich languages:
 
-# Run all tests
-pytest tests/ -v
+- **Lemmatization** via `zeyrek`
+- **Temporal parsing** via `dateparser`
+- **Stopword filtering** (Turkish + English)
 
-# Run specific module tests
-pytest tests/test_api.py -v
-pytest tests/test_turkish.py -v
-```
-
-Test coverage includes:
-- **Embeddings** — mock API, batch embed, retry logic, LRU cache
-- **Storage** — CRUD, vector search, FTS5, entities, batch ops
-- **Search** — RRF fusion, weight config, hybrid search
-- **Turkish NLP** — lemmatization, ASCII folding, stopwords, temporal parsing
-- **Triggers** — Turkish/English triggers, anti-triggers, importance scoring
-- **Entities** — extraction, dedup, knowledge graph relationships
-- **Ingest** — session parsing, chunking, MD5 dedup, filtering
-- **API** — all 7 HTTP endpoints + OpenAPI docs
-
-## Dependencies
-
-Total install size < 25 MB. No torch, no transformers, no heavy ML.
-
-```
-requests, numpy, sqlite-vec, dateparser, zeyrek
-fastapi, uvicorn, pydantic
-```
+You can run the system without these features, but they improve keyword recall and entity extraction on Turkish text.
 
 ## License
 

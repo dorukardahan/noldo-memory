@@ -1,13 +1,15 @@
-"""FastAPI HTTP API for Asuman Memory System.
+"""FastAPI HTTP API for the OpenClaw memory system.
 
 Endpoints:
-    POST   /v1/recall   — Search memories
-    POST   /v1/capture  — Ingest messages
-    POST   /v1/store    — Store a memory
-    DELETE /v1/forget    — Delete memory
-    GET    /v1/search    — Interactive search
-    GET    /v1/stats     — Statistics
-    GET    /v1/health    — Health check
+    POST   /v1/recall        — Hybrid search (semantic + BM25 + recency + strength)
+    POST   /v1/capture       — Batch ingest (write-time semantic merge)
+    POST   /v1/store         — Store one memory (write-time semantic merge)
+    DELETE /v1/forget        — Delete memory
+    GET    /v1/search        — Interactive search
+    GET    /v1/stats         — Statistics
+    GET    /v1/health        — Health check
+    POST   /v1/decay         — Run Ebbinghaus strength decay
+    POST   /v1/consolidate   — Deduplicate + archive stale memories
 
 Run: ``python -m asuman_memory.api``
 """
@@ -88,7 +90,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Agent Memory API",
+    title="OpenClaw Memory API",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -546,7 +548,7 @@ def main() -> None:
     cfg = load_config()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    logger.info("Starting Agent Memory API on %s:%d", cfg.api_host, cfg.api_port)
+    logger.info("Starting OpenClaw Memory API on %s:%d", cfg.api_host, cfg.api_port)
     uvicorn.run(
         "asuman_memory.api:app",
         host=cfg.api_host,

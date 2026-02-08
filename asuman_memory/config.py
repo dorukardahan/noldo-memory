@@ -1,7 +1,11 @@
-"""Configuration for Asuman Memory System.
+"""Configuration for the OpenClaw memory system.
 
 Loads from environment variables with sensible defaults.
 Optionally reads a config.json file.
+
+Note:
+    Environment variable prefixes keep the historical ``ASUMAN_MEMORY_*`` names
+    for backwards compatibility.
 """
 
 from __future__ import annotations
@@ -31,10 +35,11 @@ class Config:
     api_host: str = "127.0.0.1"
     api_port: int = 8787
 
-    # Search weights
-    weight_semantic: float = 0.50
-    weight_keyword: float = 0.30
-    weight_recency: float = 0.20
+    # Search weights (4-layer hybrid search)
+    weight_semantic: float = 0.40
+    weight_keyword: float = 0.25
+    weight_recency: float = 0.15
+    weight_strength: float = 0.20
 
     # Sessions
     sessions_dir: str = str(Path.home() / ".openclaw" / "agents" / "main" / "sessions")
