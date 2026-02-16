@@ -1,209 +1,133 @@
-# OpenClaw Memory — Persistent Memory for OpenClaw Agents
+# Agent Memory
 
-A local-first conversational memory system that gives OpenClaw agents long-term recall across sessions.
+Persistent, local-first memory for AI agents. One SQLite file, no Docker, no cloud DB.
 
-- **Single SQLite file** — portable, backup-friendly, no Docker needed
-- **4-layer hybrid search** with RRF fusion (semantic + keyword + recency + Ebbinghaus strength)
-- **Zero cloud dependency** for storage and retrieval (embeddings via OpenRouter are the only external call)
+Your agent remembers conversations, decisions, and facts across sessions — with intelligent recall that surfaces the right memories at the right time.
 
-## Key Features
+## What It Does
 
-- **4-layer hybrid search**: semantic (sqlite-vec) + keyword (FTS5 BM25) + recency + Ebbinghaus strength
-- **Reciprocal Rank Fusion (RRF)** for merging results from multiple layers
-- **Write-time semantic merge** (cosine similarity > 0.85 ⇒ merge instead of duplicate)
-- **Ebbinghaus spaced repetition** (frequently retrieved memories strengthen, unused ones decay)
-- **Consolidation endpoint** for bulk dedup + stale cleanup
-- **Multilingual NLP (Turkish + English built-in)**: zeyrek lemmatization, dateparser, stopwords
-- **Knowledge graph**: entities, relationships, temporal facts
-- **OpenClaw session JSONL ingestion** with auto-sync
-- **FastAPI with 9 endpoints** (Swagger UI at `/docs`)
-- **Single SQLite file** — no Docker, no external DB
+- **Hybrid search** — semantic vectors + BM25 keywords + recency + spaced repetition strength, fused via Reciprocal Rank Fusion
+- **Write-time dedup** — new memories merge with near-duplicates (cosine > 0.85) instead of piling up
+- **Spaced repetition** — frequently recalled memories strengthen; unused ones decay naturally
+- **Knowledge graph** — auto-extracted entities, relationships, and temporal facts
+- **Multi-agent** — each agent gets its own DB; cross-agent search with `agent=all`
+- **Multilingual NLP** — Turkish + English lemmatization, temporal parsing, stopword filtering
 
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                      FastAPI  (:8787)                            │
-│  /v1/recall  /v1/capture  /v1/store   /v1/forget  /v1/search    │
-│  /v1/stats   /v1/health   /v1/decay   /v1/consolidate           │
-└──────────┬──────────────┬──────────────┬─────────────────────────┘
-           │              │              │
-     ┌─────▼──────┐ ┌────▼─────┐  ┌─────▼───────┐
-     │  4-Layer   │ │  Ingest  │  │  Knowledge  │
-     │  Hybrid    │ │  (JSONL  │  │   Graph     │
-     │  Search    │ │  parser) │  │ (entities)  │
-     │            │ └────┬─────┘  └─────┬───────┘
-     │ ┌────────┐ │      │              │
-     │ │Semantic│ │      │              │
-     │ │Keyword │ │ ┌────▼──────────────▼───┐
-     │ │Recency │ │ │        SQLite          │
-     │ │Strength│ │ │  memories + vectors    │
-     │ └───┬────┘ │ │  fts5 + entities/KG   │
-     │     │RRF   │ │  strength + decay      │
-     └─────┼──────┘ └──────────┬────────────┘
-           │                   │
-           └───────────────────┘
-
-   ┌──────────────┐
-   │  OpenRouter   │  (only external dependency)
-   │  Embeddings   │  qwen3-embedding-8b / 4096d
-   └──────────────┘
-```
-
-## API (9 Endpoints)
-
-Swagger UI: **http://localhost:8787/docs**
-
-### 1) `POST /v1/recall` — hybrid search
-
-Hybrid search across 4 layers (semantic + BM25 + recency + strength), fused via RRF.
-
-**Request**
-```json
-{
-  "query": "What did we decide about backups?",
-  "limit": 5,
-  "min_score": 0.0
-}
-```
-
-**Response (example)**
-```json
-{
-  "query": "What did we decide about backups?",
-  "count": 1,
-  "triggered": true,
-  "results": [
-    {
-      "id": "a1b2c3d4e5f6",
-      "text": "We agreed to run a daily SQLite backup at 04:00...",
-      "category": "assistant",
-      "importance": 0.75,
-      "created_at": 1706900000.0,
-      "score": 0.0162,
-      "semantic_score": 0.8421,
-      "keyword_score": 0.0,
-      "recency_score": 0.9812,
-      "strength_score": 0.9034,
-      "confidence_tier": "MEDIUM"
-    }
-  ]
-}
-```
-
-### 2) `POST /v1/capture` — batch ingest (write-time merge)
-
-Ingest a batch of messages. Each message is importance-scored, (optionally) embedded, then **merge-or-insert** is applied to avoid duplicates.
-
-**Request**
-```json
-{
-  "messages": [
-    {"text": "We should rotate logs weekly.", "role": "user", "session": "2026-02-08"},
-    {"text": "Agreed — compress and keep 4 weeks.", "role": "assistant", "session": "2026-02-08"}
-  ]
-}
-```
-
-**Response**
-```json
-{
-  "stored": 1,
-  "merged": 1,
-  "total": 2
-}
-```
-
-### 3) `POST /v1/store` — store one memory (write-time merge)
-
-Store a single memory (fact/decision/note). Uses write-time merge when a near-duplicate already exists.
-
-**Request**
-```json
-{
-  "text": "Backups: run daily at 04:00; keep last 7 copies.",
-  "category": "fact",
-  "importance": 0.9
-}
-```
-
-**Response**
-```json
-{
-  "id": "f7e8d9c0b1a2",
-  "stored": true,
-  "merged": false,
-  "similarity": null
-}
-```
-
-### 4) `DELETE /v1/forget` — delete
-
-Delete a memory by ID, or by query (deletes first match).
-
-**Request (by id)**
-```json
-{ "id": "f7e8d9c0b1a2" }
-```
-
-**Request (by query)**
-```json
-{ "query": "daily at 04:00" }
-```
-
-### 5) `GET /v1/search` — interactive search
-
-For CLI/debug use.
-
-Example:
-```bash
-curl "http://localhost:8787/v1/search?query=backup&limit=5"
-```
-
-### 6) `GET /v1/stats` — stats
-
-Returns DB-level stats (counts by category, entities, relationships, temporal facts).
-
-### 7) `GET /v1/health` — health
-
-Includes uptime + whether storage/embedder are available.
-
-### 8) `POST /v1/decay` — run Ebbinghaus decay
-
-Cron-friendly endpoint to apply strength decay to stale, unused memories.
+## Quick Start
 
 ```bash
-curl -X POST http://localhost:8787/v1/decay
+git clone https://github.com/dorukardahan/asuman-memory.git
+cd whatsapp-memory
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Embeddings — pick one:
+# Option A: OpenRouter (cloud, no GPU needed)
+export OPENROUTER_API_KEY="sk-or-..."
+
+# Option B: Local llama-server (no API key needed)
+export AGENT_MEMORY_EMBEDDING_URL="http://localhost:8090/v1/embeddings"
+export AGENT_MEMORY_MODEL="local-model"
+
+python -m agent_memory
+# → API running at http://localhost:8787
 ```
 
-### 9) `POST /v1/consolidate` — dedup + archive stale
+Verify:
+```bash
+curl http://localhost:8787/v1/health
+```
 
-Bulk maintenance endpoint:
-- merges duplicates (high cosine similarity)
-- archives stale memories below a minimum strength threshold
+## API Reference
+
+Base URL: `http://localhost:8787` — Swagger UI at `/docs`
+
+| Endpoint | Method | What it does |
+|---|---|---|
+| `/v1/recall` | POST | Hybrid search across all 4 layers |
+| `/v1/store` | POST | Store one memory (with auto-merge) |
+| `/v1/capture` | POST | Batch ingest messages |
+| `/v1/forget` | DELETE | Delete by ID or query |
+| `/v1/search` | GET | Quick search (CLI/debug) |
+| `/v1/stats` | GET | DB counts and health |
+| `/v1/health` | GET | Service health check |
+| `/v1/decay` | POST | Apply Ebbinghaus decay to stale memories |
+| `/v1/consolidate` | POST | Bulk dedup + archive weak memories |
+| `/v1/agents` | GET | List all agent DBs with stats |
+
+### Core: Store and Recall
 
 ```bash
-curl -X POST http://localhost:8787/v1/consolidate
+# Store a fact
+curl -X POST http://localhost:8787/v1/store \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Deploy backups run daily at 04:00", "category": "fact", "importance": 0.9}'
+
+# Recall it later
+curl -X POST http://localhost:8787/v1/recall \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "when do backups run?", "limit": 5}'
 ```
+
+### Batch Ingest
+
+```bash
+curl -X POST http://localhost:8787/v1/capture \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "messages": [
+      {"text": "We should rotate logs weekly.", "role": "user", "session": "2026-02-08"},
+      {"text": "Agreed — compress and keep 4 weeks.", "role": "assistant", "session": "2026-02-08"}
+    ]
+  }'
+# → {"stored": 1, "merged": 1, "total": 2}
+```
+
+### Multi-Agent
+
+Pass `agent` parameter to any endpoint to route to a specific agent's DB:
+
+```bash
+curl -X POST http://localhost:8787/v1/recall \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "deployment status", "agent": "devops", "limit": 5}'
+
+# Search across ALL agent DBs
+curl -X POST http://localhost:8787/v1/recall \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "deployment status", "agent": "all", "limit": 10}'
+```
+
+## How Search Works
+
+Four scoring layers, fused with Reciprocal Rank Fusion (RRF):
+
+| Layer | Weight | What it measures |
+|---|---|---|
+| Semantic | 0.40 | Embedding cosine similarity (meaning) |
+| Keyword | 0.25 | BM25 full-text search (exact terms) |
+| Recency | 0.15 | How recently the memory was created |
+| Strength | 0.20 | Spaced repetition score (use frequency) |
+
+Weights are configurable via environment or JSON config overlay.
 
 ## Configuration
 
-Environment variables keep the historical `AGENT_MEMORY_*` prefix for compatibility.
-
 | Variable | Default | Description |
-|---|---:|---|
-| `OPENROUTER_API_KEY` | *(required for semantic search)* | OpenRouter API key used for embeddings |
+|---|---|---|
 | `AGENT_MEMORY_DB` | `~/.agent-memory/memory.sqlite` | SQLite database path |
-| `AGENT_MEMORY_MODEL` | `qwen/qwen3-embedding-8b` | Embedding model name |
+| `AGENT_MEMORY_MODEL` | `qwen/qwen3-embedding-8b` | Embedding model |
 | `AGENT_MEMORY_DIMENSIONS` | `4096` | Vector dimensions |
-| `AGENT_MEMORY_HOST` | `127.0.0.1` | API bind address |
-| `AGENT_MEMORY_PORT` | `8787` | API server port |
-| `AGENT_MEMORY_SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | OpenClaw session JSONL directory |
-| `AGENT_MEMORY_CONFIG` | *(none)* | Optional JSON config overlay file |
+| `AGENT_MEMORY_HOST` | `127.0.0.1` | Bind address |
+| `AGENT_MEMORY_PORT` | `8787` | API port |
+| `AGENT_MEMORY_SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | Session JSONL dir |
+| `OPENROUTER_API_KEY` | — | For cloud embeddings (OpenRouter) |
+| `AGENT_MEMORY_EMBEDDING_URL` | — | For local embeddings (llama-server etc.) |
+| `AGENT_MEMORY_CONFIG` | — | JSON config overlay path |
 
-### JSON config overlay
+### Config Overlay
 
-Set `AGENT_MEMORY_CONFIG=/path/to/config.json` to override any `Config` field.
+Override search weights and batch size without changing code:
 
 ```json
 {
@@ -215,144 +139,79 @@ Set `AGENT_MEMORY_CONFIG=/path/to/config.json` to override any `Config` field.
 }
 ```
 
-## Quick Start
+## OpenClaw Integration
 
-```bash
-git clone https://github.com/dorukardahan/asuman-memory.git
-cd whatsapp-memory
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-export OPENROUTER_API_KEY="sk-or-..."
-python -m agent_memory
-```
+### Session Sync (cron)
 
-Health check:
-```bash
-curl http://localhost:8787/v1/health
-```
+Auto-ingest OpenClaw session transcripts:
 
-## OpenClaw Integration (auto-sync)
-
-This repo includes a session ingester that reads OpenClaw JSONL transcripts and stores them into the SQLite memory DB.
-
-### 1) Cron sync (`scripts/cron_sync.sh`)
-
-- Run incremental sync every 30 minutes
-- Write logs to a file
-
-Example crontab entry:
 ```cron
 */30 * * * * /path/to/whatsapp-memory/scripts/cron_sync.sh
 ```
 
-### 2) Systemd service (example)
-
-A minimal service file that runs the API:
+### Systemd Service
 
 ```ini
 [Unit]
-Description=OpenClaw Memory API
+Description=Agent Memory API
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/path/to/whatsapp-memory
-Environment=OPENROUTER_API_KEY=sk-or-...
-ExecStart=/path/to/whatsapp-memory/.venv/bin/python -m agent_memory
+EnvironmentFile=/path/to/.env
+ExecStart=/path/to/.venv/bin/python -m agent_memory
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-### 3) Calling `/v1/recall` from agent prompts (TOOLS.md-style snippet)
+### Agent TOOLS.md Snippet
 
-In your agent’s `TOOLS.md` (or a skill), describe the memory call as a tool-like HTTP action:
+Add this to your agent's `TOOLS.md` so it knows how to recall:
 
 ```markdown
-### Memory recall (HTTP)
-
-When the user asks to remember past decisions, preferences, or prior context, call:
-
-```bash
+### Memory Recall
+Search past conversations and decisions:
+\`\`\`bash
 curl -s -X POST http://127.0.0.1:8787/v1/recall \
   -H 'Content-Type: application/json' \
-  -d '{"query":"<user question>","limit":5,"min_score":0.0}'
+  -d '{"query": "<search term>", "limit": 5}'
+\`\`\`
 ```
-
-Summarize the returned `results[].text` into 3–7 bullets and cite the memory IDs.
-```
-
-## Search Weights (4 layers)
-
-Default layer weights used in RRF fusion:
-
-- **Semantic:** 0.40
-- **Keyword:** 0.25
-- **Recency:** 0.15
-- **Strength:** 0.20
-
-## Ebbinghaus Strength (spaced repetition)
-
-Each memory has a **strength** value that approximates retention:
-
-- **Default strength:** `1.0`
-- **Retrieval boost:** `+0.3` per access (cap `5.0`)
-- **Weekly decay:** `-0.05` for unused memories (floor `0.3`)
-
-Strength is combined with the other layers via RRF. The `/v1/decay` endpoint applies the decay step; retrieval boosting happens automatically on top hits.
-
-## Write-time Semantic Merge
-
-To prevent “a thousand near-identical memories”:
-
-- On `store` / `capture`, find nearest neighbor in the same **category**
-- If cosine similarity **> 0.85**, **merge** instead of insert
-- Text is appended with `\n• new_text`
-- Embeddings are averaged
-- Strength gets a small boost (`+0.2`)
 
 ## Maintenance
 
-### Weekly decay
-
 ```bash
+# Weekly: decay unused memories
 curl -X POST http://localhost:8787/v1/decay
-```
 
-### Consolidation (dedup + stale cleanup)
-
-```bash
+# Weekly: dedup + archive stale
 curl -X POST http://localhost:8787/v1/consolidate
-```
 
-### Backups
-
-A backup helper script is included:
-
-```bash
+# Backup (WAL-safe)
 bash scripts/backup_db.sh
-```
 
-It creates a safe SQLite `.backup` copy (WAL-safe) and prunes old backups.
-
-### Management script
-
-```bash
+# Status check
 ./scripts/manage.sh status
-./scripts/manage.sh sync
-./scripts/manage.sh health
 ```
 
-## Multilingual NLP (Turkish + English)
+## Architecture
 
-This project includes optional language tooling for better recall on morphologically rich languages:
+```
+FastAPI (:8787)
+├── /v1/recall    → 4-layer hybrid search → RRF fusion → ranked results
+├── /v1/store     → embed → find nearest → merge or insert
+├── /v1/capture   → batch ingest → importance scoring → merge-or-insert
+├── /v1/forget    → delete by ID or query match
+├── /v1/decay     → Ebbinghaus strength decay pass
+└── /v1/consolidate → cosine dedup + stale archival
 
-- **Lemmatization** via `zeyrek`
-- **Temporal parsing** via `dateparser`
-- **Stopword filtering** (Turkish + English)
-
-You can run the system without these features, but they improve keyword recall and entity extraction on Turkish text.
+Storage: SQLite + sqlite-vec (vectors) + FTS5 (keywords)
+Embeddings: OpenRouter API or local llama-server
+NLP: zeyrek (Turkish lemmatizer) + dateparser + stopwords
+```
 
 ## License
 
