@@ -22,6 +22,7 @@ Run: ``python -m agent_memory.api``
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 import time
@@ -40,6 +41,7 @@ from .entities import KnowledgeGraph
 from .pool import StoragePool
 from .search import HybridSearch, SearchResult, SearchWeights
 from .storage import MemoryStorage
+from .rules import RuleDetector
 from .triggers import get_confidence_tier, score_importance, should_trigger
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,7 @@ _start_time: float = 0.0
 _search_cache: Dict[str, HybridSearch] = {}
 _kg_cache: Dict[str, KnowledgeGraph] = {}
 _search_weights: Optional[SearchWeights] = None
+_rule_detector = RuleDetector()
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +130,7 @@ async def lifespan(app: FastAPI):
             model=_config.embedding_model,
             dimensions=_config.embedding_dimensions,
         )
+        _embedder.set_storage(_storage_pool.get("main"))
     else:
         logger.warning("No OPENROUTER_API_KEY -- semantic search disabled")
         _embedder = None
@@ -144,12 +148,28 @@ async def lifespan(app: FastAPI):
         base_dir, agents, _config.embedding_model,
     )
 
+    # Start warmup background task
+    asyncio.create_task(warmup_loop())
+
     yield
 
     # Shutdown
     _storage_pool.close_all()
     _search_cache.clear()
     _kg_cache.clear()
+
+
+async def warmup_loop():
+    """Background task to keep the embedding model warm."""
+    while True:
+        await asyncio.sleep(600)  # 10 minutes
+        if _embedder:
+            try:
+                # Use a specific string that will likely be in cache after first call
+                await _embedder.embed("warmup")
+                logger.debug("Embedding warmup successful")
+            except Exception as exc:
+                logger.warning("Embedding warmup failed: %s", exc)
 
 
 app = FastAPI(
@@ -333,6 +353,9 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Invalidate search cache
+    storage.invalidate_search_cache(agent=req.agent or "main")
+
     agent_key = StoragePool.normalize_key(req.agent)
     return {
         "stored": stored_n,
@@ -357,13 +380,25 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Rule detection: override category/importance if instruction detected
+    category = req.category
+    importance = req.importance
+    detected = _rule_detector.detect(req.text)
+    if detected or _rule_detector.check_safeword(req.text):
+        category = "rule"
+        importance = 1.0
+        logger.info("Rule detected in /v1/store: %s", req.text[:60])
+
     res = storage.merge_or_store(
         text=req.text,
         vector=vector,
-        category=req.category,
-        importance=req.importance,
+        category=category,
+        importance=importance,
         source_session=None,
     )
+
+    # Invalidate search cache
+    storage.invalidate_search_cache(agent=req.agent or "main")
 
     agent_key = StoragePool.normalize_key(req.agent)
     return {
@@ -371,6 +406,41 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         "stored": res["action"] == "inserted",
         "merged": res["action"] == "merged",
         "similarity": res.get("similarity"),
+        "agent": agent_key,
+    }
+
+
+@app.post("/v1/rule")
+async def store_rule(req: StoreRequest) -> Dict[str, Any]:
+    """Explicitly store a rule/instruction (safeword bypass)."""
+    if req.agent == "all":
+        raise HTTPException(400, "Cannot store to 'all' -- specify an agent")
+
+    storage = _get_storage(req.agent)
+
+    vector = None
+    if _embedder:
+        try:
+            vector = await _embedder.embed(req.text)
+        except Exception:
+            pass
+
+    res = storage.merge_or_store(
+        text=req.text,
+        vector=vector,
+        category="rule",
+        importance=1.0,
+        source_session=None,
+    )
+
+    storage.invalidate_search_cache(agent=req.agent or "main")
+
+    agent_key = StoragePool.normalize_key(req.agent)
+    logger.info("Rule stored via /v1/rule: %s", req.text[:60])
+    return {
+        "id": res["id"],
+        "stored": res["action"] == "inserted",
+        "merged": res["action"] == "merged",
         "agent": agent_key,
     }
 
@@ -385,6 +455,8 @@ async def forget(req: ForgetRequest) -> Dict[str, Any]:
 
     if req.id:
         deleted = storage.delete_memory(req.id)
+        if deleted:
+            storage.invalidate_search_cache(agent=req.agent or "main")
         return {"deleted": deleted, "id": req.id}
 
     if req.query:
@@ -392,6 +464,8 @@ async def forget(req: ForgetRequest) -> Dict[str, Any]:
         if results:
             mid = results[0]["id"]
             deleted = storage.delete_memory(mid)
+            if deleted:
+                storage.invalidate_search_cache(agent=req.agent or "main")
             return {"deleted": deleted, "id": mid}
         return {"deleted": False, "reason": "no match found"}
 

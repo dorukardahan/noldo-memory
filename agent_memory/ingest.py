@@ -21,10 +21,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .config import Config, load_config
 from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
+from .rules import RuleDetector
 from .storage import MemoryStorage
 from .triggers import score_importance, should_trigger
 
 logger = logging.getLogger(__name__)
+rule_detector = RuleDetector()
 
 # Messages to skip
 _SKIP_CONTENT: set[str] = {
@@ -313,11 +315,17 @@ async def ingest_sessions(
         items: list[Dict[str, Any]] = []
         for chunk, vector in zip(batch, vectors):
             importance = score_importance(chunk.text, {"role": chunk.role})
+            category = chunk.role
+            if rule_detector.detect(chunk.text) or rule_detector.check_safeword(chunk.text):
+                category = "rule"
+                importance = 1.0
+                logger.info(f"Rule detected: {chunk.text[:50]}...")
+
             items.append({
                 "id": chunk.md5,
                 "text": chunk.text,
                 "vector": vector,
-                "category": chunk.role,
+                "category": category,
                 "importance": importance,
                 "source_session": chunk.session_id,
             })

@@ -118,6 +118,24 @@ CREATE TABLE IF NOT EXISTS temporal_facts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tf_entity ON temporal_facts(entity_id);
+
+-- Cache tables
+CREATE TABLE IF NOT EXISTS search_result_cache (
+    query_norm TEXT NOT NULL,
+    limit_val INTEGER NOT NULL,
+    min_score REAL NOT NULL DEFAULT 0.0,
+    agent TEXT NOT NULL DEFAULT 'main',
+    results_json TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    PRIMARY KEY (query_norm, limit_val, agent)
+);
+
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    text_hash TEXT PRIMARY KEY,
+    embedding BLOB NOT NULL,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -136,6 +154,8 @@ class MemoryStorage:
 
         self._conn: Optional[sqlite3.Connection] = None
         self._ensure_schema()
+        # Schema migration for typed relations
+        self.run_migrations()
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -147,6 +167,9 @@ class MemoryStorage:
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
+            self._conn.execute("PRAGMA cache_size = -64000")  # 64MB page cache
+            self._conn.execute("PRAGMA mmap_size = 300000000")  # 300MB mmap
+            self._conn.execute("PRAGMA temp_store = MEMORY")
             _load_vec_extension(self._conn)
         return self._conn
 
@@ -831,6 +854,73 @@ class MemoryStorage:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
+    # Caching
+    # ------------------------------------------------------------------
+
+    def cache_search_result(
+        self,
+        query_norm: str,
+        limit_val: int,
+        min_score: float,
+        agent: str,
+        results_json: str,
+        ttl: int = 3600,
+    ) -> None:
+        """Store a search result in the cache."""
+        conn = self._get_conn()
+        now = time.time()
+        expires_at = now + ttl
+        conn.execute(
+            """INSERT OR REPLACE INTO search_result_cache
+               (query_norm, limit_val, min_score, agent, results_json, created_at, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (query_norm, limit_val, min_score, agent, results_json, now, expires_at),
+        )
+        conn.commit()
+
+    def get_cached_search_result(
+        self, query_norm: str, limit_val: int, min_score: float, agent: str
+    ) -> Optional[str]:
+        """Retrieve a cached search result if not expired."""
+        conn = self._get_conn()
+        now = time.time()
+        row = conn.execute(
+            """SELECT results_json FROM search_result_cache
+               WHERE query_norm = ? AND limit_val = ? AND min_score = ? AND agent = ?
+                 AND expires_at > ?""",
+            (query_norm, limit_val, min_score, agent, now),
+        ).fetchone()
+        return row["results_json"] if row else None
+
+    def invalidate_search_cache(self, agent: Optional[str] = None) -> None:
+        """Delete expired cache entries, or all entries for a specific agent."""
+        conn = self._get_conn()
+        now = time.time()
+        if agent:
+            conn.execute("DELETE FROM search_result_cache WHERE agent = ?", (agent,))
+        else:
+            conn.execute("DELETE FROM search_result_cache WHERE expires_at <= ?", (now,))
+        conn.commit()
+
+    def cache_embedding(self, text_hash: str, embedding_blob: bytes) -> None:
+        """Store an embedding in the persistent cache."""
+        conn = self._get_conn()
+        now = time.time()
+        conn.execute(
+            "INSERT OR REPLACE INTO embedding_cache (text_hash, embedding, created_at) VALUES (?, ?, ?)",
+            (text_hash, embedding_blob, now),
+        )
+        conn.commit()
+
+    def get_cached_embedding(self, text_hash: str) -> Optional[bytes]:
+        """Retrieve a cached embedding blob."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT embedding FROM embedding_cache WHERE text_hash = ?", (text_hash,)
+        ).fetchone()
+        return row["embedding"] if row else None
+
+    # ------------------------------------------------------------------
     # Statistics
     # ------------------------------------------------------------------
 
@@ -852,3 +942,125 @@ class MemoryStorage:
             "relationships": rel_count,
             "temporal_facts": fact_count,
         }
+
+    # ------------------------------------------------------------------
+    # Temporal Facts & Typed Relations (Extensions)
+    # ------------------------------------------------------------------
+
+    def run_migrations(self) -> None:
+        """Apply schema extensions for typed relations."""
+        conn = self._get_conn()
+        
+        # Check if columns exist
+        try:
+            existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_facts)").fetchall()}
+        except Exception:
+            existing_cols = set()
+            
+        updates = []
+        if "relation_type" not in existing_cols:
+            updates.append("ALTER TABLE temporal_facts ADD COLUMN relation_type TEXT")
+        if "object_entity_id" not in existing_cols:
+            updates.append("ALTER TABLE temporal_facts ADD COLUMN object_entity_id TEXT")
+        if "object_value" not in existing_cols:
+            updates.append("ALTER TABLE temporal_facts ADD COLUMN object_value TEXT")
+        if "confidence" not in existing_cols:
+            updates.append("ALTER TABLE temporal_facts ADD COLUMN confidence REAL DEFAULT 0.7")
+        if "is_active" not in existing_cols:
+            updates.append("ALTER TABLE temporal_facts ADD COLUMN is_active INTEGER DEFAULT 1")
+            
+        for stmt in updates:
+            try:
+                conn.execute(stmt)
+                logger.info(f"Migration applied: {stmt}")
+            except sqlite3.OperationalError as e:
+                logger.warning(f"Migration failed (maybe already exists): {e}")
+
+        # Indexes
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_entity_rel_active ON temporal_facts(entity_id, relation_type, is_active)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_valid_from ON temporal_facts(valid_from)")
+        conn.commit()
+
+    def store_typed_fact(
+        self,
+        entity_id: str,
+        relation_type: str,
+        object_value: str,
+        confidence: float = 0.7,
+        valid_from: Optional[float] = None,
+        source_memory_id: Optional[str] = None,
+        object_entity_id: Optional[str] = None
+    ) -> str:
+        """Store a structured temporal fact."""
+        conn = self._get_conn()
+        fid = uuid.uuid4().hex[:16]
+        # Construct fact string for backward compatibility / display
+        fact_text = f"{relation_type}: {object_value}"
+        
+        # Ensure migration runs if not already
+        # self.run_migrations() # Assuming run in __init__
+        
+        conn.execute(
+            """INSERT INTO temporal_facts 
+               (id, entity_id, fact, valid_from, valid_to, source_memory_id,
+                relation_type, object_value, object_entity_id, confidence, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (fid, entity_id, fact_text, valid_from or time.time(), None, source_memory_id,
+             relation_type, object_value, object_entity_id, confidence)
+        )
+        conn.commit()
+        return fid
+
+    def get_active_facts(self, entity_id: str, relation_type: str) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT * FROM temporal_facts 
+               WHERE entity_id = ? AND relation_type = ? AND is_active = 1""",
+            (entity_id, relation_type)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def deactivate_fact(self, fact_id: str, reason: str = "superseded") -> None:
+        conn = self._get_conn()
+        now = time.time()
+        conn.execute(
+            "UPDATE temporal_facts SET is_active = 0, valid_to = ? WHERE id = ?",
+            (now, fact_id)
+        )
+        conn.commit()
+
+    def get_conflicts(self, entity_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
+        """Identify conflicts (multiple active facts for same exclusive relation)."""
+        conn = self._get_conn()
+        
+        query = """
+            SELECT entity_id, relation_type, COUNT(*) as count 
+            FROM temporal_facts 
+            WHERE is_active = 1 AND relation_type IS NOT NULL
+        """
+        params = []
+        if entity_id:
+            query += " AND entity_id = ?"
+            params.append(entity_id)
+            
+        query += """
+            GROUP BY entity_id, relation_type 
+            HAVING count > 1
+            LIMIT ?
+        """
+        params.append(limit)
+        
+        rows = conn.execute(query, tuple(params)).fetchall()
+        
+        results = []
+        for r in rows:
+            facts = conn.execute(
+                "SELECT * FROM temporal_facts WHERE entity_id = ? AND relation_type = ? AND is_active = 1",
+                (r["entity_id"], r["relation_type"])
+            ).fetchall()
+            results.append({
+                "entity_id": r["entity_id"],
+                "relation_type": r["relation_type"],
+                "facts": [dict(f) for f in facts]
+            })
+        return results

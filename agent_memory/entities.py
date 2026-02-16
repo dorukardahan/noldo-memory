@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
 from .storage import MemoryStorage
+from .conflict_detector import ConflictDetector
 
 try:
     from rapidfuzz import fuzz, process as rfprocess
@@ -192,6 +193,30 @@ _PRODUCT_PATTERNS = [
     re.compile(r"iPad\s*(?:Pro|Air|Mini)?", re.IGNORECASE),
 ]
 
+# Typed relation patterns
+_RELATION_PATTERNS = {
+    "lives_in": [
+        re.compile(r"(\w+)\s+(.*)(?:de|da)\s+(?:yaşıyor|oturuyor|ikamet ediyor)", re.IGNORECASE),
+        re.compile(r"(\w+)\s+lives?\s+in\s+(\w[\w\s]*)", re.IGNORECASE),
+    ],
+    "works_at": [
+        re.compile(r"(\w+)\s+(.*)(?:de|da)\s+çalışıyor", re.IGNORECASE),
+        re.compile(r"(\w+)\s+works?\s+(?:at|for)\s+(\w[\w\s]*)", re.IGNORECASE),
+    ],
+    "status": [
+        re.compile(r"(\w+)\s+(?:durumu|statüsü)\s+(aktif|pasif|beklemede|tamamlandı|iptal)", re.IGNORECASE),
+        re.compile(r"(\w+)\s+(?:status|state)\s+(?:is|=)\s+(active|inactive|pending|completed|cancelled)", re.IGNORECASE),
+    ],
+    "prefers": [
+        re.compile(r"(\w+)\s+(\w[\w\s]*)\s+tercih\s+ediyor", re.IGNORECASE),
+        re.compile(r"(\w+)\s+prefers?\s+(\w[\w\s]*)", re.IGNORECASE),
+    ],
+    "has_state": [
+        re.compile(r"(\w+)\s+(hasta|iyi|yorgun|müsait|meşgul)", re.IGNORECASE),
+        re.compile(r"(\w+)\s+is\s+(sick|well|tired|available|busy|online|offline)", re.IGNORECASE),
+    ],
+}
+
 
 # ---------------------------------------------------------------------------
 # Extractor
@@ -306,6 +331,50 @@ class EntityExtractor:
 
         return result
 
+    def extract_typed_relations(
+        self, text: str, entities: ExtractedEntities
+    ) -> List[Dict[str, Any]]:
+        """Extract structured relations from text using typed patterns."""
+        relations = []
+        text_norm = text.replace("\n", " ")
+
+        # Create lookup map for entities to normalize names
+        # Map lowercased original text -> canonical entity object
+        entity_map = {}
+        for e in entities.all_entities():
+            entity_map[e.text.lower()] = e
+
+        for rel_type, patterns in _RELATION_PATTERNS.items():
+            for pattern in patterns:
+                for match in pattern.finditer(text_norm):
+                    # Groups: 1=Subject, 2=Object (usually)
+                    # Some patterns like status/has_state might just be subject+state
+                    if len(match.groups()) < 2:
+                        continue
+                    
+                    subject_raw = match.group(1).strip()
+                    object_raw = match.group(2).strip()
+                    
+                    # Try to map subject to an extracted entity
+                    subject_ent = entity_map.get(subject_raw.lower())
+                    subject_name = subject_ent.text if subject_ent else resolve_alias(subject_raw)
+                    
+                    # For object, it might be an entity or just a string value
+                    # If it maps to an entity, use canonical name
+                    object_ent = entity_map.get(object_raw.lower())
+                    object_val = object_ent.text if object_ent else object_raw
+
+                    relations.append({
+                        "relation_type": rel_type,
+                        "subject": subject_name,
+                        "object": object_val,
+                        "confidence": 0.8,  # High confidence for regex match
+                        "text_span": match.group(0)
+                    })
+        
+        return relations
+
+
 
 def _dedupe(entities: List[Entity]) -> List[Entity]:
     """Remove duplicates (case-insensitive)."""
@@ -361,6 +430,64 @@ class KnowledgeGraph:
                         confidence=0.5,
                         context=text[:200],
                     )
+
+        # Typed relations + Conflict Detection
+        typed_rels = self.extractor.extract_typed_relations(text, entities)
+        detector = ConflictDetector(self.storage)
+        
+        for rel in typed_rels:
+            # Map subject name to entity ID
+            subj_name = rel["subject"]
+            subj_eid = None
+            
+            # Find subject entity ID
+            # 1. Check extracted entities first
+            for e_obj, e_id in zip(all_ents, entity_ids):
+                if resolve_alias(e_obj.text).lower() == subj_name.lower():
+                    subj_eid = e_id
+                    break
+            
+            # 2. Or search storage if not in current extraction (less likely but possible via regex)
+            if not subj_eid:
+                matches = self.storage.search_entities(subj_name, limit=1)
+                if matches:
+                    subj_eid = matches[0]["id"]
+            
+            if not subj_eid:
+                # Implicit entity creation if not found?
+                # For now, skip if subject entity not resolved
+                continue
+
+            # Store typed relationship link
+            # Only if object is also an entity (which regex tries to determine)
+            # But regex returns object string. If it matches an entity, link it.
+            obj_val = rel["object"]
+            obj_eid = None
+            
+            # Check if object value maps to an extracted entity
+            for e_obj, e_id in zip(all_ents, entity_ids):
+                if resolve_alias(e_obj.text).lower() == obj_val.lower():
+                    obj_eid = e_id
+                    break
+            
+            if obj_eid:
+                self.storage.link_entities(
+                    subj_eid,
+                    obj_eid,
+                    relation_type=rel["relation_type"],
+                    confidence=rel["confidence"],
+                    context=rel["text_span"]
+                )
+
+            # Detect conflicts and store temporal fact
+            detector.check_and_store(
+                entity_id=subj_eid,
+                relation_type=rel["relation_type"],
+                object_value=obj_val,
+                confidence=rel["confidence"],
+                valid_from=None,  # defaults to now
+                source_memory_id=None # passed if available (todo: pass from caller?)
+            )
 
         return entities
 

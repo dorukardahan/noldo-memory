@@ -14,14 +14,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import struct
 import time
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 import requests
 
 from .config import Config, load_config
+
+if TYPE_CHECKING:
+    from .storage import MemoryStorage
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +63,11 @@ class OpenRouterEmbeddings:
         self._cache_size = cache_size
         self._cache: dict[str, List[float]] = {}
         self._cache_order: list[str] = []
+        self._storage: Optional[MemoryStorage] = None
+
+    def set_storage(self, storage: MemoryStorage) -> None:
+        """Set the storage reference for persistent caching."""
+        self._storage = storage
 
     # ------------------------------------------------------------------
     # Cache helpers
@@ -144,37 +153,68 @@ class OpenRouterEmbeddings:
 
     async def embed(self, text: str) -> List[float]:
         """Embed a single text string. Returns a vector (list of floats)."""
+        # 1. Check in-memory LRU cache
         cached = self._cache_get(text)
         if cached is not None:
             return cached
+
+        # 2. Check persistent SQLite cache
+        key = self._cache_key(text)
+        if self._storage:
+            blob = self._storage.get_cached_embedding(key)
+            if blob:
+                vec = list(struct.unpack(f"{len(blob) // 4}f", blob))
+                self._cache_put(text, vec)  # backfill LRU
+                return vec
+
+        # 3. Call API
         vectors = await asyncio.to_thread(self._call_api, [text])
         vec = vectors[0]
+
+        # 4. Store in both caches
         self._cache_put(text, vec)
+        if self._storage:
+            blob = struct.pack(f"{len(vec)}f", *vec)
+            self._storage.cache_embedding(key, blob)
+
         return vec
 
     async def embed_batch(self, texts: List[str]) -> List[List[float]]:
-        """Embed multiple texts in one API call. Returns list of vectors.
-
-        Texts already in cache are served from cache; only uncached texts
-        are sent to the API.
-        """
+        """Embed multiple texts in one API call. Returns list of vectors."""
         results: List[Optional[List[float]]] = [None] * len(texts)
         uncached_indices: List[int] = []
         uncached_texts: List[str] = []
 
         for i, text in enumerate(texts):
+            # 1. Check LRU
             cached = self._cache_get(text)
             if cached is not None:
                 results[i] = cached
-            else:
-                uncached_indices.append(i)
-                uncached_texts.append(text)
+                continue
+
+            # 2. Check Persistent Cache
+            key = self._cache_key(text)
+            if self._storage:
+                blob = self._storage.get_cached_embedding(key)
+                if blob:
+                    vec = list(struct.unpack(f"{len(blob) // 4}f", blob))
+                    results[i] = vec
+                    self._cache_put(text, vec)
+                    continue
+
+            # 3. API needed
+            uncached_indices.append(i)
+            uncached_texts.append(text)
 
         if uncached_texts:
             vectors = await asyncio.to_thread(self._call_api, uncached_texts)
             for idx, vec in zip(uncached_indices, vectors):
                 results[idx] = vec
                 self._cache_put(texts[idx], vec)
+                if self._storage:
+                    key = self._cache_key(texts[idx])
+                    blob = struct.pack(f"{len(vec)}f", *vec)
+                    self._storage.cache_embedding(key, blob)
 
         return results  # type: ignore[return-value]
 

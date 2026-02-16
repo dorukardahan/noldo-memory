@@ -14,8 +14,10 @@ Adapted from Mahmory's ``hybrid_search.py`` — rewritten for sqlite-vec + FTS5.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -25,6 +27,19 @@ from .storage import MemoryStorage
 from .triggers import get_confidence_tier
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_query(text: str) -> str:
+    """Normalize query text for better cache hits.
+
+    - lowercase, strip
+    - collapse whitespace
+    - remove trailing punctuation
+    """
+    t = text.lower().strip()
+    t = re.sub(r"\s+", " ", t)
+    t = re.sub(r"[?!.,;:]+$", "", t)
+    return t.strip()
 
 
 @dataclass
@@ -123,12 +138,25 @@ class HybridSearch:
         use_semantic: bool = True,
         use_keyword: bool = True,
         use_recency: bool = True,
+        agent: str = "main",
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
         Graceful degradation: if the embedding API is unavailable, only
         BM25 + recency layers are used.
         """
+        # 1. Query Normalization + Result Cache Check
+        q_norm = normalize_query(query)
+        cached_json = self.storage.get_cached_search_result(
+            query_norm=q_norm, limit_val=limit, min_score=min_score, agent=agent
+        )
+        if cached_json:
+            try:
+                cached_data = json.loads(cached_json)
+                return [SearchResult(**r) for r in cached_data]
+            except Exception as exc:
+                logger.warning("Failed to parse cached search results: %s", exc)
+
         candidate_limit = max(limit * 4, 20)
 
         # Collect candidates from each layer ---------------------------------
@@ -139,7 +167,7 @@ class HybridSearch:
         # Layer 1 — Semantic (sqlite-vec)
         if use_semantic and self.embedder is not None:
             try:
-                query_vec = await self.embedder.embed(query)
+                query_vec = await self.embedder.embed(q_norm)
                 sem_results = self.storage.search_vectors(
                     query_vec, limit=candidate_limit, min_score=0.0
                 )
@@ -154,7 +182,7 @@ class HybridSearch:
         # Layer 2 — Keyword (FTS5 BM25)
         if use_keyword:
             try:
-                kw_results = self.storage.search_text(query, limit=candidate_limit)
+                kw_results = self.storage.search_text(q_norm, limit=candidate_limit)
                 for r in kw_results:
                     mid = r["id"]
                     keyword_ids.append(mid)
@@ -238,5 +266,18 @@ class HybridSearch:
                 self.storage.boost_strength(r.id)
             except Exception:
                 pass
+
+        # 3. Store Results in Cache
+        try:
+            results_json = json.dumps([r.to_dict() for r in results])
+            self.storage.cache_search_result(
+                query_norm=q_norm,
+                limit_val=limit,
+                min_score=min_score,
+                agent=agent,
+                results_json=results_json,
+            )
+        except Exception as exc:
+            logger.warning("Failed to cache search results: %s", exc)
 
         return results
