@@ -11,6 +11,9 @@ Your agent remembers conversations, decisions, and facts across sessions — wit
 - **Spaced repetition** — frequently recalled memories strengthen; unused ones decay naturally
 - **Knowledge graph** — auto-extracted entities, relationships, and temporal facts
 - **Multi-agent** — each agent gets its own DB; cross-agent search with `agent=all`
+- **Instruction capture** — auto-detects rules/preferences in conversation ("always use dark mode", "bundan sonra Türkçe yaz") and stores them as high-importance memories. Safewords: 📌 💾 `/rule` `/save` `/remember`
+- **Conflict detection** — when a new fact contradicts an existing one (same entity + relation), flags it and auto-resolves (newest wins) or marks for review
+- **Result caching** — SQLite-backed search cache + embedding cache with eager invalidation on writes
 - **Multilingual NLP** — Turkish + English lemmatization, temporal parsing, stopword filtering
 
 ## Why Not Just Use Files?
@@ -87,6 +90,7 @@ Base URL: `http://localhost:8787` — Swagger UI at `/docs`
 | `/v1/search` | GET | Quick search (CLI/debug) |
 | `/v1/stats` | GET | DB counts and health |
 | `/v1/health` | GET | Service health check |
+| `/v1/rule` | POST | Explicitly store a rule/instruction |
 | `/v1/decay` | POST | Apply Ebbinghaus decay to stale memories |
 | `/v1/consolidate` | POST | Bulk dedup + archive weak memories |
 | `/v1/agents` | GET | List all agent DBs with stats |
@@ -118,6 +122,26 @@ curl -X POST http://localhost:8787/v1/capture \
   }'
 # → {"stored": 1, "merged": 1, "total": 2}
 ```
+
+### Instruction Capture
+
+Rules and preferences are detected automatically during `/v1/store` and `/v1/capture`. You can also store them explicitly:
+
+```bash
+# Explicit rule
+curl -X POST http://localhost:8787/v1/rule \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "Always reply in Turkish when I write in Turkish"}'
+
+# Auto-detected during normal store (no extra call needed)
+curl -X POST http://localhost:8787/v1/store \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "From now on use dark mode in all code snippets"}'
+# → detected as instruction, stored with importance=1.0 and category="instruction"
+```
+
+Trigger patterns: "always ...", "never ...", "from now on ...", "bundan sonra ...", "her zaman ...", "asla ..."
+Safewords (force capture): 📌 💾 `/rule` `/save` `/remember`
 
 ### Multi-Agent
 
@@ -328,16 +352,18 @@ bash scripts/backup_db.sh
 
 ```
 FastAPI (:8787)
-├── /v1/recall    → 4-layer hybrid search → RRF fusion → ranked results
-├── /v1/store     → embed → find nearest → merge or insert
-├── /v1/capture   → batch ingest → importance scoring → merge-or-insert
-├── /v1/forget    → delete by ID or query match
+├── /v1/recall    → cache check → 4-layer hybrid search → RRF fusion → cache store → results
+├── /v1/store     → rule detection → embed → conflict check → merge or insert → invalidate cache
+├── /v1/capture   → batch ingest → rule detection → importance scoring → merge-or-insert
+├── /v1/rule      → explicit instruction store (importance=1.0)
+├── /v1/forget    → delete by ID or query match → invalidate cache
 ├── /v1/decay     → Ebbinghaus strength decay pass
 └── /v1/consolidate → cosine dedup + stale archival
 
-Storage: SQLite + sqlite-vec (vectors) + FTS5 (keywords)
-Embeddings: OpenRouter API or local llama-server
+Storage: SQLite + sqlite-vec (vectors) + FTS5 (keywords) + search/embedding cache tables
+Embeddings: OpenRouter API or local llama-server (with warm-up on startup)
 NLP: zeyrek (Turkish lemmatizer) + dateparser + stopwords
+KG: Entity extraction + relation-scoped conflict detection
 ```
 
 ## License
