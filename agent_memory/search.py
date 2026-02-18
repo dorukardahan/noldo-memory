@@ -20,7 +20,7 @@ import math
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .config import Config, load_config
 from .storage import MemoryStorage
@@ -143,6 +143,7 @@ class HybridSearch:
         use_keyword: bool = True,
         use_recency: bool = True,
         agent: str = "main",
+        time_range: Optional[Tuple[float, float]] = None,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -197,6 +198,21 @@ class HybridSearch:
 
         if not all_candidates:
             return []
+
+        # Temporal filter: remove candidates outside time_range
+        if time_range is not None:
+            t_start, t_end = time_range
+            before = len(all_candidates)
+            all_candidates = {
+                mid: c for mid, c in all_candidates.items()
+                if t_start <= c.get("created_at", 0) <= t_end
+            }
+            # Also filter ranked ID lists
+            semantic_ids = [mid for mid in semantic_ids if mid in all_candidates]
+            keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
+            if before > 0 and len(all_candidates) == 0:
+                logger.debug("Temporal filter removed all %d candidates", before)
+                return []
 
         # Layer 3 — Recency: rank all candidates by created_at
         recency_ranked = sorted(

@@ -50,6 +50,7 @@ from .search import HybridSearch, SearchWeights
 from .storage import MemoryStorage
 from .rules import RuleDetector
 from .triggers import score_importance, should_trigger
+from .turkish import parse_temporal
 
 logger = logging.getLogger(__name__)
 
@@ -301,20 +302,34 @@ async def recall(req: RecallRequest) -> Dict[str, Any]:
         return await _recall_all(req)
 
     search = _get_search(req.agent)
+
+    # Temporal-aware search: parse time expressions from query
+    time_range = None
+    temporal = parse_temporal(req.query)
+    if temporal is not None:
+        time_range = (temporal[0].timestamp(), temporal[1].timestamp())
+
     results = await search.search(
         query=req.query,
         limit=req.limit,
         min_score=req.min_score,
+        time_range=time_range,
     )
 
     agent_key = StoragePool.normalize_key(req.agent)
-    return {
+    response = {
         "query": req.query,
         "agent": agent_key,
         "count": len(results),
         "triggered": should_trigger(req.query),
         "results": [r.to_dict() for r in results],
     }
+    if time_range is not None:
+        response["time_range"] = {
+            "start": time_range[0],
+            "end": time_range[1],
+        }
+    return response
 
 
 async def _recall_all(req: RecallRequest) -> Dict[str, Any]:
