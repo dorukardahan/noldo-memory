@@ -714,16 +714,21 @@ def _consolidate_single(agent_id: str) -> Dict[str, Any]:
             if n["vec_rowid"] == vec_rowid:
                 continue
             sim = 1.0 - (float(n["distance"]) / 2.0)
-            if sim <= 0.90:
+            if sim <= 0.82:
                 continue
             other = conn.execute(
-                "SELECT id FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL",
+                "SELECT id, category FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL",
                 (n["vec_rowid"],),
             ).fetchone()
             if not other:
                 continue
             oid = other["id"]
             if oid == mid:
+                continue
+            # Category-aware threshold: same category = 0.82, different = 0.92
+            same_cat = (r["category"] or "other") == (other["category"] or "other")
+            threshold = 0.82 if same_cat else 0.92
+            if sim < threshold:
                 continue
             union(mid, oid)
             pairs += 1
@@ -983,6 +988,117 @@ async def metrics(
         "agent_counts": agent_counts,
         "embedding_available": _embedder is not None,
     }
+
+
+
+@app.get("/v1/export")
+async def export_memories(
+    agent: Optional[str] = Query(default=None),
+    include_deleted: bool = Query(default=False),
+) -> List[Dict[str, Any]]:
+    """Export memories as JSON array (JSONL-compatible per line).
+
+    Returns all non-deleted memories for the given agent.
+    Use ``include_deleted=true`` to include soft-deleted records.
+    """
+    if _storage_pool is None:
+        raise HTTPException(503, "Storage pool not initialised")
+
+    agent_key = StoragePool.normalize_key(agent) if agent else None
+    storage = _get_storage(agent_key)
+    conn = storage._get_conn()
+
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
+    rows = conn.execute(
+        f"""
+        SELECT id, text, category, importance, strength,
+               source_session, created_at, updated_at,
+               last_accessed_at, deleted_at
+          FROM memories {where}
+         ORDER BY created_at ASC
+        """
+    ).fetchall()
+
+    result = []
+    for r in rows:
+        result.append({
+            "id": r["id"],
+            "text": r["text"],
+            "category": r["category"],
+            "importance": r["importance"],
+            "strength": r["strength"],
+            "source_session": r["source_session"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "last_accessed_at": r["last_accessed_at"],
+            "deleted_at": r["deleted_at"],
+        })
+
+    logger.info("Exported %d memories for agent=%s", len(result), agent or "main")
+    return result
+
+
+class ImportRequest(BaseModel):
+    """Import request: list of memory objects."""
+    memories: List[Dict[str, Any]] = Field(..., min_length=1)
+    agent: Optional[str] = None
+    skip_duplicates: bool = True
+
+
+@app.post("/v1/import")
+async def import_memories(req: ImportRequest) -> Dict[str, Any]:
+    """Import memories from JSONL/JSON array.
+
+    Each memory object must have at least ``text``.
+    Optional fields: category, importance, strength, tags, created_at.
+    If ``skip_duplicates`` is true (default), memories with existing IDs are skipped.
+    """
+    if _storage_pool is None:
+        raise HTTPException(503, "Storage pool not initialised")
+
+    agent_key = StoragePool.normalize_key(req.agent) if req.agent else None
+    storage = _get_storage(agent_key)
+
+    imported = 0
+    skipped = 0
+
+    for mem in req.memories:
+        text = mem.get("text", "").strip()
+        if not text:
+            skipped += 1
+            continue
+
+        mid = mem.get("id")
+        if mid and req.skip_duplicates:
+            existing = storage._get_conn().execute(
+                "SELECT 1 FROM memories WHERE id = ?", (mid,)
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+
+        # Embed if embedder available
+        vector = None
+        if _embedder is not None:
+            try:
+                vector = await _embedder.embed(text)
+            except Exception:
+                pass
+
+        storage.store_memory(
+            text=text,
+            vector=vector,
+            category=mem.get("category", "other"),
+            importance=float(mem.get("importance", 0.5)),
+            source_session=mem.get("source_session"),
+        )
+        imported += 1
+
+    logger.info(
+        "Imported %d memories (skipped %d) for agent=%s",
+        imported, skipped, req.agent or "main",
+    )
+    return {"imported": imported, "skipped": skipped, "total": len(req.memories)}
 
 
 # ---------------------------------------------------------------------------

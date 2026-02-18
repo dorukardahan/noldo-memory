@@ -91,6 +91,20 @@ Generate a key: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
 
 Health endpoint is always public (for monitoring).
 
+
+### Export & Import
+
+```bash
+# Export all memories for an agent
+curl -s -H "X-API-Key: $KEY" \
+  "http://localhost:8787/v1/export?agent=main" > memories.json
+
+# Import memories
+curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"memories": [...], "agent": "main"}' \
+  http://localhost:8787/v1/import
+```
+
 ## Security
 
 - API key authentication on all write/read endpoints
