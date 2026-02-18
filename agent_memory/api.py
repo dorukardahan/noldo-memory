@@ -68,10 +68,13 @@ _kg_cache: Dict[str, KnowledgeGraph] = {}
 _search_weights: Optional[SearchWeights] = None
 _rule_detector = RuleDetector()
 
-# Audit logging handler (file-based)
-_audit_handler = logging.FileHandler("/var/log/asuman-memory-audit.log")
-_audit_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
-logging.getLogger("audit").addHandler(_audit_handler)
+# Audit logging handler (file-based, graceful fallback for CI/test)
+try:
+    _audit_handler = logging.FileHandler("/var/log/asuman-memory-audit.log")
+    _audit_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    logging.getLogger("audit").addHandler(_audit_handler)
+except (PermissionError, FileNotFoundError):
+    pass  # CI/test environment - audit log not available
 logging.getLogger("audit").setLevel(logging.INFO)
 
 
