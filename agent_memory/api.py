@@ -618,7 +618,8 @@ async def decay(req: DecayRequest = DecayRequest()) -> Dict[str, Any]:
 async def consolidate(req: ConsolidateRequest = ConsolidateRequest()) -> Dict[str, Any]:
     """Deduplicate and cleanup memories.
 
-    1) Find memory pairs with cosine similarity > 0.90
+    1) Find memory pairs with cosine similarity > threshold
+       (same category: 0.82, cross-category: 0.92)
     2) Merge duplicates (keep higher importance; combine text)
     3) Soft-delete memories with strength < 0.3 and not accessed in 30 days
 
