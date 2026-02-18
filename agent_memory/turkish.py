@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 

@@ -15,7 +15,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -415,15 +415,15 @@ class MemoryStorage:
                 UPDATE memories
                    SET strength = CASE
                        -- 1. Very stale (30+ days): Drop to floor
-                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 2592000) 
+                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 2592000)
                             THEN ?
-                       
+
                        -- 2. Very recent (last 24h): Small boost
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 86400) 
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 86400)
                             THEN MIN(COALESCE(strength, 1.0) + 0.1, 5.0)
 
                        -- 3. Recent (7-day window): Maintain high (min 0.8)
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 604800) 
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 604800)
                             THEN MAX(COALESCE(strength, 1.0), 0.8)
 
                        -- 4. Mid-stale (7-30 days): Aggressive decay
@@ -432,7 +432,7 @@ class MemoryStorage:
                  WHERE deleted_at IS NULL
                    AND (
                        (COALESCE(last_accessed_at, created_at) < ? - 604800) -- stale
-                       OR 
+                       OR
                        (COALESCE(last_accessed_at, created_at) >= ? - 86400) -- very recent (for boost)
                    )
                 """,
@@ -967,13 +967,13 @@ class MemoryStorage:
     def run_migrations(self) -> None:
         """Apply schema extensions for typed relations."""
         conn = self._get_conn()
-        
+
         # Check if columns exist
         try:
             existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(temporal_facts)").fetchall()}
         except Exception:
             existing_cols = set()
-            
+
         updates = []
         if "relation_type" not in existing_cols:
             updates.append("ALTER TABLE temporal_facts ADD COLUMN relation_type TEXT")
@@ -985,7 +985,7 @@ class MemoryStorage:
             updates.append("ALTER TABLE temporal_facts ADD COLUMN confidence REAL DEFAULT 0.7")
         if "is_active" not in existing_cols:
             updates.append("ALTER TABLE temporal_facts ADD COLUMN is_active INTEGER DEFAULT 1")
-            
+
         for stmt in updates:
             try:
                 conn.execute(stmt)
@@ -1013,12 +1013,12 @@ class MemoryStorage:
         fid = uuid.uuid4().hex[:16]
         # Construct fact string for backward compatibility / display
         fact_text = f"{relation_type}: {object_value}"
-        
+
         # Ensure migration runs if not already
         # self.run_migrations() # Assuming run in __init__
-        
+
         conn.execute(
-            """INSERT INTO temporal_facts 
+            """INSERT INTO temporal_facts
                (id, entity_id, fact, valid_from, valid_to, source_memory_id,
                 relation_type, object_value, object_entity_id, confidence, is_active)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
@@ -1031,7 +1031,7 @@ class MemoryStorage:
     def get_active_facts(self, entity_id: str, relation_type: str) -> List[Dict[str, Any]]:
         conn = self._get_conn()
         rows = conn.execute(
-            """SELECT * FROM temporal_facts 
+            """SELECT * FROM temporal_facts
                WHERE entity_id = ? AND relation_type = ? AND is_active = 1""",
             (entity_id, relation_type)
         ).fetchall()
@@ -1049,26 +1049,26 @@ class MemoryStorage:
     def get_conflicts(self, entity_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         """Identify conflicts (multiple active facts for same exclusive relation)."""
         conn = self._get_conn()
-        
+
         query = """
-            SELECT entity_id, relation_type, COUNT(*) as count 
-            FROM temporal_facts 
+            SELECT entity_id, relation_type, COUNT(*) as count
+            FROM temporal_facts
             WHERE is_active = 1 AND relation_type IS NOT NULL
         """
         params = []
         if entity_id:
             query += " AND entity_id = ?"
             params.append(entity_id)
-            
+
         query += """
-            GROUP BY entity_id, relation_type 
+            GROUP BY entity_id, relation_type
             HAVING count > 1
             LIMIT ?
         """
         params.append(limit)
-        
+
         rows = conn.execute(query, tuple(params)).fetchall()
-        
+
         results = []
         for r in rows:
             facts = conn.execute(

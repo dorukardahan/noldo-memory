@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from agent_memory.ingest import (
-    Chunk,
     _chunk_session,
     _extract_text,
     _is_tool_call,
@@ -19,7 +16,6 @@ from agent_memory.ingest import (
     discover_sessions,
     ingest_sessions,
 )
-from agent_memory.storage import MemoryStorage
 
 
 # ---------------------------------------------------------------------------

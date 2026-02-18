@@ -1,7 +1,5 @@
 """Tests for SQLite storage layer."""
 
-import os
-import tempfile
 import pytest
 
 from agent_memory.storage import MemoryStorage

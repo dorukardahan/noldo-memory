@@ -552,14 +552,14 @@ class EntityExtractor:
                     # Some patterns like status/has_state might just be subject+state
                     if len(match.groups()) < 2:
                         continue
-                    
+
                     subject_raw = match.group(1).strip()
                     object_raw = match.group(2).strip()
-                    
+
                     # Try to map subject to an extracted entity
                     subject_ent = entity_map.get(subject_raw.lower())
                     subject_name = subject_ent.text if subject_ent else resolve_alias(subject_raw)
-                    
+
                     # For object, it might be an entity or just a string value
                     # If it maps to an entity, use canonical name
                     object_ent = entity_map.get(object_raw.lower())
@@ -572,7 +572,7 @@ class EntityExtractor:
                         "confidence": 0.8,  # High confidence for regex match
                         "text_span": match.group(0)
                     })
-        
+
         return relations
 
 
@@ -645,25 +645,25 @@ class KnowledgeGraph:
         # Typed relations + Conflict Detection
         typed_rels = self.extractor.extract_typed_relations(text, entities)
         detector = ConflictDetector(self.storage)
-        
+
         for rel in typed_rels:
             # Map subject name to entity ID
             subj_name = rel["subject"]
             subj_eid = None
-            
+
             # Find subject entity ID
             # 1. Check extracted entities first
             for e_obj, e_id in zip(all_ents, entity_ids):
                 if resolve_alias(e_obj.text).lower() == subj_name.lower():
                     subj_eid = e_id
                     break
-            
+
             # 2. Or search storage if not in current extraction (less likely but possible via regex)
             if not subj_eid:
                 matches = self.storage.search_entities(subj_name, limit=1)
                 if matches:
                     subj_eid = matches[0]["id"]
-            
+
             if not subj_eid:
                 # Implicit entity creation if not found?
                 # For now, skip if subject entity not resolved
@@ -674,13 +674,13 @@ class KnowledgeGraph:
             # But regex returns object string. If it matches an entity, link it.
             obj_val = rel["object"]
             obj_eid = None
-            
+
             # Check if object value maps to an extracted entity
             for e_obj, e_id in zip(all_ents, entity_ids):
                 if resolve_alias(e_obj.text).lower() == obj_val.lower():
                     obj_eid = e_id
                     break
-            
+
             if obj_eid:
                 self.storage.link_entities(
                     subj_eid,

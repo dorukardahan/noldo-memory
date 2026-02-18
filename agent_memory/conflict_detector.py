@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Any
+from typing import Optional
 
 from .storage import MemoryStorage
 
@@ -74,7 +74,6 @@ class ConflictDetector:
         # 2. Exclusive: Check active facts
         # We need a method in storage to get active facts for (entity, relation)
         active_facts = self.storage.get_active_facts(entity_id, relation_type)
-        conflict_found = False
 
         for fact in active_facts:
             existing_val = fact.get("object_value", "")
@@ -83,8 +82,7 @@ class ConflictDetector:
 
             # Check if value is different (case-insensitive)
             if existing_val.lower() != object_value.lower():
-                conflict_found = True
-                
+
                 # Conflict logic
                 if confidence > (existing_conf + AUTO_RESOLVE_CONFIDENCE_MARGIN):
                     # Auto-resolve: Deactivate old
@@ -103,7 +101,7 @@ class ConflictDetector:
                     new_confidence=confidence,
                     resolution=resolution,
                 )
-                
+
                 # If auto-resolved, we can stop checking (assuming one active fact usually)
                 if resolution == "auto_new_wins":
                     break

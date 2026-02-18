@@ -38,3 +38,16 @@ include = ["agent_memory*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501"]  # line length handled by line-length setting
+
+[tool.ruff.lint.per-file-ignores]
+"agent_memory/entities.py" = ["F401"]
+"agent_memory/search.py" = ["F401"]
+"agent_memory/ingest.py" = ["F401"]

@@ -34,7 +34,9 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel, Field
 
 from starlette.responses import JSONResponse
@@ -44,10 +46,10 @@ from .config import Config, load_config
 from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
 from .pool import StoragePool
-from .search import HybridSearch, SearchResult, SearchWeights
+from .search import HybridSearch, SearchWeights
 from .storage import MemoryStorage
 from .rules import RuleDetector
-from .triggers import get_confidence_tier, score_importance, should_trigger
+from .triggers import score_importance, should_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +215,6 @@ app.add_middleware(
 )
 
 # --- Centralized error handling ---
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request, exc):

@@ -1,17 +1,10 @@
 """Tests for entity extraction and knowledge graph."""
 
-import pytest
 
 from agent_memory.entities import (
     Entity,
-    EntityExtractor,
     ExtractedEntities,
-    KnowledgeGraph,
     _dedupe,
-    KNOWN_PEOPLE,
-    KNOWN_PLACES,
-    KNOWN_ORGS,
-    KNOWN_TECH,
 )
 
 

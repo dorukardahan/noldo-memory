@@ -1,6 +1,5 @@
 """Tests for Turkish NLP utilities."""
 
-import pytest
 
 from agent_memory.turkish import (
     ascii_fold,

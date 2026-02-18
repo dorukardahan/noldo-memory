@@ -16,13 +16,12 @@ import hashlib
 import logging
 import struct
 import time
-from functools import lru_cache
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional
 
 import numpy as np
 import requests
 
-from .config import Config, load_config
+from .config import load_config
 
 if TYPE_CHECKING:
     from .storage import MemoryStorage

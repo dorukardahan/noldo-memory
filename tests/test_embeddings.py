@@ -1,6 +1,5 @@
 """Tests for OpenRouter embedding client."""
 
-import os
 import pytest
 from unittest.mock import patch, MagicMock
 

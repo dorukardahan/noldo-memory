@@ -1,9 +1,9 @@
 """Tests for hybrid search."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
-from agent_memory.search import HybridSearch, SearchWeights, _recency_score, _rrf_fuse
+from agent_memory.search import HybridSearch, _recency_score, _rrf_fuse
 from agent_memory.storage import MemoryStorage
 
 

@@ -1,6 +1,5 @@
 """Tests for trigger patterns and importance scoring."""
 
-import pytest
 
 from agent_memory.triggers import (
     should_trigger,
