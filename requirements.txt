@@ -10,4 +10,5 @@ pytest>=7.0.0
 pytest-asyncio>=0.23.0
 httpx>=0.27.0
 rapidfuzz>=3.0.0
+# Reranker (optional — install for cross-encoder reranking)
 sentence-transformers>=3.0.0

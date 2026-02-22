@@ -1,0 +1,2 @@
+# Heavy dependencies for reranker (optional for basic usage)
+sentence-transformers>=3.0.0
