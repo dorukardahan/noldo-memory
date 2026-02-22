@@ -502,7 +502,8 @@ class HybridSearch:
                     used_cross_encoder = False
 
                     if self.reranker is not None:
-                        ce_scores = self.reranker.score(
+                        ce_scores = await asyncio.to_thread(
+                            self.reranker.score,
                             q_norm,
                             [r.text for r in cands],
                             [r.id for r in cands],

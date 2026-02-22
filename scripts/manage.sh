@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-SERVICE="${OPENCLAW_MEMORY_SERVICE:-openclaw-memory}"
+SERVICE="${OPENCLAW_MEMORY_SERVICE:-asuman-memory}"
 API_URL="${OPENCLAW_MEMORY_API_URL:-http://127.0.0.1:8787}"
 SCRIPTS_DIR="${ROOT_DIR}/scripts"
 
@@ -28,7 +28,7 @@ if [ -f "${ENV_FILE}" ]; then
   set +a
 fi
 
-DB_PATH="${AGENT_MEMORY_DB:-${HOME}/.agent-memory/memory.sqlite}"
+DB_PATH="${AGENT_MEMORY_DB:-${HOME}/.asuman/memory.sqlite}"
 
 case "${1:-}" in
   start)

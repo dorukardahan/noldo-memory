@@ -88,6 +88,7 @@ def _get_modified_sessions(
     sessions: List[Path],
     state: Dict[str, Any],
     full: bool = False,
+    agent_id: str = "main",
 ) -> List[Path]:
     """Return sessions that are new or modified since last sync."""
     if full:
@@ -97,8 +98,10 @@ def _get_modified_sessions(
     modified = []
     for session in sessions:
         sid = session.stem
+        # Use the same key format as when saving state (agent_id:sid for non-main)
+        state_key = f"{agent_id}:{sid}" if agent_id != "main" else sid
         mtime = session.stat().st_mtime
-        prev = synced.get(sid)
+        prev = synced.get(state_key)
         if prev is None or prev.get("mtime", 0) < mtime:
             modified.append(session)
     return modified
@@ -109,6 +112,11 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
     cfg = load_config()
     state = _load_state()
 
+    # Apply CLI overrides
+    if getattr(args, "db", None):
+        cfg.db_path = args.db
+    sessions_dir_override = getattr(args, "sessions_dir", None)
+
     has_api_key = bool(cfg.openrouter_api_key)
     skip_embeddings = args.skip_embeddings or not has_api_key
 
@@ -116,7 +124,11 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
         logger.info("No OPENROUTER_API_KEY — running without embeddings")
 
     # Discover sessions for all agents
-    agent_sessions = discover_all_agent_sessions()
+    if sessions_dir_override:
+        sd = Path(sessions_dir_override)
+        agent_sessions = {"main": list(sd.glob("*.jsonl"))} if sd.is_dir() else {}
+    else:
+        agent_sessions = discover_all_agent_sessions()
     if not agent_sessions:
         logger.info("No session files found for any agent")
         return {"status": "no_sessions", "new": 0, "stored": 0}
@@ -142,7 +154,7 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
 
     for agent_id, sessions in agent_sessions.items():
         # Find new/modified sessions for this agent
-        modified = _get_modified_sessions(sessions, state, full=args.full)
+        modified = _get_modified_sessions(sessions, state, full=args.full, agent_id=agent_id)
         if not modified:
             continue
 
@@ -273,7 +285,7 @@ def show_status() -> None:
     agent_sessions = discover_all_agent_sessions()
     pending_count = 0
     for agent_id, sessions in agent_sessions.items():
-        modified = _get_modified_sessions(sessions, state)
+        modified = _get_modified_sessions(sessions, state, agent_id=agent_id)
         pending_count += len(modified)
     
     print(f"  Pending sync:   {pending_count} session(s) across all agents")

@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS search_result_cache (
     results_json TEXT NOT NULL,
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL,
-    PRIMARY KEY (query_norm, limit_val, agent)
+    PRIMARY KEY (query_norm, limit_val, min_score, agent)
 );
 
 CREATE TABLE IF NOT EXISTS embedding_cache (
@@ -237,6 +237,27 @@ class MemoryStorage:
             )
         except Exception:
             pass
+
+        # Migrate search_result_cache PK to include min_score (cache is ephemeral)
+        try:
+            cols = conn.execute("PRAGMA table_info(search_result_cache)").fetchall()
+            if cols:
+                pk_cols = [c[1] for c in cols if c[5] > 0]
+                if "min_score" not in pk_cols and len(pk_cols) == 3:
+                    conn.execute("DROP TABLE search_result_cache")
+                    conn.execute("""CREATE TABLE IF NOT EXISTS search_result_cache (
+                        query_norm TEXT NOT NULL,
+                        limit_val INTEGER NOT NULL,
+                        min_score REAL NOT NULL DEFAULT 0.0,
+                        agent TEXT NOT NULL DEFAULT 'main',
+                        results_json TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        expires_at REAL NOT NULL,
+                        PRIMARY KEY (query_norm, limit_val, min_score, agent)
+                    )""")
+                    logger.info("Schema migration: rebuilt search_result_cache with min_score in PK")
+        except Exception as exc:
+            logger.debug("search_result_cache migration skipped: %s", exc)
 
         conn.commit()
 

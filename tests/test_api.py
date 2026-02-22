@@ -86,10 +86,14 @@ class TestHealth:
         assert "uptime_seconds" in data
         assert data["checks"]["storage"] is True
 
-    async def test_health_has_memory_count(self, client):
+    async def test_health_minimal_response(self, client):
+        """Health endpoint should not leak metadata (total_memories, agents)."""
         resp = await client.get("/v1/health")
         data = resp.json()
-        assert "total_memories" in data
+        assert "total_memories" not in data
+        assert "agents" not in data
+        assert "status" in data
+        assert "checks" in data
 
 
 # ---------------------------------------------------------------------------

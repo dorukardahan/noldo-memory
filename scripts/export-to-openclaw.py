@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime
@@ -19,7 +20,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-DB_PATH = "~/.agent-memory/memory.sqlite"
+DB_PATH = os.environ.get("AGENT_MEMORY_DB", os.path.expanduser("~/.asuman/memory.sqlite"))
 OUTPUT_DIR = Path("/root/.openclaw/workspace/memory")
 OUTPUT_FILE = OUTPUT_DIR / "whatsapp-highlights.md"
 

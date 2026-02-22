@@ -91,7 +91,10 @@ def _get_storage(agent: Optional[str] = None) -> MemoryStorage:
     """Get the MemoryStorage for the given agent."""
     if _storage_pool is None:
         raise HTTPException(503, "Storage pool not initialised")
-    return _storage_pool.get(agent)
+    try:
+        return _storage_pool.get(agent)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 def _get_search(agent: Optional[str] = None) -> HybridSearch:
@@ -1080,13 +1083,12 @@ async def health() -> Dict[str, Any]:
     all_ok = all(checks.values())
     overall = "ok" if all_ok else ("degraded" if checks["storage"] else "down")
 
+    # Public health: only status + checks (no metadata leakage).
+    # Detailed info (total_memories, agents, vectorless_count) is in /v1/stats (auth required).
     return {
         "status": overall,
         "checks": checks,
-        "vectorless_count": vectorless_count,
         "uptime_seconds": round(time.time() - _start_time, 1),
-        "total_memories": total_memories,
-        "agents": agents_list,
     }
 
 
@@ -1222,6 +1224,7 @@ async def import_memories(req: ImportRequest) -> Dict[str, Any]:
             category=mem.get("category", "other"),
             importance=float(mem.get("importance", 0.5)),
             source_session=mem.get("source_session"),
+            memory_id=mid,
         )
         imported += 1
 

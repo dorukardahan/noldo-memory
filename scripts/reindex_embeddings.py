@@ -11,6 +11,7 @@ Steps:
 Usage: python3 scripts/reindex_embeddings.py
 """
 
+import os
 import sqlite3
 import struct
 import sys
@@ -18,7 +19,7 @@ import time
 
 import requests
 
-DB_PATH = "~/.agent-memory/memory.sqlite"
+DB_PATH = os.environ.get("AGENT_MEMORY_DB", os.path.expanduser("~/.asuman/memory.sqlite"))
 EMBED_URL = "http://localhost:8090/v1/embeddings"
 NEW_DIM = 1024
 BATCH_SIZE = 20  # texts per API call
