@@ -1,42 +1,96 @@
 # CHANGELOG
 
-<!-- version list -->
-
-## v1.0.0 (2026-02-22)
-
-### Bug Fixes
-
-- Remove build_command and changelog section causing semantic-release errors
-  ([`2a68007`](https://github.com/dorukardahan/asuman-memory/commit/2a68007d0ebb44d67f42334b3a5a31d9f14fb0a9))
-
-- Temporal parsing review fixes + single-word patterns
-  ([`031a005`](https://github.com/dorukardahan/asuman-memory/commit/031a005dd08a407f75a62c48d7ae699cddc58c35))
-
-- Unset AGENT_MEMORY_API_KEY in test conftest to prevent auth failures in CI
-  ([`a03044f`](https://github.com/dorukardahan/asuman-memory/commit/a03044f1d32f8b69d2e1ec2f752743fed7a54d83))
-
-- Use empty string instead of bool for semantic-release config
-  ([`3cfdfef`](https://github.com/dorukardahan/asuman-memory/commit/3cfdfefd260928d40a5a049c859e9ba7c89577e7))
-
-### Chores
-
-- Generic rescore script with CLI args, add requirements-dev.txt, CI timeout
-  ([`0a888ed`](https://github.com/dorukardahan/asuman-memory/commit/0a888ed7ce90913db8013869ce7147bc2657dbe3))
-
-### Continuous Integration
-
-- Add python-semantic-release for automated versioning
-  ([`619ffef`](https://github.com/dorukardahan/asuman-memory/commit/619ffefbb690a6a929ad7ef3f7fa6b300a41b92c))
-
-- Trigger release after CI completes to satisfy branch protection
-  ([`122d12d`](https://github.com/dorukardahan/asuman-memory/commit/122d12d088eec45ce115503c8c696163fffa019b))
+## [1.0.0](https://github.com/dorukardahan/asuman-memory/compare/v0.4.0...v1.0.0) (2026-02-22)
 
 ### Features
+- Reranker for improved recall precision
+- Resilient embedding with graceful fallback
+- Automated backfill for memories missing embeddings
+- Generic cleanup and garbage collection
 
-- Sync with production — reranker, resilient embedding, backfill, generic cleanup
-  ([`fbf29b8`](https://github.com/dorukardahan/asuman-memory/commit/fbf29b886e969b2bceaee002bafed239cce0d056))
+### CI/CD
+- python-semantic-release with conventional commits
+- Automated changelog generation
+- Generic rescore script with CLI args
 
+### Fixes
+- Fixed auth bypass in CI test environment
+- CI timeout configuration
 
-## v0.3.0 (2026-02-18)
+## [0.4.0](https://github.com/dorukardahan/asuman-memory/compare/v0.3.0...v0.4.0) (2026-02-19)
 
-- Initial Release
+### Features
+- Temporal parsing — natural language time expressions in search queries
+- Feature registry — modular feature toggle system
+- GC endpoint for memory cleanup
+- Importance-adjusted decay — rate varies by memory importance
+- Noise filters for low-quality memories
+
+### Fixes
+- Temporal parsing review fixes + single-word patterns
+- Synced with live VPS production state
+
+## [0.3.0](https://github.com/dorukardahan/asuman-memory/compare/v0.2.1...v0.3.0) (2026-02-18)
+
+### Features
+- Security hardening — API key auth, audit logging, input validation
+- CI/CD pipeline — GitHub Actions with ruff lint + pytest
+- Metrics — memory usage stats and health endpoints
+- Export/Import — bulk memory endpoints
+- Improved consolidation — better dedup and merge logic
+- PR template for contributions
+
+### Fixes
+- Resolved all ruff lint errors
+- Graceful audit log handler for CI environment
+- Repo cleanup — version sync, README rewrite
+
+## [0.2.1](https://github.com/dorukardahan/asuman-memory/compare/v0.2.0...v0.2.1) (2026-02-17)
+
+### Features
+- Memory system overhaul — 15 improvements across P0, P1, P2 priorities
+- Improved recall accuracy and ranking
+- Better deduplication and noise filtering
+- Enhanced consolidation pipeline
+
+## [0.2.0](https://github.com/dorukardahan/asuman-memory/compare/v0.1.1...v0.2.0) (2026-02-16)
+
+### Features
+- Per-agent routing — each agent gets its own memory database
+- Package rename: `asuman_memory` → `agent_memory` (fully generic)
+- Instruction capture — detects and stores user preferences
+- KG conflict detection — catches contradicting memories
+- Caching layer for frequently accessed memories
+- Multi-agent session sync — 13 typed relation patterns
+- Aggressive Ebbinghaus decay tuning
+
+### Docs
+- Complete README rewrite
+- Dual memory architecture guide
+- Embedding integration documentation
+
+## [0.1.1](https://github.com/dorukardahan/asuman-memory/compare/v0.1.0...v0.1.1) (2026-02-08)
+
+### Features
+- B12 Patterns — Ebbinghaus forgetting curve decay, write-time merge, consolidation
+- Genericized codebase — preparing for multi-agent use
+- Improved architecture diagram
+
+### Fixes
+- Pass config search weights to HybridSearch correctly
+- Security + performance + resilience improvements
+- Removed remaining Asuman-specific references
+
+## [0.1.0](https://github.com/dorukardahan/asuman-memory/releases/tag/v0.1.0) (2026-02-04)
+
+### Features
+- Complete `asuman_memory` package — hybrid search (vector + keyword)
+- Turkish NLP with Zeyrek lemmatizer
+- SQLite + sqlite-vec for vector storage
+- FastAPI REST API (port 8787)
+- systemd service + OpenClaw sync integration
+- Production polish — backup scripts, logrotate, test suite
+- Configurable decay and importance scoring
+
+### Security
+- Removed hardcoded API keys
