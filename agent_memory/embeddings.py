@@ -107,7 +107,7 @@ class OpenRouterEmbeddings:
                     self._url,
                     headers=self._headers,
                     json=payload,
-                    timeout=60,
+                    timeout=120,
                 )
                 if resp.status_code == 200:
                     data = resp.json()
