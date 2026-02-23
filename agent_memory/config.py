@@ -23,8 +23,8 @@ class Config:
 
     # OpenRouter embedding
     openrouter_api_key: str = ""
-    embedding_model: str = "qwen/qwen3-embedding-8b"
-    embedding_dimensions: int = 4096
+    embedding_model: str = "qwen/qwen3-embedding-4b"
+    embedding_dimensions: int = 2560
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Storage — default path; falls back to legacy ~/.asuman/ if it exists
