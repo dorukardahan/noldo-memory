@@ -17,9 +17,7 @@ import argparse
 import asyncio
 import json
 import logging
-import os
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,8 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent_memory.config import load_config
 from agent_memory.embeddings import OpenRouterEmbeddings
 from agent_memory.entities import KnowledgeGraph
-from agent_memory.ingest import discover_sessions, parse_session_file
-from agent_memory.storage import MemoryStorage
+from agent_memory.ingest import parse_session_file
 from agent_memory.pool import StoragePool
 from agent_memory.triggers import score_importance
 
@@ -41,14 +38,14 @@ STATE_FILE = Path.home() / ".agent-memory" / "sync_state.json"
 
 def discover_all_agent_sessions(base_dir: Optional[str] = None) -> Dict[str, List[Path]]:
     """Discover sessions for all agents.
-    
+
     Structure: {base_dir}/agents/{agent_id}/sessions/*.jsonl
     """
     root = Path(base_dir or (Path.home() / ".openclaw"))
     agents_dir = root / "agents"
-    
+
     results = {}
-    
+
     if agents_dir.is_dir():
         for agent_path in agents_dir.iterdir():
             if agent_path.is_dir():
@@ -57,7 +54,7 @@ def discover_all_agent_sessions(base_dir: Optional[str] = None) -> Dict[str, Lis
                     sessions = sorted(sdir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
                     if sessions:
                         results[agent_path.name] = sessions
-                        
+
     return results
 
 
@@ -168,7 +165,7 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
             # Prefix sid with agent_id in state to avoid collision across agents if needed
             # but stem is usually unique UUID. For safety, we track by absolute path/stem.
             state_key = f"{agent_id}:{sid}" if agent_id != "main" else sid
-            
+
             try:
                 chunks = parse_session_file(session_path, gap_hours=cfg.chunk_gap_hours)
             except Exception as exc:
@@ -287,7 +284,7 @@ def show_status() -> None:
     for agent_id, sessions in agent_sessions.items():
         modified = _get_modified_sessions(sessions, state, agent_id=agent_id)
         pending_count += len(modified)
-    
+
     print(f"  Pending sync:   {pending_count} session(s) across all agents")
     print("=" * 50)
 

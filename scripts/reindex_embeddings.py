@@ -14,7 +14,6 @@ Usage: python3 scripts/reindex_embeddings.py
 import os
 import sqlite3
 import struct
-import sys
 import time
 
 import requests
@@ -79,7 +78,6 @@ def main():
     total = len(rows)
     done = 0
     start_time = time.time()
-    new_rowid_map = {}  # memory_id -> new_vector_rowid
 
     for i in range(0, total, BATCH_SIZE):
         batch = rows[i:i + BATCH_SIZE]

@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import sys
 import time
 
@@ -113,7 +112,7 @@ async def main() -> None:
             print(f"    {role}: {count}")
 
         # Show sample chunks (no message content for security)
-        print(f"\n  Sample chunk lengths (first 5):")
+        print("\n  Sample chunk lengths (first 5):")
         for c in all_chunks[:5]:
             print(f"    session={c.session_id[:8]}... role={c.role} len={len(c.text)} ts={c.timestamp[:19] if c.timestamp else 'N/A'}")
 
@@ -250,12 +249,12 @@ async def main() -> None:
         print(f"  Parse errors:  {parse_errors}")
 
     db_stats = storage.stats()
-    print(f"\n  Database totals:")
+    print("\n  Database totals:")
     print(f"    Memories:      {db_stats['total_memories']}")
     print(f"    Entities:      {db_stats['entities']}")
     print(f"    Relationships: {db_stats['relationships']}")
     if db_stats.get('by_category'):
-        print(f"    By category:")
+        print("    By category:")
         for cat, count in db_stats['by_category'].items():
             print(f"      {cat}: {count}")
     print("=" * 60)

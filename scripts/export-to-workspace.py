@@ -1,6 +1,5 @@
 """Trim whatsapp-memory export to top 100 high-value + 30 recent + top 50 entities."""
 import sqlite3
-import json
 import time
 from datetime import datetime
 from pathlib import Path
@@ -40,20 +39,24 @@ lines.append("## High-Value Memories\n")
 seen = set()
 for row in high_value:
     mid = row["id"]
-    if mid in seen: continue
+    if mid in seen:
+        continue
     seen.add(mid)
     text = (row["text"] or "").strip()[:400]
-    if not text: continue
+    if not text:
+        continue
     ts = datetime.fromtimestamp(row["created_at"]).strftime("%m/%d")
     lines.append(f"- [{ts}] (imp:{row['importance']:.1f}) {text}\n")
 
 lines.append("\n## Recent User Messages (7d)\n")
 for row in recent_user:
     mid = row["id"]
-    if mid in seen: continue
+    if mid in seen:
+        continue
     seen.add(mid)
     text = (row["text"] or "").strip()[:250]
-    if not text: continue
+    if not text:
+        continue
     ts = datetime.fromtimestamp(row["created_at"]).strftime("%m/%d %H:%M")
     lines.append(f"- [{ts}] {text}\n")
 
