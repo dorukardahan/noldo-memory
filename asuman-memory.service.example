@@ -1,0 +1,33 @@
+[Unit]
+Description=Agent Memory API (hardened example)
+After=network.target
+
+[Service]
+Type=simple
+# Keep root for now; migrate to a dedicated service user separately.
+User=root
+# Change these paths to match your deployment location.
+WorkingDirectory=/opt/your-org/whatsapp-memory
+ExecStart=/opt/your-org/whatsapp-memory/.venv/bin/python -m agent_memory
+Restart=always
+RestartSec=5
+
+# File with OPENROUTER_API_KEY and AGENT_MEMORY_* variables.
+EnvironmentFile=/etc/asuman/memory.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asuman-memory
+
+# Hardening directives
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectHome=read-only
+# Allow write access only to the memory data directory.
+ReadWritePaths=/var/lib/asuman-memory
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
