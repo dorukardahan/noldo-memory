@@ -6,6 +6,7 @@ and adapted for Turkish+English environment.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Dict, List, Optional
 
@@ -190,9 +191,20 @@ _CRON_NOISE_PATTERNS = [
 ]
 _CRON_NOISE_MAX = 0.30
 
-# Conversation source indicators — messages from User via Slack/WhatsApp
+# Conversation source indicators — generic by default, override via env if needed.
+_DEFAULT_SLACK_DM_SOURCE_REGEX = r"Slack DM from [^:\n]+:"
+_CONVERSATION_SOURCE_REGEX = os.environ.get(
+    "AGENT_MEMORY_CONVERSATION_SOURCE_REGEX",
+    _DEFAULT_SLACK_DM_SOURCE_REGEX,
+)
+
+try:
+    _SLACK_DM_SOURCE_PATTERN = re.compile(_CONVERSATION_SOURCE_REGEX, re.IGNORECASE)
+except re.error:
+    _SLACK_DM_SOURCE_PATTERN = re.compile(_DEFAULT_SLACK_DM_SOURCE_REGEX, re.IGNORECASE)
+
 _CONVERSATION_SOURCE_PATTERNS = [
-    re.compile(r"Slack DM from User:", re.IGNORECASE),
+    _SLACK_DM_SOURCE_PATTERN,
     # Add your own WhatsApp/phone patterns here if needed:
     # re.compile(r"\[WhatsApp \+1234567890", re.IGNORECASE),
     re.compile(r"Conversation info.*\"conversation_label\"", re.IGNORECASE | re.DOTALL),
