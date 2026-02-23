@@ -1,0 +1,34 @@
+[Unit]
+Description=Embedding Server (llama-server with Qwen3-Embedding)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/llama-server \
+  --model /path/to/Qwen3-Embedding-4B-Q8_0.gguf \
+  --embedding --pooling last \
+  --host 0.0.0.0 --port 8090 \
+  --ctx-size 8192 --batch-size 2048 \
+  --threads 12 --parallel 2
+Restart=always
+RestartSec=5
+
+# Environment (optional overrides)
+Environment=LLAMA_LOG_LEVEL=info
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=embedding-server
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectHome=read-only
+ReadWritePaths=/tmp
+CapabilityBoundingSet=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

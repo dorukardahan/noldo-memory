@@ -1,0 +1,35 @@
+# Agent Memory — Cron Jobs
+# Install: crontab -e, then paste these lines (adjust paths).
+# All times are in the system timezone.
+#
+# Prerequisites:
+#   - Memory API running (systemctl start asuman-memory)
+#   - .env file configured (or /root/.asuman/memory.env)
+#   - API key file at $HOME/.asuman/memory-api-key (or set AGENT_MEMORY_API_KEY_FILE)
+#   - Embedding server running (llama-server on port 8090)
+
+REPO=/opt/asuman/whatsapp-memory
+
+# ─── Session Sync (every 30 min) ───────────────────────────────────────
+# Pulls new OpenClaw sessions → memory via openclaw_sync.py
+*/30 * * * * flock -n /tmp/cron_sync.lock nice -n 10 ionice -c2 -n7 $REPO/scripts/cron_sync.sh
+
+# ─── Ebbinghaus Decay (daily 2am) ──────────────────────────────────────
+# Reduces memory strength over time (spaced repetition model)
+0 2 * * * $REPO/scripts/cron_api_call.sh /v1/decay '{"agent":"all"}' >> /var/log/asuman-memory-decay.log 2>&1
+
+# ─── GC Purge (weekly Sunday 3am) ──────────────────────────────────────
+# Permanently deletes soft-deleted memories older than 30 days
+0 3 * * 0 $REPO/scripts/cron_api_call.sh /v1/gc '{"agent":"all","soft_deleted_days":30}' >> /var/log/asuman-memory-gc.log 2>&1
+
+# ─── Export to Workspace (weekly Sunday 4am) ────────────────────────────
+# Exports memory summaries to OpenClaw workspace dirs for agent context
+0 4 * * 0 $REPO/.venv/bin/python $REPO/scripts/export-to-workspace.py >> /tmp/memory-export.log 2>&1
+
+# ─── Vectorless Backfill (every 6 hours) ───────────────────────────────
+# Re-embeds memories that failed initial embedding (uses flock to prevent overlap)
+0 */6 * * * flock -n /tmp/asuman-backfill.lock bash -c 'set -a; . $REPO/.env; set +a; $REPO/.venv/bin/python $REPO/scripts/backfill_vectors.py --agent all --batch-size 2 --max-sub-batch 2 --sleep-between-batches 1.0' >> /var/log/asuman-memory-backfill.log 2>&1
+
+# ─── SQLite Backup (daily 7am) ─────────────────────────────────────────
+# Hot backup of all SQLite databases
+0 7 * * * $REPO/scripts/backup_db.sh >> /var/log/asuman-memory-backup.log 2>&1

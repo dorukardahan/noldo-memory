@@ -153,6 +153,8 @@ All configuration is environment-driven. `AGENT_MEMORY_*` variables are canonica
 | `AGENT_MEMORY_RERANKER_TWO_PASS_THREADS` | `2` | Torch threads for second pass |
 | `AGENT_MEMORY_RERANKER_TWO_PASS_MAX_DOC_CHARS` | `450` | Per-doc char limit in second pass |
 | `AGENT_MEMORY_RERANKER_TWO_PASS_PREWARM` | `false` | Prewarm background reranker at startup |
+| `AGENT_MEMORY_EMBED_WORKER_ENABLED` | `true` | Enable background embed worker (auto-embeds vectorless memories) |
+| `AGENT_MEMORY_EMBED_WORKER_INTERVAL` | `300` | Seconds between embed worker sweeps |
 
 \* `AGENT_MEMORY_DB` fallback behavior in code: if `$HOME/.asuman` exists and `$HOME/.agent-memory` does not, default becomes `$HOME/.asuman/memory.sqlite`.
 
@@ -160,53 +162,128 @@ Legacy fallbacks are still accepted when the new key is unset: `ASUMAN_MEMORY_CO
 
 ## Cron Jobs
 
+A `crontab.example` file is included with all recommended cron entries. Install with:
+
 ```bash
-# Incremental session sync (every 30 min)
-*/30 * * * * cd /path/to/asuman-memory && set -a && . ./.env && set +a && ./.venv/bin/python scripts/openclaw_sync.py
-
-# Ebbinghaus decay (daily 2am)
-0 2 * * * curl -s -X POST -H "X-API-Key: $KEY" http://127.0.0.1:8787/v1/decay -d '{"agent":"all"}'
-
-# Consolidation (weekly Sunday 3am)
-0 3 * * 0 curl -s -X POST -H "X-API-Key: $KEY" http://127.0.0.1:8787/v1/consolidate -d '{"agent":"all"}'
-
-# GC purge (weekly Sunday 4am)
-0 4 * * 0 curl -s -X POST -H "X-API-Key: $KEY" http://127.0.0.1:8787/v1/gc -d '{"agent":"all"}'
-
-# Vectorless backfill (every 6 hours)
-0 */6 * * * cd /path/to/asuman-memory && set -a && . ./.env && set +a && ./.venv/bin/python scripts/backfill_vectors.py --agent all
+# Review and edit paths first
+cat crontab.example
+# Then install (merges with existing crontab)
+(crontab -l 2>/dev/null; cat crontab.example) | crontab -
 ```
+
+**Important:** API calls from cron use `scripts/cron_api_call.sh` which reads the API key from a file — never hardcode secrets in crontab.
+
+| Job | Schedule | Purpose |
+|-----|----------|---------|
+| Session sync | `*/30 * * * *` | Pull OpenClaw sessions → memory |
+| Ebbinghaus decay | `0 2 * * *` | Reduce memory strength over time |
+| GC purge | `0 3 * * 0` | Delete soft-deleted memories > 30 days |
+| Workspace export | `0 4 * * 0` | Export summaries to agent workspace dirs |
+| Vectorless backfill | `0 */6 * * *` | Re-embed failed memories |
+| SQLite backup | `0 7 * * *` | Hot backup all databases |
 
 ## Deployment
 
-### 1) systemd service
+### 1) Embedding server
 
-Use `asuman-memory.service.example` as the base unit file, then install and enable it:
+The memory API needs an OpenAI-compatible `/v1/embeddings` endpoint. An `embedding-server.service.example` systemd unit is included.
+
+```bash
+# Download a model (e.g. Qwen3-Embedding-4B)
+mkdir -p /opt/models
+# Place your .gguf file in /opt/models/
+
+# Install systemd unit
+sudo cp embedding-server.service.example /etc/systemd/system/embedding-server.service
+# Edit paths in the unit file, then:
+sudo systemctl daemon-reload
+sudo systemctl enable --now embedding-server
+```
+
+- Set `OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1` in `.env` for local mode.
+- Keep `AGENT_MEMORY_DIMENSIONS` aligned with your model output (Qwen3-4B = 2560).
+- If you increase `--parallel`, also increase `--ctx-size` or reduce `AGENT_MEMORY_MAX_EMBED_CHARS`.
+
+Alternatively, use OpenRouter cloud: set `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`.
+
+### 2) Memory API service
+
+Use `asuman-memory.service.example` as the base unit file:
 
 ```bash
 sudo cp asuman-memory.service.example /etc/systemd/system/asuman-memory.service
+# Edit paths and EnvironmentFile in the unit
 sudo systemctl daemon-reload
 sudo systemctl enable --now asuman-memory
 sudo systemctl status asuman-memory --no-pager
 ```
 
-Keep secrets in an env file (for example `/etc/asuman-memory.env`) and reference it from the service `EnvironmentFile=` entry.
+Keep secrets in an env file (e.g. `/etc/asuman-memory.env`) referenced by the service `EnvironmentFile=` entry.
 
-### 2) Embedding server in production
+### 3) Multi-agent provisioning
 
-- Run a local embedding server (`llama-server`) with enough context for your longest chunks.
-- Set `OPENROUTER_BASE_URL` to that server (`http://127.0.0.1:8090/v1`) or to OpenRouter.
-- Keep `AGENT_MEMORY_DIMENSIONS` aligned with the selected embedding model output.
-- If you increase `--parallel`, also increase `--ctx-size` or reduce `AGENT_MEMORY_MAX_EMBED_CHARS`.
+For OpenClaw setups with multiple agents, use the provision script:
 
-### 3) Production checklist
+```bash
+# Show status of all agents
+./scripts/provision-agent-memory.sh --status
 
-- Set strong secrets: `OPENROUTER_API_KEY`, `AGENT_MEMORY_API_KEY`.
-- Pin an explicit DB path with enough disk (`AGENT_MEMORY_DB`).
-- Keep `AGENT_MEMORY_HOST=127.0.0.1` unless reverse-proxying intentionally.
-- Back up the SQLite DB regularly (`/v1/export` or filesystem snapshots).
-- Monitor health and logs: `/v1/health`, `/v1/metrics`, `journalctl -u asuman-memory`.
-- Schedule cron jobs (sync, decay, consolidate, gc, backfill).
+# Provision memory dirs + verify API access for all agents
+./scripts/provision-agent-memory.sh
+
+# Dry run (no changes)
+./scripts/provision-agent-memory.sh --dry-run
+```
+
+This scans `openclaw.json`, creates `memory/` dirs in each agent workspace, and verifies API connectivity.
+
+### 4) OpenClaw hooks
+
+Seven hooks connect OpenClaw sessions to the memory system. See the `hooks/` directory for documented examples of each:
+
+| Hook | Purpose |
+|------|---------|
+| `realtime-capture` | Capture messages to memory in real-time |
+| `session-end-capture` | Batch capture when a session ends |
+| `bootstrap-context` | Inject recalled memories into session context |
+| `after-tool-call` | Capture tool results as memories |
+| `pre-session-save` | Tag sessions with memory metadata |
+| `post-compaction-restore` | Restore memory context after compaction |
+| `subagent-complete` | Capture sub-agent results |
+
+To install hooks, copy the `.example` files and configure in your OpenClaw config:
+
+```bash
+cp hooks/realtime-capture/handler.js.example ~/.openclaw/hooks/realtime-capture/handler.js
+# Repeat for each hook you want, then set MEMORY_API_KEY in each
+```
+
+### 5) OpenClaw native memory (important)
+
+This system **replaces** OpenClaw's built-in `memorySearch`. Disable it in your `openclaw.json`:
+
+```json
+{
+  "memorySearch": {
+    "enabled": false
+  }
+}
+```
+
+All memory operations are handled by the Agent Memory API via hooks — OpenClaw's native memory system must be off to avoid conflicts.
+
+### 6) Production checklist
+
+- [ ] Set strong secrets: `OPENROUTER_API_KEY`, `AGENT_MEMORY_API_KEY`
+- [ ] Pin an explicit DB path with enough disk (`AGENT_MEMORY_DB`)
+- [ ] Keep `AGENT_MEMORY_HOST=127.0.0.1` unless reverse-proxying
+- [ ] Install embedding server (local or cloud)
+- [ ] Install cron jobs from `crontab.example`
+- [ ] Run `scripts/provision-agent-memory.sh` for multi-agent setups
+- [ ] Copy and configure hooks from `hooks/` directory
+- [ ] Disable OpenClaw native `memorySearch`
+- [ ] Back up SQLite DB regularly (`/v1/export` or `scripts/backup_db.sh`)
+- [ ] Monitor: `/v1/health`, `/v1/metrics`, `journalctl -u asuman-memory`
 
 ## Tests
 
