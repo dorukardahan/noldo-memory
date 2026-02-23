@@ -49,20 +49,74 @@ The API starts on `http://127.0.0.1:8787`.
 
 ## Embedding Server
 
-Agent Memory needs an embedding API compatible with the OpenAI `/v1/embeddings` format.
+Agent Memory needs an embedding API compatible with the OpenAI `/v1/embeddings` format. Run locally (recommended) or use a cloud API.
 
-**Local (recommended for privacy):**
+### Hardware auto-detection
+
+The included script detects your system resources and recommends the best model:
 
 ```bash
-# llama.cpp with Qwen3-Embedding
+./scripts/detect-hardware.sh          # show recommendation
+./scripts/detect-hardware.sh --json   # machine-readable output
+./scripts/detect-hardware.sh --apply  # write settings to .env
+```
+
+### Model profiles
+
+| Profile | Model | Size | Dimensions | Min RAM | Min Cores | Use Case |
+|---------|-------|------|------------|---------|-----------|----------|
+| **minimal** | EmbeddingGemma 300M | 314MB | 768 | 1-2GB | 1-2 | Raspberry Pi, $5 VPS |
+| **light** | Qwen3-Embedding-0.6B | 610MB | 1024 | 2-4GB | 2-4 | Small VPS, shared hosting |
+| **standard** | Qwen3-Embedding-4B | 4.0GB | 2560 | 4-8GB | 4-8 | Mid-range server |
+| **heavy** | Qwen3-Embedding-8B | 8.1GB | 4096 | 12GB+ | 8+ | Dedicated server |
+| **gpu** | Qwen3-Embedding-8B + GPU | 8.1GB | 4096 | 8GB+ | 4+ | NVIDIA GPU ≥6GB VRAM |
+
+**Quality comparison** (MTEB Multilingual leaderboard, higher = better):
+
+| Model | MTEB Score | Multilingual | Speed (relative) |
+|-------|-----------|--------------|-------------------|
+| EmbeddingGemma 300M | ~58 | 100+ langs | ⚡⚡⚡⚡ fastest |
+| Qwen3-Embedding-0.6B | ~63 | 100+ langs | ⚡⚡⚡ fast |
+| Qwen3-Embedding-4B | ~68 | 100+ langs | ⚡⚡ balanced |
+| Qwen3-Embedding-8B | ~70.58 (#1) | 100+ langs | ⚡ thorough |
+
+> **Tip:** Qwen3-Embedding-4B offers the best quality/resource ratio — close to the 8B quality at half the RAM. Start with 4B unless you have strong reasons to go bigger or smaller.
+
+### Local setup
+
+```bash
+# Download model (pick one based on your profile)
+# Qwen3: https://huggingface.co/Qwen/Qwen3-Embedding-{0.6B,4B,8B}-GGUF
+# Gemma:  https://huggingface.co/ggml-org/EmbeddingGemma-300M-GGUF
+
+# Run (standard profile example)
 llama-server --model Qwen3-Embedding-4B-Q8_0.gguf \
   --embedding --pooling last --host 0.0.0.0 --port 8090 \
   --ctx-size 8192 --batch-size 2048 --threads 12 --parallel 2
 ```
 
-Set `OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1` in `.env` for local mode.
+Set `OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1` and `AGENT_MEMORY_DIMENSIONS=2560` in `.env`.
 
-**Cloud:** set `OPENROUTER_BASE_URL=https://openrouter.ai/api/v1`.
+A systemd unit is included: `embedding-server.service.example`.
+
+### Cloud API
+
+If you prefer not to run a local server, use OpenRouter or any OpenAI-compatible API:
+
+```bash
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=your-key
+AGENT_MEMORY_MODEL=openai/text-embedding-3-large
+AGENT_MEMORY_DIMENSIONS=3072
+```
+
+### Dimension compatibility
+
+⚠️ **Changing embedding dimensions requires re-embedding all memories.** If you switch profiles, run:
+
+```bash
+.venv/bin/python scripts/reindex_embeddings.py
+```
 
 > **Important:** With `--parallel N`, each slot gets `ctx-size / N` tokens. Set `ctx-size` high enough for your longest texts, or use `AGENT_MEMORY_MAX_EMBED_CHARS` to truncate.
 
