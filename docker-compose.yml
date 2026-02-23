@@ -1,0 +1,71 @@
+# Agent Memory — Docker Compose
+# Quick start: docker compose up -d
+# Dashboard:   http://localhost:8787/v1/health
+#
+# Volumes:
+#   memory-data  — SQLite DBs, API key, backups (persistent)
+#   models       — Embedding model GGUF files (persistent)
+#
+# First run:
+#   1. cp .env.example .env && edit .env
+#   2. Download model: mkdir -p ./models && wget -P ./models <model-url>
+#   3. docker compose up -d
+#   4. Test: curl http://localhost:8787/v1/health
+
+services:
+  # ── Memory API ──────────────────────────────────────────────
+  memory-api:
+    build: .
+    container_name: agent-memory-api
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - memory-data:/data
+    env_file:
+      - .env
+    environment:
+      - AGENT_MEMORY_DB=/data/memory.sqlite
+      - AGENT_MEMORY_DATA_DIR=/data
+      - AGENT_MEMORY_HOST=0.0.0.0
+      - OPENROUTER_BASE_URL=http://embedding:8090/v1
+    depends_on:
+      embedding:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8787/v1/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  # ── Embedding Server (llama-server) ─────────────────────────
+  # Uses pre-built llama.cpp image. Mount your GGUF model into /models.
+  embedding:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: agent-memory-embedding
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./models:/models:ro
+    command: >
+      --model /models/${EMBEDDING_MODEL_FILE:-Qwen3-Embedding-4B-Q8_0.gguf}
+      --embedding
+      --pooling last
+      --host 0.0.0.0
+      --port 8090
+      --ctx-size 8192
+      --batch-size 2048
+      --threads ${EMBEDDING_THREADS:-4}
+      --parallel ${EMBEDDING_PARALLEL:-2}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8090/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+volumes:
+  memory-data:
+    driver: local

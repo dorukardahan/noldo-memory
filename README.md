@@ -489,6 +489,40 @@ pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests/ -x -q
 ```
 
+## Docker
+
+Quick start with Docker Compose (runs both the Memory API and embedding server):
+
+```bash
+# 1. Clone and configure
+git clone https://github.com/dorukardahan/asuman-memory.git && cd asuman-memory
+cp .env.example .env
+# Edit .env: set OPENROUTER_API_KEY, AGENT_MEMORY_API_KEY, model settings
+
+# 2. Download embedding model
+mkdir -p models
+wget -P models https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF/resolve/main/Qwen3-Embedding-4B-Q8_0.gguf
+
+# 3. Start services
+docker compose up -d
+
+# 4. Verify
+curl http://localhost:8787/v1/health
+```
+
+**Volumes:**
+- `memory-data` — SQLite databases and backups (persistent across restarts)
+- `./models` — Embedding model GGUF files (bind mount)
+
+**Customize threads/parallelism** via `.env`:
+```bash
+EMBEDDING_THREADS=8        # CPU threads for embedding
+EMBEDDING_PARALLEL=2       # Concurrent requests
+EMBEDDING_MODEL_FILE=Qwen3-Embedding-4B-Q8_0.gguf  # Model filename
+```
+
+> **Note:** For production use with OpenClaw hooks and cron jobs, the native systemd setup (see Full Setup Guide above) is recommended. Docker is ideal for testing, development, and standalone deployments.
+
 ## License
 
 MIT

@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.sqlite
+logs/
+models/
+.env
+*.bak
+tests/
+hooks/
+*.md
+!agent_memory/**
+!scripts/**
+!requirements.txt
