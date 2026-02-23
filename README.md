@@ -397,23 +397,29 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Detect hardware and configure
+# 2. Configure environment
+cp .env.example .env
 ./scripts/detect-hardware.sh            # see recommended profile
-./scripts/detect-hardware.sh --apply    # write to .env
-cp .env.example .env                    # if not exists
+./scripts/detect-hardware.sh --apply    # updates model + dimensions in .env
 # Edit .env: set AGENT_MEMORY_API_KEY (generate a strong random key)
-# OPENROUTER_API_KEY is only needed for cloud embeddings
+# For local embedding: set OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1
+# For cloud embedding: set OPENROUTER_API_KEY=your-key (keep default URL)
 
 # 3. Download embedding model (pick based on detect-hardware output)
-# For standard profile (Qwen3-Embedding-4B):
-mkdir -p /opt/models
-# Download from: https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF
-# Place .gguf file in /opt/models/
+mkdir -p /opt/models && cd /opt/models
+# Standard profile (Qwen3-Embedding-4B, 4.0GB):
+wget https://huggingface.co/Qwen/Qwen3-Embedding-4B-GGUF/resolve/main/Qwen3-Embedding-4B-Q8_0.gguf
+# Light profile (Qwen3-Embedding-0.6B, 610MB):
+# wget https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
+# Heavy profile (Qwen3-Embedding-8B, 8.1GB):
+# wget https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF/resolve/main/Qwen3-Embedding-8B-Q8_0.gguf
+cd -
 
-# 4. Install systemd services
+# 4. Create log directory and install systemd services
+sudo mkdir -p /var/log
+# Edit BOTH service files: fix paths marked with ">>> CHANGE <<<" comments
 sudo cp embedding-server.service.example /etc/systemd/system/embedding-server.service
 sudo cp asuman-memory.service.example /etc/systemd/system/asuman-memory.service
-# Edit both: fix paths to match your install location
 sudo systemctl daemon-reload
 sudo systemctl enable --now embedding-server
 sudo systemctl enable --now asuman-memory
@@ -436,9 +442,21 @@ cat crontab.example                     # review paths first
 ./scripts/provision-agent-memory.sh
 ```
 
+## Migrations
+
+Database schema migrations are in the `migrations/` directory. They are applied automatically when the API starts — no manual migration step is needed. If you need to apply migrations manually:
+
+```bash
+sqlite3 /path/to/memory.sqlite < migrations/001_temporal_facts_extensions.sql
+```
+
 ## Tests
 
 ```bash
+# Install dev dependencies first
+pip install -r requirements-dev.txt
+
+# Run tests
 .venv/bin/python -m pytest tests/ -x -q
 ```
 

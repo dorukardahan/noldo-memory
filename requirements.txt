@@ -6,9 +6,6 @@ zeyrek>=0.1.3
 fastapi>=0.109.0
 uvicorn>=0.27.0
 pydantic>=2.0.0
-pytest>=7.0.0
-pytest-asyncio>=0.23.0
-httpx>=0.27.0
 rapidfuzz>=3.0.0
 # Reranker (optional — install for cross-encoder reranking)
 sentence-transformers>=3.0.0

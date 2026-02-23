@@ -124,9 +124,12 @@ if [ "${1:-}" = "--apply" ]; then
   # Update embedding-related vars
   sed -i "s|^AGENT_MEMORY_MODEL=.*|AGENT_MEMORY_MODEL=$MODEL_ID|" "$ENV_FILE"
   sed -i "s|^AGENT_MEMORY_DIMENSIONS=.*|AGENT_MEMORY_DIMENSIONS=$DIMENSIONS|" "$ENV_FILE"
+  # Set local embedding URL (user can override for cloud)
+  sed -i "s|^OPENROUTER_BASE_URL=.*|OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1|" "$ENV_FILE"
   echo "✓ Updated $ENV_FILE with profile=$PROFILE (model=$MODEL_ID, dims=$DIMENSIONS)"
+  echo "✓ Set OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1 (local embedding)"
   echo ""
-  echo "Also update your llama-server command:"
+  echo "Next: start your embedding server:"
   echo "  llama-server --model $MODEL_NAME \\"
   echo "    --embedding --pooling last --host 0.0.0.0 --port 8090 \\"
   echo "    --ctx-size 8192 --batch-size 2048 --threads $THREADS --parallel $PARALLEL"
