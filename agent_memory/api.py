@@ -361,6 +361,7 @@ class RecallRequest(BaseModel):
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     max_tokens: Optional[int] = Field(default=None, ge=100, le=100000,
                                        description="Trim results to fit within this token budget")
+    namespace: Optional[str] = Field(default=None, description="Filter by namespace (None = all)")
     agent: Optional[str] = None
 
 
@@ -373,6 +374,7 @@ class StoreRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
     category: str = "other"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    namespace: str = Field(default="default", description="Namespace for topic-based grouping")
     agent: Optional[str] = None
 
 
@@ -421,6 +423,7 @@ async def recall(req: RecallRequest) -> Dict[str, Any]:
         limit=req.limit,
         min_score=req.min_score,
         time_range=time_range,
+        namespace=req.namespace,
     )
 
     agent_key = StoragePool.normalize_key(req.agent)
@@ -630,6 +633,7 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         category=category,
         importance=importance,
         source_session=None,
+        namespace=req.namespace,
     )
 
     # Invalidate search cache

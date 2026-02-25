@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS memories (
     -- Soft-delete / archive support
     deleted_at REAL,
     -- Critical memory pinning: pinned memories survive decay/gc/consolidation
-    pinned INTEGER DEFAULT 0
+    pinned INTEGER DEFAULT 0,
+    -- Namespace for topic-based memory grouping
+    namespace TEXT DEFAULT 'default'
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
@@ -233,6 +235,7 @@ class MemoryStorage:
         _add_col("memories", "deleted_at REAL", "deleted_at")
         # Critical memory pinning: pinned memories survive decay/gc/consolidation
         _add_col("memories", "pinned INTEGER DEFAULT 0", "pinned")
+        _add_col("memories", "namespace TEXT DEFAULT 'default'", "namespace")
         _add_col("memories", "memory_type TEXT DEFAULT 'other'", "memory_type")
 
         # Backfill last_accessed_at for existing rows (keep idempotent)
@@ -277,6 +280,7 @@ class MemoryStorage:
         category: str = "other",
         importance: float = 0.5,
         source_session: Optional[str] = None,
+        namespace: str = "default",
         memory_id: Optional[str] = None,
         memory_type: str = "other",
     ) -> str:
@@ -295,10 +299,10 @@ class MemoryStorage:
 
         conn.execute(
             """INSERT OR REPLACE INTO memories
-               (id, text, category, memory_type, importance, source_session,
+               (id, text, category, memory_type, importance, source_session, namespace,
                 created_at, updated_at, vector_rowid,
                 strength, last_accessed_at, deleted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
             (
                 mid,
                 text,
@@ -306,6 +310,7 @@ class MemoryStorage:
                 memory_type,
                 importance,
                 source_session,
+                namespace,
                 now,
                 now,
                 vector_rowid,
@@ -616,6 +621,7 @@ class MemoryStorage:
         source_session: Optional[str],
         similarity_threshold: float = 0.85,
         memory_type: str = "other",
+        namespace: str = "default",
     ) -> Dict[str, Any]:
         """Store a memory, merging into nearest neighbor when highly similar.
 
@@ -634,11 +640,12 @@ class MemoryStorage:
                 importance=importance,
                 source_session=source_session,
                 memory_type=memory_type,
+                namespace=namespace,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
         try:
-            nn = self.search_vectors(vector, limit=1, min_score=0.0)
+            nn = self.search_vectors(vector, limit=1, min_score=0.0, namespace=namespace)
         except Exception as exc:
             logger.warning("merge_or_store: vector search failed; inserting: %s", exc)
             mid = self.store_memory(
@@ -648,6 +655,7 @@ class MemoryStorage:
                 importance=importance,
                 source_session=source_session,
                 memory_type=memory_type,
+                namespace=namespace,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
@@ -659,6 +667,7 @@ class MemoryStorage:
                 importance=importance,
                 source_session=source_session,
                 memory_type=memory_type,
+                namespace=namespace,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
@@ -730,6 +739,7 @@ class MemoryStorage:
             importance=importance,
             source_session=source_session,
             memory_type=memory_type,
+            namespace=namespace,
         )
         return {"action": "inserted", "id": mid, "similarity": similarity}
 
@@ -759,6 +769,7 @@ class MemoryStorage:
                 memory_type = item.get("memory_type", "other")
                 importance = item.get("importance", 0.5)
                 source = item.get("source_session")
+                namespace = item.get("namespace", "default")
 
                 vector_rowid: Optional[int] = None
                 if vector is not None:
@@ -770,10 +781,10 @@ class MemoryStorage:
 
                 conn.execute(
                     """INSERT OR REPLACE INTO memories
-                       (id, text, category, memory_type, importance, source_session,
+                       (id, text, category, memory_type, importance, source_session, namespace,
                         created_at, updated_at, vector_rowid,
                         strength, last_accessed_at, deleted_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
                     (
                         mid,
                         text,
@@ -781,6 +792,7 @@ class MemoryStorage:
                         memory_type,
                         importance,
                         source,
+                        namespace,
                         now,
                         now,
                         vector_rowid,
@@ -810,6 +822,7 @@ class MemoryStorage:
         query_vector: List[float],
         limit: int = 10,
         min_score: float = 0.0,
+        namespace: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Nearest-neighbour search via sqlite-vec (cosine distance).
 
@@ -838,10 +851,16 @@ class MemoryStorage:
             similarity = 1.0 - (r["distance"] / 2.0)
             if similarity < min_score:
                 continue
-            mem = conn.execute(
-                "SELECT * FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL AND importance >= 0.3",
-                (r["vec_rowid"],),
-            ).fetchone()
+            if namespace is not None:
+                mem = conn.execute(
+                    "SELECT * FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL AND importance >= 0.3 AND namespace = ?",
+                    (r["vec_rowid"], namespace),
+                ).fetchone()
+            else:
+                mem = conn.execute(
+                    "SELECT * FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL AND importance >= 0.3",
+                    (r["vec_rowid"],),
+                ).fetchone()
             if mem:
                 d = dict(mem)
                 d["score"] = round(similarity, 4)
@@ -854,7 +873,7 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     def search_text(
-        self, query: str, limit: int = 10
+        self, query: str, limit: int = 10, namespace: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """FTS5 search. Returns memories sorted by BM25 relevance."""
         conn = self._get_conn()
@@ -879,9 +898,16 @@ class MemoryStorage:
 
         results: List[Dict[str, Any]] = []
         for r in rows:
-            mem = conn.execute(
-                "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND importance >= 0.3", (r["id"],)
-            ).fetchone()
+            if namespace is not None:
+                mem = conn.execute(
+                    "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND importance >= 0.3 AND namespace = ?",
+                    (r["id"], namespace),
+                ).fetchone()
+            else:
+                mem = conn.execute(
+                    "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND importance >= 0.3",
+                    (r["id"],),
+                ).fetchone()
             if mem:
                 d = dict(mem)
                 d["bm25_rank"] = r["rank"]

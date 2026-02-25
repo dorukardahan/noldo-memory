@@ -224,6 +224,7 @@ class HybridSearch:
         self,
         *,
         q_norm: str,
+        cache_query_norm: Optional[str] = None,
         limit: int,
         min_score: float,
         agent: str,
@@ -241,7 +242,8 @@ class HybridSearch:
         if len(seed_results) < 2:
             return
 
-        cache_key = f"{agent}|{q_norm}|{limit}|{min_score:.4f}"
+        cache_query_norm = cache_query_norm or q_norm
+        cache_key = f"{agent}|{cache_query_norm}|{limit}|{min_score:.4f}"
         if cache_key in _BG_TWO_PASS_PENDING:
             return
 
@@ -253,6 +255,7 @@ class HybridSearch:
                 self._run_background_quality_rerank(
                     cache_key=cache_key,
                     q_norm=q_norm,
+                    cache_query_norm=cache_query_norm,
                     limit=limit,
                     min_score=min_score,
                     agent=agent,
@@ -268,6 +271,7 @@ class HybridSearch:
         *,
         cache_key: str,
         q_norm: str,
+        cache_query_norm: str,
         limit: int,
         min_score: float,
         agent: str,
@@ -327,7 +331,7 @@ class HybridSearch:
 
                 results_json = json.dumps([r.to_dict() for r in cands])
                 self.storage.cache_search_result(
-                    query_norm=q_norm,
+                    query_norm=cache_query_norm,
                     limit_val=limit,
                     min_score=min_score,
                     agent=agent,
@@ -355,6 +359,7 @@ class HybridSearch:
         use_recency: bool = True,
         agent: str = "main",
         time_range: Optional[Tuple[float, float]] = None,
+        namespace: Optional[str] = None,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -393,7 +398,8 @@ class HybridSearch:
             try:
                 query_vec = await self.embedder.embed(q_norm)
                 sem_results = self.storage.search_vectors(
-                    query_vec, limit=candidate_limit, min_score=0.0
+                    query_vec, limit=candidate_limit, min_score=0.0,
+                    namespace=namespace,
                 )
                 for r in sem_results:
                     mid = r["id"]
@@ -408,7 +414,7 @@ class HybridSearch:
         # Layer 2 — Keyword (FTS5 BM25)
         if use_keyword:
             try:
-                kw_results = self.storage.search_text(q_norm, limit=candidate_limit)
+                kw_results = self.storage.search_text(q_norm, limit=candidate_limit, namespace=namespace)
                 for r in kw_results:
                     mid = r["id"]
                     keyword_ids.append(mid)
