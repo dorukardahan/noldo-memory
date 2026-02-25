@@ -63,10 +63,21 @@ ENGLISH_TRIGGERS: List[str] = [
 
 # Patterns for messages that should NOT trigger memory search
 ANTI_TRIGGER_PATTERNS: List[str] = [
-    r"^(?:ok|tamam|evet|hayır|hayir|anladım|anladim|👍|😂|😊|🙏)$",
-    r"^(?:merhaba|selam|hey|hi|hello|nasılsın|nasilsin|naber)[\s?!]*$",
-    r"^(?:teşekkür|tesekkur|sağol|sagol|thanks|thx)[\s!]*$",
-    r"^(?:yap|oluştur|olustur|gönder|gonder|aç|ac|kapat|başla|basla|bitir)[\s!]*$",
+    # Single-word acknowledgements / reactions
+    r"^(?:ok|tamam|evet|hayır|hayir|anladım|anladim|tamamdır|tamamdir|oldu|olur|güzel|harika|süper)[\s!.]*$",
+    r"^(?:👍|😂|😊|🙏|👀|❤️|🔥|✅|💯|🤝|🎉)[\s]*$",
+    # Greetings (no memory context needed)
+    r"^(?:merhaba|selam|hey|hi|hello|nasılsın|nasilsin|naber|iyi\s*geceler|iyi\s*günler)[\s?!]*$",
+    # Thanks (no memory context needed)
+    r"^(?:teşekkür|tesekkur|sağol|sagol|eyvallah|thanks|thx|ty|thank\s*you)[\s!]*$",
+    # Imperative commands (agent should just do it, no recall needed)
+    r"^(?:yap|oluştur|olustur|gönder|gonder|aç|ac|kapat|başla|basla|bitir|sil|düzelt|duzelt|çalıştır|calistir)[\s!]*$",
+    # Short confirmations / follow-ups
+    r"^(?:onu|bunu|şunu|onu\s*yap|devam\s*et|git|gel|dur|bekle|sus)[\s!]*$",
+    # Numeric responses
+    r"^\d{1,4}[\s.!]*$",
+    # Single letter / word too short for meaningful recall
+    r"^[a-zA-ZçğıöşüÇĞİÖŞÜ]{1,2}[\s?!]*$",
 ]
 
 # Past-tense heuristic (Turkish + English)

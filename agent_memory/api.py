@@ -7,7 +7,8 @@ Endpoints:
     DELETE /v1/forget        -- Delete memory
     GET    /v1/search        -- Interactive search
     GET    /v1/stats         -- Statistics
-    GET    /v1/health        -- Health check
+    GET    /v1/health        -- Health check (fast)
+    GET    /v1/health/deep   -- Deep health check (DB/embedding diagnostics)
     GET    /v1/agents        -- List known agent memory databases
     POST   /v1/decay         -- Run Ebbinghaus strength decay
     POST   /v1/consolidate   -- Deduplicate + archive stale memories
@@ -25,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import os
 import logging
+import secrets
 import sqlite3
 import time
 from contextlib import asynccontextmanager
@@ -303,9 +305,13 @@ app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
 
 # API key authentication
 _api_key = os.environ.get("AGENT_MEMORY_API_KEY", "")
+_extra_keys_path = os.path.join(
+    os.environ.get("AGENT_MEMORY_DATA_DIR", os.path.expanduser("~/.asuman")),
+    "memory-api-keys.json",
+)
 if _api_key:
-    app.add_middleware(APIKeyMiddleware, api_key=_api_key)
-    logger.info("API key authentication enabled")
+    app.add_middleware(APIKeyMiddleware, api_key=_api_key, extra_keys_path=_extra_keys_path)
+    logger.info("API key authentication enabled (extra keys: %s)", _extra_keys_path)
 else:
     logger.warning("No AGENT_MEMORY_API_KEY set -- API is UNAUTHENTICATED")
 
@@ -353,6 +359,9 @@ class RecallRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=50)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    max_tokens: Optional[int] = Field(default=None, ge=100, le=100000,
+                                       description="Trim results to fit within this token budget")
+    namespace: Optional[str] = Field(default=None, description="Filter by namespace (None = all)")
     agent: Optional[str] = None
 
 
@@ -365,6 +374,7 @@ class StoreRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
     category: str = "other"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
+    namespace: str = Field(default="default", description="Namespace for topic-based grouping")
     agent: Optional[str] = None
 
 
@@ -413,16 +423,33 @@ async def recall(req: RecallRequest) -> Dict[str, Any]:
         limit=req.limit,
         min_score=req.min_score,
         time_range=time_range,
+        namespace=req.namespace,
     )
 
     agent_key = StoragePool.normalize_key(req.agent)
+    result_dicts = [r.to_dict() for r in results]
+
+    # Apply token budget trimming if requested
+    trimmed = False
+    if req.max_tokens is not None and result_dicts:
+        from .token_utils import trim_results_to_budget
+        original_count = len(result_dicts)
+        result_dicts = trim_results_to_budget(result_dicts, req.max_tokens)
+        trimmed = len(result_dicts) < original_count
+
     response = {
         "query": req.query,
         "agent": agent_key,
-        "count": len(results),
+        "count": len(result_dicts),
         "triggered": should_trigger(req.query),
-        "results": [r.to_dict() for r in results],
+        "search_mode": search.last_search_mode,
+        "results": result_dicts,
     }
+    if search.last_search_degraded:
+        response["degraded"] = True
+    if trimmed:
+        response["trimmed"] = True
+        response["max_tokens"] = req.max_tokens
     if time_range is not None:
         response["time_range"] = {
             "start": time_range[0],
@@ -537,6 +564,8 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
     # Store (write-time semantic merge, per message)
     stored_n = 0
     merged_n = 0
+    from .ingest import classify_memory_type
+
     for it in items:
         res = storage.merge_or_store(
             text=it["text"],
@@ -544,6 +573,7 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
             category=it.get("category", "other"),
             importance=float(it.get("importance", 0.5)),
             source_session=it.get("source_session"),
+            memory_type=classify_memory_type(it["text"]),
         )
         if res.get("action") == "merged":
             merged_n += 1
@@ -600,12 +630,16 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         importance = 1.0
         logger.info("Rule detected in /v1/store: %s", req.text[:60])
 
+    from .ingest import classify_memory_type
+
     res = storage.merge_or_store(
         text=req.text,
         vector=vector,
         category=category,
         importance=importance,
         source_session=None,
+        namespace=req.namespace,
+        memory_type=classify_memory_type(req.text),
     )
 
     # Invalidate search cache
@@ -660,6 +694,26 @@ async def store_rule(req: StoreRequest) -> Dict[str, Any]:
         "merged": res["action"] == "merged",
         "agent": agent_key,
     }
+
+
+@app.post("/v1/pin")
+async def pin_memory(req: ForgetRequest) -> Dict[str, Any]:
+    """Pin a memory: protects it from decay, gc, and consolidation."""
+    if not req.id:
+        raise HTTPException(400, "Provide 'id'")
+    storage = _get_storage(req.agent)
+    pinned = storage.pin_memory(req.id)
+    return {"pinned": pinned, "id": req.id}
+
+
+@app.post("/v1/unpin")
+async def unpin_memory(req: ForgetRequest) -> Dict[str, Any]:
+    """Unpin a memory: allows decay/gc/consolidation again."""
+    if not req.id:
+        raise HTTPException(400, "Provide 'id'")
+    storage = _get_storage(req.agent)
+    unpinned = storage.unpin_memory(req.id)
+    return {"unpinned": unpinned, "id": req.id}
 
 
 @app.delete("/v1/forget")
@@ -1124,6 +1178,94 @@ async def health() -> Dict[str, Any]:
     }
 
 
+@app.get("/v1/health/deep")
+async def health_deep() -> Dict[str, Any]:
+    """Deep health check with diagnostics for operators.
+
+    Includes SQLite quick integrity probe, embedding probe latency,
+    vectorless memory count, DB file size and service uptime.
+    """
+    checks: Dict[str, Dict[str, Any]] = {
+        "db_integrity": {"ok": False, "result": None, "latency_ms": None},
+        "embedding": {"ok": False, "latency_ms": None},
+        "vectorless": {"ok": False, "count": None},
+        "disk_usage": {"ok": False, "db_path": None, "db_size_bytes": None},
+    }
+
+    storage_available = False
+
+    if _storage_pool:
+        try:
+            storage = _storage_pool.get("main")
+            conn = storage._get_conn()
+            storage_available = True
+
+            quick_check_start = time.perf_counter()
+            quick_check_row = conn.execute("PRAGMA quick_check").fetchone()
+            quick_check_latency = round((time.perf_counter() - quick_check_start) * 1000, 2)
+            quick_check_result = str(quick_check_row[0]) if quick_check_row else "unknown"
+            checks["db_integrity"] = {
+                "ok": quick_check_result.lower() == "ok",
+                "result": quick_check_result,
+                "latency_ms": quick_check_latency,
+            }
+
+            vectorless_row = conn.execute(
+                "SELECT COUNT(*) AS c FROM memories WHERE vector_rowid IS NULL"
+            ).fetchone()
+            checks["vectorless"] = {
+                "ok": True,
+                "count": int(vectorless_row["c"]) if vectorless_row else 0,
+            }
+
+            db_path = Path(storage.db_path)
+            checks["disk_usage"] = {
+                "ok": db_path.exists(),
+                "db_path": str(db_path),
+                "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
+            }
+        except Exception as exc:
+            checks["db_integrity"]["error"] = str(exc)
+    else:
+        checks["db_integrity"]["error"] = "storage pool not initialised"
+
+    if _embedder:
+        embed_start = time.perf_counter()
+        try:
+            await asyncio.wait_for(_embedder.embed("health_probe_deep"), timeout=5.0)
+            checks["embedding"] = {
+                "ok": True,
+                "latency_ms": round((time.perf_counter() - embed_start) * 1000, 2),
+            }
+        except Exception as exc:
+            checks["embedding"] = {
+                "ok": False,
+                "latency_ms": round((time.perf_counter() - embed_start) * 1000, 2),
+                "error": str(exc),
+            }
+    else:
+        checks["embedding"]["error"] = "embedder not configured"
+
+    core_ok = (
+        checks["db_integrity"].get("ok", False)
+        and checks["vectorless"].get("ok", False)
+        and checks["disk_usage"].get("ok", False)
+    )
+    embedding_ok = checks["embedding"].get("ok", False)
+
+    if core_ok and embedding_ok:
+        status = "ok"
+    elif core_ok or storage_available:
+        status = "degraded"
+    else:
+        status = "down"
+
+    return {
+        "status": status,
+        "uptime_seconds": round(time.time() - _start_time, 1),
+        "checks": checks,
+    }
+
 
 @app.get("/v1/metrics")
 async def metrics(
@@ -1280,6 +1422,110 @@ async def import_memories(req: ImportRequest) -> Dict[str, Any]:
         imported, skipped, req.agent or "main",
     )
     return {"imported": imported, "skipped": skipped, "total": len(req.memories)}
+
+
+# ---------------------------------------------------------------------------
+# Amnesia Detection
+# ---------------------------------------------------------------------------
+
+class AmnesiaCheckRequest(BaseModel):
+    topics: List[str] = Field(..., min_length=1, max_length=20,
+                               description="Topics to check coverage for")
+    agent: Optional[str] = None
+    min_match_score: float = Field(default=0.01, ge=0.0, le=1.0)
+
+
+@app.post("/v1/amnesia-check")
+async def amnesia_check(req: AmnesiaCheckRequest) -> Dict[str, Any]:
+    """Check how well the agent remembers a list of topics.
+
+    Returns a coverage score (0-1) and per-topic match details.
+    Useful for post-compaction validation and memory health monitoring.
+    """
+    search = _get_search(req.agent)
+    agent_key = StoragePool.normalize_key(req.agent)
+
+    topic_results = []
+    hits = 0
+
+    for topic in req.topics:
+        results = await search.search(
+            query=topic, limit=3, min_score=req.min_match_score, agent=agent_key,
+        )
+        matched = len(results) > 0
+        if matched:
+            hits += 1
+        topic_results.append({
+            "topic": topic,
+            "matched": matched,
+            "match_count": len(results),
+            "top_score": round(results[0].score, 4) if results else 0.0,
+            "top_text": results[0].text[:200] if results else None,
+        })
+
+    coverage = hits / len(req.topics) if req.topics else 0.0
+
+    return {
+        "agent": agent_key,
+        "coverage": round(coverage, 2),
+        "total_topics": len(req.topics),
+        "matched_topics": hits,
+        "topics": topic_results,
+        "status": "healthy" if coverage >= 0.7 else "warning" if coverage >= 0.4 else "amnesia",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin: Key Rotation
+# ---------------------------------------------------------------------------
+
+@app.post("/v1/admin/rotate-key")
+async def rotate_key(expire_old_hours: int = 24) -> Dict[str, Any]:
+    """Generate a new API key and optionally expire the current extra keys.
+
+    - Generates a new 32-byte URL-safe key
+    - Appends to memory-api-keys.json
+    - Optionally sets expires_at on existing extra keys
+    - Returns the new key (only time it's visible!)
+    """
+    import json as _json
+
+    new_key = secrets.token_urlsafe(32)
+    keys_path = _extra_keys_path
+
+    existing_keys: list = []
+    try:
+        with open(keys_path) as f:
+            data = _json.load(f)
+            existing_keys = data.get("keys", [])
+    except (FileNotFoundError, _json.JSONDecodeError):
+        pass
+
+    # Expire old extra keys if requested
+    if expire_old_hours > 0:
+        expire_at = time.time() + (expire_old_hours * 3600)
+        for entry in existing_keys:
+            if entry.get("expires_at") is None:
+                entry["expires_at"] = expire_at
+
+    # Add new key
+    existing_keys.append({
+        "key": new_key,
+        "label": f"rotated-{int(time.time())}",
+        "created_at": time.time(),
+        "expires_at": None,
+    })
+
+    os.makedirs(os.path.dirname(keys_path), exist_ok=True)
+    with open(keys_path, "w") as f:
+        _json.dump({"keys": existing_keys}, f, indent=2)
+
+    logger.info("API key rotated. Total keys: %d", len(existing_keys))
+    return {
+        "new_key": new_key,
+        "total_keys": len(existing_keys),
+        "old_keys_expire_in_hours": expire_old_hours if expire_old_hours > 0 else None,
+    }
 
 
 # ---------------------------------------------------------------------------

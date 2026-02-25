@@ -26,21 +26,59 @@ audit_logger = logging.getLogger("audit")
 # API Key Authentication
 # ---------------------------------------------------------------------------
 
+def _load_extra_keys(keys_path: str) -> list[dict]:
+    """Load additional API keys from a JSON file (if it exists).
+
+    Format: {"keys": [{"key": "...", "expires_at": null|unix_ts, "label": "..."}]}
+    """
+    import json
+    from pathlib import Path
+
+    p = Path(keys_path)
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text())
+        return data.get("keys", [])
+    except Exception as exc:
+        logger.warning("Failed to load extra keys from %s: %s", keys_path, exc)
+        return []
+
+
 class APIKeyMiddleware(BaseHTTPMiddleware):
-    """Require X-API-Key header on all non-exempt paths."""
+    """Require X-API-Key header on all non-exempt paths.
+
+    Supports multiple keys: primary (from file) + extras (from JSON).
+    """
 
     EXEMPT_PATHS: Set[str] = {"/v1/health", "/docs", "/openapi.json", "/redoc"}
 
-    def __init__(self, app, api_key: str):
+    def __init__(self, app, api_key: str, extra_keys_path: str | None = None):
         super().__init__(app)
         self.api_key = api_key
+        self.extra_keys_path = extra_keys_path
+
+    def _is_valid_key(self, key: str) -> bool:
+        """Check if key matches primary or any non-expired extra key."""
+        if secrets.compare_digest(key, self.api_key):
+            return True
+        if self.extra_keys_path:
+            now = time.time()
+            for entry in _load_extra_keys(self.extra_keys_path):
+                ekey = entry.get("key", "")
+                expires = entry.get("expires_at")
+                if expires is not None and expires < now:
+                    continue  # expired
+                if ekey and secrets.compare_digest(key, ekey):
+                    return True
+        return False
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
         key = request.headers.get("X-API-Key", "")
-        if not key or not secrets.compare_digest(key, self.api_key):
+        if not key or not self._is_valid_key(key):
             audit_logger.warning(
                 "AUTH_FAIL ip=%s path=%s",
                 request.client.host if request.client else "unknown",

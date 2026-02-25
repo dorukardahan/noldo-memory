@@ -86,7 +86,7 @@ class SearchWeights:
     keyword: float = 0.25
     recency: float = 0.10
     strength: float = 0.07
-    importance: float = 0.25
+    importance: float = 0.08
 
 
 @dataclass
@@ -143,6 +143,41 @@ def _strength_score(last_accessed_at: float, strength: float) -> float:
     return math.exp(-days / s)
 
 
+def _mmr_diversify(
+    results: List["SearchResult"],
+    limit: int,
+    lambda_param: float = 0.7,
+) -> List["SearchResult"]:
+    """Maximal Marginal Relevance: greedily select results balancing
+    relevance (score) and diversity (low text overlap with already selected).
+
+    lambda_param: 1.0 = pure relevance, 0.0 = pure diversity.
+    """
+    if len(results) <= 1:
+        return results
+
+    selected: List["SearchResult"] = [results[0]]
+    remaining = list(results[1:])
+
+    while remaining and len(selected) < limit:
+        best_idx = 0
+        best_mmr = -1.0
+        for i, cand in enumerate(remaining):
+            relevance = cand.score
+            # Max similarity to any already-selected result (text overlap)
+            max_sim = max(
+                _lexical_overlap(cand.text, sel.text)
+                for sel in selected
+            )
+            mmr = lambda_param * relevance - (1.0 - lambda_param) * max_sim
+            if mmr > best_mmr:
+                best_mmr = mmr
+                best_idx = i
+        selected.append(remaining.pop(best_idx))
+
+    return selected
+
+
 def _rrf_fuse(
     ranked_lists: List[List[str]],
     weights: List[float],
@@ -181,11 +216,15 @@ class HybridSearch:
         self.bg_reranker = bg_reranker
         self.bg_two_pass_enabled = bool(bg_two_pass_enabled and bg_reranker is not None)
         self.bg_rerank_weight = max(0.0, min(1.0, float(bg_rerank_weight)))
+        # Graceful degradation: track if last search used all layers
+        self.last_search_degraded: bool = False
+        self.last_search_mode: str = "full"  # full | keyword_only | cache_hit
 
     def _schedule_background_quality_rerank(
         self,
         *,
         q_norm: str,
+        cache_query_norm: Optional[str] = None,
         limit: int,
         min_score: float,
         agent: str,
@@ -203,7 +242,8 @@ class HybridSearch:
         if len(seed_results) < 2:
             return
 
-        cache_key = f"{agent}|{q_norm}|{limit}|{min_score:.4f}"
+        cache_query_norm = cache_query_norm or q_norm
+        cache_key = f"{agent}|{cache_query_norm}|{limit}|{min_score:.4f}"
         if cache_key in _BG_TWO_PASS_PENDING:
             return
 
@@ -215,6 +255,7 @@ class HybridSearch:
                 self._run_background_quality_rerank(
                     cache_key=cache_key,
                     q_norm=q_norm,
+                    cache_query_norm=cache_query_norm,
                     limit=limit,
                     min_score=min_score,
                     agent=agent,
@@ -230,6 +271,7 @@ class HybridSearch:
         *,
         cache_key: str,
         q_norm: str,
+        cache_query_norm: str,
         limit: int,
         min_score: float,
         agent: str,
@@ -289,7 +331,7 @@ class HybridSearch:
 
                 results_json = json.dumps([r.to_dict() for r in cands])
                 self.storage.cache_search_result(
-                    query_norm=q_norm,
+                    query_norm=cache_query_norm,
                     limit_val=limit,
                     min_score=min_score,
                     agent=agent,
@@ -317,6 +359,7 @@ class HybridSearch:
         use_recency: bool = True,
         agent: str = "main",
         time_range: Optional[Tuple[float, float]] = None,
+        namespace: Optional[str] = None,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -324,6 +367,10 @@ class HybridSearch:
         lexical + non-vector layers (keyword/recency/strength/importance)
         are still used.
         """
+        # Reset degradation flags
+        self.last_search_degraded = False
+        self.last_search_mode = "full"
+
         # 1. Query Normalization + Result Cache Check
         q_norm = normalize_query(query)
         # Skip cache for temporal queries — time_range changes daily
@@ -334,6 +381,7 @@ class HybridSearch:
             if cached_json:
                 try:
                     cached_data = json.loads(cached_json)
+                    self.last_search_mode = "cache_hit"
                     return [SearchResult(**r) for r in cached_data]
                 except Exception as exc:
                     logger.warning("Failed to parse cached search results: %s", exc)
@@ -350,7 +398,8 @@ class HybridSearch:
             try:
                 query_vec = await self.embedder.embed(q_norm)
                 sem_results = self.storage.search_vectors(
-                    query_vec, limit=candidate_limit, min_score=0.0
+                    query_vec, limit=candidate_limit, min_score=0.0,
+                    namespace=namespace,
                 )
                 for r in sem_results:
                     mid = r["id"]
@@ -359,11 +408,13 @@ class HybridSearch:
                     all_candidates[mid] = r
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
+                self.last_search_degraded = True
+                self.last_search_mode = "keyword_only"
 
         # Layer 2 — Keyword (FTS5 BM25)
         if use_keyword:
             try:
-                kw_results = self.storage.search_text(q_norm, limit=candidate_limit)
+                kw_results = self.storage.search_text(q_norm, limit=candidate_limit, namespace=namespace)
                 for r in kw_results:
                     mid = r["id"]
                     keyword_ids.append(mid)
@@ -419,6 +470,13 @@ class HybridSearch:
         importance_ranked = [mid for mid, _ in sorted(importance_scored, key=lambda x: x[1], reverse=True)]
         importance_map = {mid: sc for mid, sc in importance_scored}
 
+        # Memory type bonus layer: prioritize factual and preference memories.
+        memory_type_bonus: Dict[str, float] = {}
+        for mid, cand in all_candidates.items():
+            memory_type = str(cand.get("memory_type", "") or "").strip().lower()
+            if memory_type in {"fact", "preference"}:
+                memory_type_bonus[mid] = 0.1
+
         # RRF fusion ----------------------------------------------------------
         ranked_lists: List[List[str]] = []
         weights_list: List[float] = []
@@ -443,6 +501,9 @@ class HybridSearch:
             return []
 
         rrf_scores = _rrf_fuse(ranked_lists, weights_list)
+        for mid, bonus in memory_type_bonus.items():
+            if mid in rrf_scores:
+                rrf_scores[mid] += bonus
 
         # Build SearchResult objects ------------------------------------------
         pre_limit = limit
@@ -484,9 +545,17 @@ class HybridSearch:
         if len(results) > 1:
             try:
                 query_token_count = len(_tokenize_for_rerank(q_norm))
-                # VPS-tuned friend-repo behavior:
-                # rerank almost always (except extremely short/noisy queries).
-                need_rerank = query_token_count >= 2
+
+                # Adaptive reranker gating: skip when top results are clearly
+                # separated (score spread > threshold).  This saves ~500ms+ on
+                # unambiguous queries while preserving quality for close calls.
+                _scores = [r.score for r in results[:5]]
+                _spread = (_scores[0] - _scores[-1]) if len(_scores) >= 2 else 0.0
+                _RERANK_SPREAD_THRESHOLD = 0.005  # tune: higher = rerank less often
+                need_rerank = (
+                    query_token_count >= 2
+                    and _spread < _RERANK_SPREAD_THRESHOLD
+                )
 
                 if need_rerank:
                     base_ranked = [r.id for r in results]
@@ -556,6 +625,11 @@ class HybridSearch:
                 agent=agent,
                 seed_results=results,
             )
+
+        # MMR diversity pass: remove near-duplicate results.
+        # Uses text overlap as proxy for similarity (avoids extra embedding calls).
+        if len(results) > 2:
+            results = _mmr_diversify(results, limit, lambda_param=0.7)
 
         # Return only requested count after optional reranking over pre-limit pool.
         if len(results) > limit:

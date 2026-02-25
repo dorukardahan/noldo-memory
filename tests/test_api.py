@@ -95,6 +95,25 @@ class TestHealth:
         assert "status" in data
         assert "checks" in data
 
+    async def test_health_deep_contains_diagnostics(self, client):
+        resp = await client.get("/v1/health/deep")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        assert data["status"] in ("ok", "degraded", "down")
+        assert "uptime_seconds" in data
+        assert "checks" in data
+
+        checks = data["checks"]
+        assert checks["db_integrity"]["ok"] is True
+        assert checks["db_integrity"]["result"] == "ok"
+        assert checks["embedding"]["ok"] is True
+        assert checks["embedding"]["latency_ms"] >= 0
+        assert checks["vectorless"]["ok"] is True
+        assert isinstance(checks["vectorless"]["count"], int)
+        assert checks["disk_usage"]["ok"] is True
+        assert checks["disk_usage"]["db_size_bytes"] >= 0
+
 
 # ---------------------------------------------------------------------------
 # /v1/stats
