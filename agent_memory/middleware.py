@@ -26,10 +26,27 @@ audit_logger = logging.getLogger("audit")
 # API Key Authentication
 # ---------------------------------------------------------------------------
 
+def _normalize_agent_scope(agent: object) -> str | None:
+    """Normalize optional per-key agent scope."""
+    if agent is None:
+        return None
+    value = str(agent).strip().lower()
+    return value or None
+
+
 def _load_extra_keys(keys_path: str) -> list[dict]:
     """Load additional API keys from a JSON file (if it exists).
 
-    Format: {"keys": [{"key": "...", "expires_at": null|unix_ts, "label": "..."}]}
+    Format:
+    {
+      "keys": [
+        {"key": "...", "expires_at": null|unix_ts, "label": "...", "agent": "main"},
+        {"key": "..."}
+      ]
+    }
+
+    - If ``agent`` is present, key is restricted to that agent.
+    - If ``agent`` is absent, key is treated as admin (all agents).
     """
     import json
     from pathlib import Path
@@ -39,7 +56,30 @@ def _load_extra_keys(keys_path: str) -> list[dict]:
         return []
     try:
         data = json.loads(p.read_text())
-        return data.get("keys", [])
+        raw_keys = data.get("keys", [])
+        if not isinstance(raw_keys, list):
+            logger.warning("Invalid extra key format in %s: 'keys' must be a list", keys_path)
+            return []
+
+        keys: list[dict] = []
+        for entry in raw_keys:
+            if not isinstance(entry, dict):
+                continue
+            ekey = entry.get("key")
+            if not isinstance(ekey, str) or not ekey:
+                continue
+
+            normalized = {
+                "key": ekey,
+                "expires_at": entry.get("expires_at"),
+                "label": entry.get("label"),
+            }
+            if "agent" in entry:
+                normalized["agent"] = _normalize_agent_scope(entry.get("agent"))
+
+            keys.append(normalized)
+
+        return keys
     except Exception as exc:
         logger.warning("Failed to load extra keys from %s: %s", keys_path, exc)
         return []
@@ -58,10 +98,11 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         self.api_key = api_key
         self.extra_keys_path = extra_keys_path
 
-    def _is_valid_key(self, key: str) -> bool:
-        """Check if key matches primary or any non-expired extra key."""
+    def _validate_key(self, key: str) -> tuple[bool, str | None]:
+        """Validate key and return (is_valid, allowed_agent)."""
         if secrets.compare_digest(key, self.api_key):
-            return True
+            return True, None  # primary key is admin
+
         if self.extra_keys_path:
             now = time.time()
             for entry in _load_extra_keys(self.extra_keys_path):
@@ -70,15 +111,21 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 if expires is not None and expires < now:
                     continue  # expired
                 if ekey and secrets.compare_digest(key, ekey):
-                    return True
-        return False
+                    if "agent" in entry:
+                        # restricted key: can only access this agent
+                        return True, _normalize_agent_scope(entry.get("agent"))
+                    # legacy/admin extra key
+                    return True, None
+
+        return False, None
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
         key = request.headers.get("X-API-Key", "")
-        if not key or not self._is_valid_key(key):
+        is_valid, allowed_agent = self._validate_key(key) if key else (False, None)
+        if not key or not is_valid:
             audit_logger.warning(
                 "AUTH_FAIL ip=%s path=%s",
                 request.client.host if request.client else "unknown",
@@ -88,6 +135,9 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
                 status_code=401,
                 content={"detail": "Invalid or missing API key"},
             )
+
+        # None -> admin key (all agents), "<agent>" -> restricted key
+        request.state.allowed_agent = allowed_agent
 
         return await call_next(request)
 
