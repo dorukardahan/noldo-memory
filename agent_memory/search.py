@@ -389,39 +389,70 @@ class HybridSearch:
         candidate_limit = max(limit * 4, 20)
 
         # Collect candidates from each layer ---------------------------------
+        # Semantic + keyword run in parallel when both are enabled.
         semantic_ids: List[str] = []
         keyword_ids: List[str] = []
         all_candidates: Dict[str, Dict[str, Any]] = {}
 
-        # Layer 1 — Semantic (sqlite-vec)
-        if use_semantic and self.embedder is not None:
+        async def _semantic_search() -> List[Dict[str, Any]]:
+            """Embed query + vector search (async)."""
+            query_vec = await self.embedder.embed(q_norm)
+            return self.storage.search_vectors(
+                query_vec, limit=candidate_limit, min_score=0.0,
+                namespace=namespace,
+            )
+
+        async def _keyword_search() -> List[Dict[str, Any]]:
+            """FTS5 BM25 search (sync, runs in event loop — fast enough)."""
+            return self.storage.search_text(q_norm, candidate_limit, namespace)
+
+        sem_results: List[Dict[str, Any]] = []
+        kw_results: List[Dict[str, Any]] = []
+
+        # Run both layers in parallel
+        if use_semantic and self.embedder is not None and use_keyword:
+            sem_task = asyncio.create_task(_semantic_search())
+            kw_task = asyncio.create_task(_keyword_search())
+
             try:
-                query_vec = await self.embedder.embed(q_norm)
-                sem_results = self.storage.search_vectors(
-                    query_vec, limit=candidate_limit, min_score=0.0,
-                    namespace=namespace,
-                )
-                for r in sem_results:
-                    mid = r["id"]
-                    semantic_ids.append(mid)
-                    r["_sem_score"] = r.get("score", 0.0)
-                    all_candidates[mid] = r
+                sem_results = await sem_task
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
                 self.last_search_degraded = True
                 self.last_search_mode = "keyword_only"
 
-        # Layer 2 — Keyword (FTS5 BM25)
-        if use_keyword:
             try:
-                kw_results = self.storage.search_text(q_norm, limit=candidate_limit, namespace=namespace)
-                for r in kw_results:
-                    mid = r["id"]
-                    keyword_ids.append(mid)
-                    if mid not in all_candidates:
-                        all_candidates[mid] = r
+                kw_results = await kw_task
             except Exception as exc:
                 logger.warning("Keyword search failed: %s", exc)
+
+        elif use_semantic and self.embedder is not None:
+            try:
+                sem_results = await _semantic_search()
+            except Exception as exc:
+                logger.warning("Semantic search failed (BM25 fallback): %s", exc)
+                self.last_search_degraded = True
+                self.last_search_mode = "keyword_only"
+
+        elif use_keyword:
+            try:
+                kw_results = await _keyword_search()
+            except Exception as exc:
+                logger.warning("Keyword search failed: %s", exc)
+
+        # Merge semantic results
+        for r in sem_results:
+            mid = r["id"]
+            semantic_ids.append(mid)
+            r["_sem_score"] = r.get("score", 0.0)
+            all_candidates[mid] = r
+
+        # Merge keyword results
+        for r in kw_results:
+            mid = r["id"]
+            keyword_ids.append(mid)
+            if mid not in all_candidates:
+                all_candidates[mid] = r
 
         if not all_candidates:
             return []

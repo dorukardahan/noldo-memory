@@ -392,6 +392,13 @@ class ConsolidateRequest(BaseModel):
     agent: Optional[str] = None
 
 
+class CompressRequest(BaseModel):
+    agent: Optional[str] = None
+    age_days: int = Field(default=30, ge=7, description="Compress memories older than this many days")
+    min_chars: int = Field(default=500, ge=100, description="Only compress memories longer than this")
+    dry_run: bool = Field(default=False, description="Preview without actually compressing")
+
+
 class GCRequest(BaseModel):
     agent: Optional[str] = None
     soft_deleted_days: int = Field(default=30, ge=7, description="Purge memories soft-deleted for this many days")
@@ -871,6 +878,47 @@ async def consolidate(req: ConsolidateRequest = ConsolidateRequest()) -> Dict[st
 
     agent_key = StoragePool.normalize_key(req.agent)
     result = _consolidate_single(agent_key)
+    result["agent"] = agent_key
+    return result
+
+
+@app.post("/v1/compress")
+async def compress(req: CompressRequest = CompressRequest()) -> Dict[str, Any]:
+    """Compress old, long memories by replacing text with summary.
+
+    Pinned and high-importance (>=0.8) memories are skipped.
+    Use dry_run=true to preview without changes.
+    """
+    from .compression import compress_old_memories
+
+    if _storage_pool is None:
+        raise HTTPException(503, "Storage pool not initialised")
+
+    if req.agent == "all":
+        total = {"compressed": 0, "skipped": 0, "saved_chars": 0}
+        for agent_id in _storage_pool.get_all_agents():
+            try:
+                storage = _storage_pool.get(agent_id)
+                result = compress_old_memories(
+                    storage, agent=agent_id,
+                    age_days=req.age_days, min_chars=req.min_chars,
+                    dry_run=req.dry_run,
+                )
+                total["compressed"] += result["compressed"]
+                total["skipped"] += result["skipped"]
+                total["saved_chars"] += result["saved_chars"]
+            except Exception as exc:
+                logger.warning("Compression failed for %s: %s", agent_id, exc)
+        total["dry_run"] = req.dry_run
+        return total
+
+    agent_key = StoragePool.normalize_key(req.agent)
+    storage = _get_storage(agent_key)
+    result = compress_old_memories(
+        storage, agent=agent_key,
+        age_days=req.age_days, min_chars=req.min_chars,
+        dry_run=req.dry_run,
+    )
     result["agent"] = agent_key
     return result
 
