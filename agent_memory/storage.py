@@ -233,6 +233,7 @@ class MemoryStorage:
         _add_col("memories", "deleted_at REAL", "deleted_at")
         # Critical memory pinning: pinned memories survive decay/gc/consolidation
         _add_col("memories", "pinned INTEGER DEFAULT 0", "pinned")
+        _add_col("memories", "memory_type TEXT DEFAULT 'other'", "memory_type")
 
         # Backfill last_accessed_at for existing rows (keep idempotent)
         try:
@@ -277,6 +278,7 @@ class MemoryStorage:
         importance: float = 0.5,
         source_session: Optional[str] = None,
         memory_id: Optional[str] = None,
+        memory_type: str = "other",
     ) -> str:
         """Insert a memory. Returns the memory ID."""
         conn = self._get_conn()
@@ -293,11 +295,23 @@ class MemoryStorage:
 
         conn.execute(
             """INSERT OR REPLACE INTO memories
-               (id, text, category, importance, source_session,
+               (id, text, category, memory_type, importance, source_session,
                 created_at, updated_at, vector_rowid,
                 strength, last_accessed_at, deleted_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
-            (mid, text, category, importance, source_session, now, now, vector_rowid, 1.0, now),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+            (
+                mid,
+                text,
+                category,
+                memory_type,
+                importance,
+                source_session,
+                now,
+                now,
+                vector_rowid,
+                1.0,
+                now,
+            ),
         )
 
         # FTS5 sync
@@ -601,6 +615,7 @@ class MemoryStorage:
         importance: float,
         source_session: Optional[str],
         similarity_threshold: float = 0.85,
+        memory_type: str = "other",
     ) -> Dict[str, Any]:
         """Store a memory, merging into nearest neighbor when highly similar.
 
@@ -618,6 +633,7 @@ class MemoryStorage:
                 category=category,
                 importance=importance,
                 source_session=source_session,
+                memory_type=memory_type,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
@@ -631,6 +647,7 @@ class MemoryStorage:
                 category=category,
                 importance=importance,
                 source_session=source_session,
+                memory_type=memory_type,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
@@ -641,6 +658,7 @@ class MemoryStorage:
                 category=category,
                 importance=importance,
                 source_session=source_session,
+                memory_type=memory_type,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
 
@@ -711,6 +729,7 @@ class MemoryStorage:
             category=category,
             importance=importance,
             source_session=source_session,
+            memory_type=memory_type,
         )
         return {"action": "inserted", "id": mid, "similarity": similarity}
 
@@ -725,7 +744,7 @@ class MemoryStorage:
         """Store many memories in a single transaction.
 
         Each item dict should have at least ``text``; optional keys:
-        ``vector``, ``category``, ``importance``, ``source_session``, ``id``.
+        ``vector``, ``category``, ``memory_type``, ``importance``, ``source_session``, ``id``.
         """
         conn = self._get_conn()
         ids: List[str] = []
@@ -737,6 +756,7 @@ class MemoryStorage:
                 text = item["text"]
                 vector = item.get("vector")
                 category = item.get("category", "other")
+                memory_type = item.get("memory_type", "other")
                 importance = item.get("importance", 0.5)
                 source = item.get("source_session")
 
@@ -750,11 +770,23 @@ class MemoryStorage:
 
                 conn.execute(
                     """INSERT OR REPLACE INTO memories
-                       (id, text, category, importance, source_session,
+                       (id, text, category, memory_type, importance, source_session,
                         created_at, updated_at, vector_rowid,
                         strength, last_accessed_at, deleted_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
-                    (mid, text, category, importance, source, now, now, vector_rowid, 1.0, now),
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+                    (
+                        mid,
+                        text,
+                        category,
+                        memory_type,
+                        importance,
+                        source,
+                        now,
+                        now,
+                        vector_rowid,
+                        1.0,
+                        now,
+                    ),
                 )
                 conn.execute(
                     "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",

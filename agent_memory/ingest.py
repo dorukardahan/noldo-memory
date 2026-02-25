@@ -61,6 +61,39 @@ def _md5(text: str) -> str:
     return hashlib.md5(text.encode("utf-8")).hexdigest()[:16]
 
 
+_ENTITY_NAME_RE = re.compile(
+    r"\b[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]{2,}\b",
+    re.UNICODE,
+)
+
+_FACTUAL_PATTERNS_RE = re.compile(
+    r"\b(?:is|are|was|were|born|lives?|works?|located|founded|means|"
+    r"adım|adim|ismim|my\s+name\s+is|name\s+is|yaşar|yaşıyor|"
+    r"calisir|çalışır|çalışıyor|calisiyor|dedi|söyledi|soyledi|var(?:dır)?)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_PREFERENCE_KEYWORDS_RE = re.compile(
+    r"\b(?:sevdiğim|sevdigim|prefer|like|hate|always|never)\b",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def classify_memory_type(text: str) -> str:
+    """Classify memory text into fact/preference/rule/conversation."""
+    content = (text or "").strip()
+    if not content:
+        return "conversation"
+
+    if _ENTITY_NAME_RE.search(content) or _FACTUAL_PATTERNS_RE.search(content):
+        return "fact"
+    if _PREFERENCE_KEYWORDS_RE.search(content):
+        return "preference"
+    if rule_detector.detect(content) or rule_detector.check_safeword(content):
+        return "rule"
+    return "conversation"
+
+
 def _extract_text(content: Any) -> str:
     """Extract plain text from an OpenClaw message content field.
 
@@ -359,6 +392,7 @@ async def ingest_sessions(
         items: list[Dict[str, Any]] = []
         for chunk, vector in zip(batch, vectors):
             importance = score_importance(chunk.text, {"role": chunk.role})
+            memory_type = classify_memory_type(chunk.text)
             category = chunk.role
             if rule_detector.detect(chunk.text) or rule_detector.check_safeword(chunk.text):
                 category = "rule"
@@ -370,6 +404,7 @@ async def ingest_sessions(
                 "text": chunk.text,
                 "vector": vector,
                 "category": category,
+                "memory_type": memory_type,
                 "importance": importance,
                 "source_session": chunk.session_id,
             })

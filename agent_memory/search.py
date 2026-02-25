@@ -454,6 +454,13 @@ class HybridSearch:
         importance_ranked = [mid for mid, _ in sorted(importance_scored, key=lambda x: x[1], reverse=True)]
         importance_map = {mid: sc for mid, sc in importance_scored}
 
+        # Memory type bonus layer: prioritize factual and preference memories.
+        memory_type_bonus: Dict[str, float] = {}
+        for mid, cand in all_candidates.items():
+            memory_type = str(cand.get("memory_type", "") or "").strip().lower()
+            if memory_type in {"fact", "preference"}:
+                memory_type_bonus[mid] = 0.1
+
         # RRF fusion ----------------------------------------------------------
         ranked_lists: List[List[str]] = []
         weights_list: List[float] = []
@@ -478,6 +485,9 @@ class HybridSearch:
             return []
 
         rrf_scores = _rrf_fuse(ranked_lists, weights_list)
+        for mid, bonus in memory_type_bonus.items():
+            if mid in rrf_scores:
+                rrf_scores[mid] += bonus
 
         # Build SearchResult objects ------------------------------------------
         pre_limit = limit
