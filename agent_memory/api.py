@@ -564,6 +564,8 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
     # Store (write-time semantic merge, per message)
     stored_n = 0
     merged_n = 0
+    from .ingest import classify_memory_type
+
     for it in items:
         res = storage.merge_or_store(
             text=it["text"],
@@ -571,6 +573,7 @@ async def capture(req: CaptureRequest) -> Dict[str, Any]:
             category=it.get("category", "other"),
             importance=float(it.get("importance", 0.5)),
             source_session=it.get("source_session"),
+            memory_type=classify_memory_type(it["text"]),
         )
         if res.get("action") == "merged":
             merged_n += 1
@@ -627,6 +630,8 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         importance = 1.0
         logger.info("Rule detected in /v1/store: %s", req.text[:60])
 
+    from .ingest import classify_memory_type
+
     res = storage.merge_or_store(
         text=req.text,
         vector=vector,
@@ -634,6 +639,7 @@ async def store(req: StoreRequest) -> Dict[str, Any]:
         importance=importance,
         source_session=None,
         namespace=req.namespace,
+        memory_type=classify_memory_type(req.text),
     )
 
     # Invalidate search cache
