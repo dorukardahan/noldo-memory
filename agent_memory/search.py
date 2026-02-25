@@ -216,6 +216,9 @@ class HybridSearch:
         self.bg_reranker = bg_reranker
         self.bg_two_pass_enabled = bool(bg_two_pass_enabled and bg_reranker is not None)
         self.bg_rerank_weight = max(0.0, min(1.0, float(bg_rerank_weight)))
+        # Graceful degradation: track if last search used all layers
+        self.last_search_degraded: bool = False
+        self.last_search_mode: str = "full"  # full | keyword_only | cache_hit
 
     def _schedule_background_quality_rerank(
         self,
@@ -359,6 +362,10 @@ class HybridSearch:
         lexical + non-vector layers (keyword/recency/strength/importance)
         are still used.
         """
+        # Reset degradation flags
+        self.last_search_degraded = False
+        self.last_search_mode = "full"
+
         # 1. Query Normalization + Result Cache Check
         q_norm = normalize_query(query)
         # Skip cache for temporal queries — time_range changes daily
@@ -369,6 +376,7 @@ class HybridSearch:
             if cached_json:
                 try:
                     cached_data = json.loads(cached_json)
+                    self.last_search_mode = "cache_hit"
                     return [SearchResult(**r) for r in cached_data]
                 except Exception as exc:
                     logger.warning("Failed to parse cached search results: %s", exc)
@@ -394,6 +402,8 @@ class HybridSearch:
                     all_candidates[mid] = r
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
+                self.last_search_degraded = True
+                self.last_search_mode = "keyword_only"
 
         # Layer 2 — Keyword (FTS5 BM25)
         if use_keyword:

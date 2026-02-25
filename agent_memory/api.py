@@ -439,8 +439,11 @@ async def recall(req: RecallRequest) -> Dict[str, Any]:
         "agent": agent_key,
         "count": len(result_dicts),
         "triggered": should_trigger(req.query),
+        "search_mode": search.last_search_mode,
         "results": result_dicts,
     }
+    if search.last_search_degraded:
+        response["degraded"] = True
     if trimmed:
         response["trimmed"] = True
         response["max_tokens"] = req.max_tokens
@@ -1409,6 +1412,57 @@ async def import_memories(req: ImportRequest) -> Dict[str, Any]:
         imported, skipped, req.agent or "main",
     )
     return {"imported": imported, "skipped": skipped, "total": len(req.memories)}
+
+
+# ---------------------------------------------------------------------------
+# Amnesia Detection
+# ---------------------------------------------------------------------------
+
+class AmnesiaCheckRequest(BaseModel):
+    topics: List[str] = Field(..., min_length=1, max_length=20,
+                               description="Topics to check coverage for")
+    agent: Optional[str] = None
+    min_match_score: float = Field(default=0.01, ge=0.0, le=1.0)
+
+
+@app.post("/v1/amnesia-check")
+async def amnesia_check(req: AmnesiaCheckRequest) -> Dict[str, Any]:
+    """Check how well the agent remembers a list of topics.
+
+    Returns a coverage score (0-1) and per-topic match details.
+    Useful for post-compaction validation and memory health monitoring.
+    """
+    search = _get_search(req.agent)
+    agent_key = StoragePool.normalize_key(req.agent)
+
+    topic_results = []
+    hits = 0
+
+    for topic in req.topics:
+        results = await search.search(
+            query=topic, limit=3, min_score=req.min_match_score, agent=agent_key,
+        )
+        matched = len(results) > 0
+        if matched:
+            hits += 1
+        topic_results.append({
+            "topic": topic,
+            "matched": matched,
+            "match_count": len(results),
+            "top_score": round(results[0].score, 4) if results else 0.0,
+            "top_text": results[0].text[:200] if results else None,
+        })
+
+    coverage = hits / len(req.topics) if req.topics else 0.0
+
+    return {
+        "agent": agent_key,
+        "coverage": round(coverage, 2),
+        "total_topics": len(req.topics),
+        "matched_topics": hits,
+        "topics": topic_results,
+        "status": "healthy" if coverage >= 0.7 else "warning" if coverage >= 0.4 else "amnesia",
+    }
 
 
 # ---------------------------------------------------------------------------
