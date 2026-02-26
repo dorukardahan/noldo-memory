@@ -144,23 +144,32 @@ AGENT_MEMORY_DB=~/.agent-memory/memory-codex.sqlite .venv/bin/python scripts/rei
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/v1/recall` | POST | Hybrid search (semantic + BM25 + recency + strength + importance) |
-| `/v1/capture` | POST | Batch ingest messages |
-| `/v1/store` | POST | Store a single memory |
+| `/v1/recall` | POST | Hybrid search (semantic + BM25 + recency + strength + importance). Supports `namespace` and `max_tokens` for context budget. |
+| `/v1/capture` | POST | Batch ingest messages (auto memory_type classification) |
+| `/v1/store` | POST | Store a single memory (auto memory_type: fact/preference/rule/conversation) |
 | `/v1/rule` | POST | Store a rule/instruction (importance=1.0) |
 | `/v1/forget` | DELETE | Delete by ID or query |
 | `/v1/search` | GET | Interactive search (CLI/debug) |
-| `/v1/decay` | POST | Run Ebbinghaus strength decay |
+| `/v1/pin` | POST | Pin a memory (protects from decay/gc/consolidation) |
+| `/v1/unpin` | POST | Unpin a memory |
+| `/v1/decay` | POST | Run Ebbinghaus strength decay (respects pinned) |
 | `/v1/consolidate` | POST | Deduplicate + archive stale memories |
-| `/v1/gc` | POST | Permanently purge old soft-deleted memories |
+| `/v1/compress` | POST | Summarize old long memories (dry_run supported) |
+| `/v1/gc` | POST | Permanently purge old soft-deleted memories (respects pinned) |
+| `/v1/amnesia-check` | POST | Check memory coverage by topic list (healthy/warning/amnesia) |
 | `/v1/stats` | GET | Database statistics |
 | `/v1/agents` | GET | List agent databases |
-| `/v1/health` | GET | Health check with probes |
-| `/v1/metrics` | GET | Operational metrics |
+| `/v1/health` | GET | Basic health check |
+| `/v1/health/deep` | GET | DB integrity, embedding probe, vectorless count, disk usage |
+| `/v1/metrics` | GET | Operational metrics (JSON) |
+| `/v1/metrics/prometheus` | GET | Prometheus text exposition format metrics |
+| `/v1/admin/rotate-key` | POST | Rotate API key (with optional expiry) |
 | `/v1/export` | GET | Export memories as JSON |
 | `/v1/import` | POST | Import memories from JSON |
 
 All endpoints accept `?agent=<id>` for per-agent routing. Use `agent=all` for cross-agent operations.
+
+**Per-agent API keys:** Extra keys can be added to `memory-api-keys.json` with an optional `"agent"` field to restrict access to a single agent's data.
 
 ## Hooks
 
