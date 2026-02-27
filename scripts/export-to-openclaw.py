@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export whatsapp-memory highlights to OpenClaw workspace for indexing.
+"""Export asuman-memory highlights to OpenClaw workspace for indexing.
 
 Runs daily via cron. Exports high-importance memories from the last N days
 as a single markdown file that OpenClaw auto-indexes.
@@ -76,7 +76,7 @@ def export(days: int = 7, min_importance: float = 0.6, min_strength: float = 0.5
     lines = [
         "# WhatsApp Memory Highlights",
         "",
-        "Auto-exported from whatsapp-memory ({} memories, {} top entities).".format(len(rows), len(entities)),
+        "Auto-exported from asuman-memory ({} memories, {} top entities).".format(len(rows), len(entities)),
         "Last updated: {}. Covers last {} days.".format(now_str, days),
         "",
         "---",
