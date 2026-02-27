@@ -402,6 +402,7 @@ class RecallRequest(BaseModel):
     max_tokens: Optional[int] = Field(default=None, ge=100, le=100000,
                                        description="Trim results to fit within this token budget")
     namespace: Optional[str] = Field(default=None, description="Filter by namespace (None = all)")
+    memory_type: Optional[str] = Field(default=None, description="Filter by memory type")
     agent: Optional[str] = None
 
 
@@ -471,6 +472,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         min_score=req.min_score,
         time_range=time_range,
         namespace=req.namespace,
+        memory_type=req.memory_type,
     )
 
     agent_key = StoragePool.normalize_key(req.agent)
@@ -525,6 +527,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 limit=req.limit,
                 min_score=req.min_score,
                 time_range=time_range,
+                memory_type=req.memory_type,
             )
             for r in results:
                 d = r.to_dict()

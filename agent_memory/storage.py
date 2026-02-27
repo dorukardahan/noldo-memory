@@ -237,6 +237,9 @@ class MemoryStorage:
         _add_col("memories", "pinned INTEGER DEFAULT 0", "pinned")
         _add_col("memories", "namespace TEXT DEFAULT 'default'", "namespace")
         _add_col("memories", "memory_type TEXT DEFAULT 'other'", "memory_type")
+        _add_col("memories", "lesson_status TEXT DEFAULT 'active'", "lesson_status")
+        _add_col("memories", "lesson_scope TEXT", "lesson_scope")
+        _add_col("memories", "resolved_at REAL", "resolved_at")
 
         # Backfill last_accessed_at for existing rows (keep idempotent)
         try:
@@ -266,6 +269,11 @@ class MemoryStorage:
                     logger.info("Schema migration: rebuilt search_result_cache with min_score in PK")
         except Exception as exc:
             logger.debug("search_result_cache migration skipped: %s", exc)
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_lesson_status ON memories(lesson_status)")
+        except Exception:
+            pass
 
         conn.commit()
 
@@ -667,6 +675,18 @@ class MemoryStorage:
         conn = self._get_conn()
         now = time.time()
 
+        if memory_type == "lesson":
+            mid = self.store_memory(
+                text=text,
+                vector=vector,
+                category=category,
+                importance=importance,
+                source_session=source_session,
+                memory_type=memory_type,
+                namespace=namespace,
+            )
+            return {"action": "inserted", "id": mid, "similarity": None}
+
         if vector is None:
             mid = self.store_memory(
                 text=text,
@@ -858,6 +878,7 @@ class MemoryStorage:
         limit: int = 10,
         min_score: float = 0.0,
         namespace: Optional[str] = None,
+        memory_type: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Nearest-neighbour search via sqlite-vec (cosine distance).
 
@@ -886,16 +907,20 @@ class MemoryStorage:
             similarity = 1.0 - (r["distance"] / 2.0)
             if similarity < min_score:
                 continue
+            where = ["vector_rowid = ?", "deleted_at IS NULL", "importance >= 0.3"]
+            params: List[Any] = [r["vec_rowid"]]
             if namespace is not None:
-                mem = conn.execute(
-                    "SELECT * FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL AND importance >= 0.3 AND namespace = ?",
-                    (r["vec_rowid"], namespace),
-                ).fetchone()
-            else:
-                mem = conn.execute(
-                    "SELECT * FROM memories WHERE vector_rowid = ? AND deleted_at IS NULL AND importance >= 0.3",
-                    (r["vec_rowid"],),
-                ).fetchone()
+                where.append("namespace = ?")
+                params.append(namespace)
+            if memory_type is not None:
+                where.append("COALESCE(memory_type, 'other') = ?")
+                params.append(memory_type)
+                if memory_type == "lesson":
+                    where.append("COALESCE(lesson_status, 'active') = 'active'")
+            mem = conn.execute(
+                f"SELECT * FROM memories WHERE {' AND '.join(where)}",
+                tuple(params),
+            ).fetchone()
             if mem:
                 d = dict(mem)
                 d["score"] = round(similarity, 4)
@@ -908,7 +933,7 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     def search_text(
-        self, query: str, limit: int = 10, namespace: Optional[str] = None
+        self, query: str, limit: int = 10, namespace: Optional[str] = None, memory_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """FTS5 search. Returns memories sorted by BM25 relevance."""
         conn = self._get_conn()
@@ -933,16 +958,20 @@ class MemoryStorage:
 
         results: List[Dict[str, Any]] = []
         for r in rows:
+            where = ["id = ?", "deleted_at IS NULL", "importance >= 0.3"]
+            params: List[Any] = [r["id"]]
             if namespace is not None:
-                mem = conn.execute(
-                    "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND importance >= 0.3 AND namespace = ?",
-                    (r["id"], namespace),
-                ).fetchone()
-            else:
-                mem = conn.execute(
-                    "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND importance >= 0.3",
-                    (r["id"],),
-                ).fetchone()
+                where.append("namespace = ?")
+                params.append(namespace)
+            if memory_type is not None:
+                where.append("COALESCE(memory_type, 'other') = ?")
+                params.append(memory_type)
+                if memory_type == "lesson":
+                    where.append("COALESCE(lesson_status, 'active') = 'active'")
+            mem = conn.execute(
+                f"SELECT * FROM memories WHERE {' AND '.join(where)}",
+                tuple(params),
+            ).fetchone()
             if mem:
                 d = dict(mem)
                 d["bm25_rank"] = r["rank"]

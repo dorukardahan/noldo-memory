@@ -361,6 +361,7 @@ class HybridSearch:
         agent: str = "main",
         time_range: Optional[Tuple[float, float]] = None,
         namespace: Optional[str] = None,
+        memory_type: Optional[str] = None,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -405,11 +406,12 @@ class HybridSearch:
             return self.storage.search_vectors(
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
+                memory_type=memory_type,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
             """FTS5 BM25 search (sync, runs in event loop — fast enough)."""
-            return self.storage.search_text(q_norm, candidate_limit, namespace)
+            return self.storage.search_text(q_norm, candidate_limit, namespace, memory_type=memory_type)
 
         sem_results: List[Dict[str, Any]] = []
         kw_results: List[Dict[str, Any]] = []
@@ -462,6 +464,17 @@ class HybridSearch:
         if not all_candidates:
             return []
 
+        if memory_type:
+            memory_type_norm = memory_type.strip().lower()
+            all_candidates = {
+                mid: c for mid, c in all_candidates.items()
+                if str(c.get("memory_type", "") or "").strip().lower() == memory_type_norm
+            }
+            semantic_ids = [mid for mid in semantic_ids if mid in all_candidates]
+            keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
+            if not all_candidates:
+                return []
+
         # Temporal filter: remove candidates outside time_range
         if time_range is not None:
             t_start, t_end = time_range
@@ -506,12 +519,14 @@ class HybridSearch:
         importance_ranked = [mid for mid, _ in sorted(importance_scored, key=lambda x: x[1], reverse=True)]
         importance_map = {mid: sc for mid, sc in importance_scored}
 
-        # Memory type bonus layer: prioritize factual and preference memories.
+        # Memory type bonus layer: prioritize factual, preference, and lesson memories.
         memory_type_bonus: Dict[str, float] = {}
+        memory_type_bonus_weights = {"fact": 0.10, "preference": 0.10, "lesson": 0.20}
         for mid, cand in all_candidates.items():
-            memory_type = str(cand.get("memory_type", "") or "").strip().lower()
-            if memory_type in {"fact", "preference"}:
-                memory_type_bonus[mid] = 0.1
+            cand_memory_type = str(cand.get("memory_type", "") or "").strip().lower()
+            bonus = memory_type_bonus_weights.get(cand_memory_type)
+            if bonus is not None:
+                memory_type_bonus[mid] = bonus
 
         # RRF fusion ----------------------------------------------------------
         ranked_lists: List[List[str]] = []
