@@ -98,6 +98,7 @@ class SearchResult:
     category: str
     importance: float
     created_at: float
+    memory_type: str = "other"
     score: float = 0.0
     semantic_score: float = 0.0
     keyword_score: float = 0.0
@@ -113,6 +114,7 @@ class SearchResult:
             "text": self.text,
             "category": self.category,
             "importance": self.importance,
+            "memory_type": self.memory_type,
             "created_at": self.created_at,
             "score": round(self.score, 4),
             "semantic_score": round(self.semantic_score, 4),
@@ -579,6 +581,7 @@ class HybridSearch:
                 text=cand.get("text", ""),
                 category=cand.get("category", "other"),
                 importance=cand.get("importance", 0.5),
+                memory_type=cand.get("memory_type", "other"),
                 created_at=cand.get("created_at", 0.0),
                 score=score,
                 semantic_score=cand.get("_sem_score", 0.0),
