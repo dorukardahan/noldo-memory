@@ -24,8 +24,8 @@ OpenClaw's native memory (`memorySearch`) is basic — keyword search, no decay,
 | Prompt injection protection | No | Built-in sanitization |
 | Trust/provenance tracking | No | Source + trust_level per memory |
 | Pattern-to-policy | No | 3+ same mistake auto-escalates to rule |
-| Zero additional setup | Yes | No (requires embedding server) |
-| Cloud-managed option | Yes (built-in) | No (self-hosted only) |
+| External dependencies | None | Embedding API (cloud or local) |
+| Embedding options | Cloud only | Cloud (OpenRouter/OpenAI) or self-hosted |
 
 ## Quick Start (OpenClaw)
 
@@ -45,42 +45,46 @@ cp .env.example .env
 # Edit .env: set AGENT_MEMORY_API_KEY (pick any strong secret)
 ```
 
-### Step 2: Start the embedding server
+### Step 2: Set up embeddings
 
 NoldoMem needs an embedding API (OpenAI-compatible `/v1/embeddings` format).
 
-**Auto-detect best setup for your hardware:**
+**Fastest path — use a cloud API** (2 lines in `.env`):
 ```bash
-./scripts/detect-hardware.sh          # shows recommendation
-./scripts/detect-hardware.sh --apply  # writes settings to .env
+# In .env:
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=your-key
+AGENT_MEMORY_MODEL=openai/text-embedding-3-large
+AGENT_MEMORY_DIMENSIONS=3072
 ```
 
-**Or pick manually:**
+Works with OpenRouter, OpenAI, or any OpenAI-compatible embedding API.
 
-| Profile | Model | RAM | Best For |
-|---------|-------|-----|----------|
-| minimal | EmbeddingGemma 300M | 1-2GB | Raspberry Pi, $5 VPS |
-| light | Qwen3-Embedding-0.6B | 2-4GB | Small VPS |
-| standard | Qwen3-Embedding-4B | 4-8GB | Mid-range server |
-| heavy | Qwen3-Embedding-8B | 12GB+ | Dedicated server |
+**Or run locally** (recommended for privacy/cost):
 
-**Download a model** (example: standard profile):
 ```bash
-# Install llama.cpp: https://github.com/ggml-org/llama.cpp
+./scripts/detect-hardware.sh --apply  # auto-detect best model for your hardware
+```
+
+| Profile | Model | Download Size | RAM | Best For |
+|---------|-------|--------------|-----|----------|
+| minimal | EmbeddingGemma 300M | ~300MB | 1-2GB | Raspberry Pi, $5 VPS |
+| light | Qwen3-Embedding-0.6B | ~600MB | 2-4GB | Small VPS |
+| standard | Qwen3-Embedding-4B | ~4GB | 4-8GB | Mid-range server |
+| heavy | Qwen3-Embedding-8B | ~8GB | 12GB+ | Dedicated server |
+
+```bash
+# Download model (example: standard profile)
 huggingface-cli download Qwen/Qwen3-Embedding-4B-GGUF Qwen3-Embedding-4B-Q8_0.gguf --local-dir models/
-```
 
-```bash
-# Local llama.cpp example (standard profile):
-llama-server --model Qwen3-Embedding-4B-Q8_0.gguf \
+# Start embedding server
+llama-server --model models/Qwen3-Embedding-4B-Q8_0.gguf \
   --embedding --pooling last --host 127.0.0.1 --port 8090
 
 # In .env:
 # OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1
 # AGENT_MEMORY_DIMENSIONS=2560
 ```
-
-**Or use a cloud API** (OpenRouter, OpenAI, etc.) — set `OPENROUTER_BASE_URL` and `OPENROUTER_API_KEY` in `.env`.
 
 ### Step 3: Start NoldoMem
 
@@ -185,6 +189,12 @@ POST /v1/rule {"text": "Always run tests before commit", "agent": "YOUR_AGENT_ID
 - Repeated mistakes (3+) become permanent rules
 - Your session starts with relevant memories pre-loaded (bootstrap hook)
 - Feedback you give ("wrong", "don't do that") is captured as lessons
+
+### Error responses
+- 401: Invalid API key. Read key from ~/.noldomem/memory-api-key
+- 404: Unknown endpoint. Check URL
+- 422: Invalid request body. Check required fields (text, agent)
+- 500: Server error (usually embedding server down). Retry in 5 seconds, max 2 retries
 ```
 
 ## How Hooks Work
@@ -313,6 +323,23 @@ pip install -r requirements-dev.txt
 python -m pytest tests/ -v   # 187 tests
 ruff check agent_memory/     # lint
 ```
+
+## FAQ
+
+**Can I use NoldoMem without OpenClaw?**
+Yes. NoldoMem is a standalone REST API. Any application that can make HTTP requests can store and recall memories. The hooks are OpenClaw-specific, but the API works with anything.
+
+**How much disk space do memories use?**
+Roughly 1-2 KB per memory (text + metadata + embedding vector). 10,000 memories take about 15-20 MB. SQLite with WAL mode handles concurrent access well.
+
+**What happens if the embedding server goes down?**
+NoldoMem continues to work in degraded mode — keyword search (BM25) still works, but semantic search returns no results. The `/v1/health` endpoint reports `"embedding": false`. Memories stored without embeddings get auto-embedded when the server comes back (via the backfill worker).
+
+**Can multiple agents share memories?**
+Each agent has its own isolated SQLite database by design. Use `?agent=<id>` to route requests. Cross-agent search is not supported — this is intentional for safety and privacy.
+
+**How do I force a memory type?**
+Pass `"memory_type": "rule"` (or fact/preference/lesson/conversation) in your `/v1/store` request to override auto-classification.
 
 ## Troubleshooting
 
