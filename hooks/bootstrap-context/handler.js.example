@@ -1,42 +1,66 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 
 const MEMORY_API = "http://localhost:8787/v1";
-import { readFileSync } from "node:fs";
-const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
+const API_KEY_PATH =
+  process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
-try { _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim(); } catch (e) { console.warn("[bootstrap-context] error:", e.message || e); }
+try {
+  _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim();
+} catch (e) {
+  console.warn("[bootstrap-context] error:", e.message || e);
+}
 
-// === Character limits for bootstrap budget management ===
 const MAX_MEMORY_CHARS = 8000;
 const MAX_DAILY_CHARS = 6000;
 const MAX_CROSSAGENT_CHARS = 2000;
 const MAX_LAST_SESSION_CHARS = 2000;
 const MAX_LESSON_CHARS = 3000;
+const ENABLE_CROSS_AGENT_RECALL = process.env.OPENCLAW_ENABLE_CROSS_AGENT_RECALL === "1";
 
+const CRON_NOISE_PATTERNS = [/^\[cron:/i, /steward-engage/i, /steward-post/i, /\/steward-/i];
 
-const CRON_NOISE_PATTERNS = [
-  /^\[cron:/i,
-  /steward-engage/i,
-  /steward-post/i,
-  /\/steward-/i,
+const LOW_SIGNAL_MEMORY_PATTERNS = [
+  /A new session was started via \/new or \/reset/i,
+  /\[Subagent Context\]/i,
+  /Conversation info \(untrusted metadata\)/i,
+  /^User:\s*Conversation info/i,
+  /\[System Message\]/i,
+  /\[Queued announce messages while agent was busy\]/i,
+  /^✅\s*Subagent\s+.+\s+finished/i,
+  /\bA cron job\b/i,
+  /\bA subagent task\b/i,
+  /^System:\s*\[/i,
 ];
 
 function isCronNoise(text = "") {
   return CRON_NOISE_PATTERNS.some((p) => p.test(text));
 }
 
-function truncateSection(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  return text.slice(0, maxChars) + "\n... [truncated to " + maxChars + " chars]";
+function isLowSignalMemory(text = "") {
+  if (!text) return true;
+  if (isCronNoise(text)) return true;
+  return LOW_SIGNAL_MEMORY_PATTERNS.some((p) => p.test(text));
 }
 
+function truncateSection(text, maxChars) {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars) + `\n... [truncated to ${maxChars} chars]`;
+}
 
-/**
- * Derive agent ID from workspace directory path.
- *   $HOME/.openclaw/workspace        -> "main"
- *   $HOME/.openclaw/workspace-bureau  -> "bureau"
- */
+function stripLowSignalText(text = "") {
+  const raw = String(text || "");
+  const withoutBlocks = raw.replace(
+    /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```/gi,
+    ""
+  );
+  const cleanedLines = withoutBlocks
+    .split("\n")
+    .filter((line) => !LOW_SIGNAL_MEMORY_PATTERNS.some((p) => p.test(line)));
+  return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function getAgentId(workspaceDir) {
   const base = path.basename(workspaceDir);
   if (base === "workspace") return "main";
@@ -44,12 +68,10 @@ function getAgentId(workspaceDir) {
   return "main";
 }
 
-async function fetchRecentMemories(agentId, sessionKey) {
-  const queries = [
-    "recent decisions and configuration changes",
-    "last conversation summary and active work",
-  ];
+async function fetchRecentMemories(agentId) {
+  if (!_memoryApiKey) return [];
 
+  const queries = ["recent decisions and configuration changes", "last conversation summary and active work"];
   const allResults = [];
   const seen = new Set();
 
@@ -60,8 +82,8 @@ async function fetchRecentMemories(agentId, sessionKey) {
         headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
         body: JSON.stringify({
           query: agentId !== "main" ? `${agentId}: ${q}` : q,
-          limit: 10,
-          min_score: 0.005,
+          limit: 25,
+          min_score: 0.01,
           agent: agentId,
         }),
         signal: AbortSignal.timeout(5000),
@@ -71,19 +93,23 @@ async function fetchRecentMemories(agentId, sessionKey) {
       const results = data.results || data.memories || [];
       for (const r of results) {
         const text = r.text || r.content || "";
+        if (isLowSignalMemory(text)) continue;
         const key = text.slice(0, 120);
         if (!seen.has(key)) {
           seen.add(key);
           allResults.push(r);
         }
       }
-    } catch (e) { console.warn("[bootstrap-context] error:", e.message || e); }
+    } catch (e) {
+      console.warn("[bootstrap-context] error:", e.message || e);
+    }
   }
 
   return allResults;
 }
 
 async function fetchDecisionMemories(agentId) {
+  if (!_memoryApiKey) return null;
   try {
     const res = await fetch(`${MEMORY_API}/recall`, {
       method: "POST",
@@ -106,6 +132,7 @@ async function fetchDecisionMemories(agentId) {
 }
 
 async function fetchLessons(agentId) {
+  if (!_memoryApiKey) return [];
   try {
     const res = await fetch(`${MEMORY_API}/recall`, {
       method: "POST",
@@ -131,10 +158,11 @@ async function fetchLessons(agentId) {
 
     const deduped = [];
     for (const item of sorted) {
-      const text = (item.text || item.content || "").trim();
+      const text = stripLowSignalText(item.text || item.content || "");
       if (!text) continue;
+      if (isLowSignalMemory(text)) continue;
       const isDuplicate = deduped.some((existing) => {
-        const prev = (existing.text || existing.content || "").trim();
+        const prev = stripLowSignalText(existing.text || existing.content || "");
         return prev.includes(text) || text.includes(prev);
       });
       if (!isDuplicate) deduped.push(item);
@@ -152,12 +180,14 @@ async function readLastSessionSummary(workspaceDir) {
   const filePath = path.join(workspaceDir, "memory", "last-session.md");
   try {
     const content = await fs.readFile(filePath, "utf-8");
-    if (content.trim()) {
-      return truncateSection(content.trim(), MAX_LAST_SESSION_CHARS);
+    const cleaned = stripLowSignalText(content);
+    if (cleaned) {
+      return truncateSection(cleaned, MAX_LAST_SESSION_CHARS);
     }
   } catch (e) {
-    console.warn("[bootstrap-context] error:", e.message || e);
-    // file may not exist yet
+    if (e?.code !== "ENOENT") {
+      console.warn("[bootstrap-context] error:", e.message || e);
+    }
   }
   return null;
 }
@@ -174,11 +204,13 @@ async function readDailyNotes(memoryDir) {
       const matches = files.filter((f) => f.startsWith(date) && f.endsWith(".md"));
       for (const file of matches) {
         const content = await fs.readFile(path.join(memoryDir, file), "utf-8");
-        if (content.trim()) parts.push(`## ${file}\n${content.trim()}`);
+        const cleaned = stripLowSignalText(content);
+        if (cleaned) parts.push(`## ${file}\n${cleaned}`);
       }
     } catch (e) {
-      console.warn("[bootstrap-context] error:", e.message || e);
-      // directory may not exist yet
+      if (e?.code !== "ENOENT") {
+        console.warn("[bootstrap-context] error:", e.message || e);
+      }
     }
   }
   return parts.join("\n\n");
@@ -191,7 +223,10 @@ const bootstrapContextHook = async (event) => {
   if (!context || !context.bootstrapFiles) return;
 
   const workspaceDir =
-    context.workspaceDir || context.cfg?.workspace?.dir || process.env.OPENCLAW_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
+    context.workspaceDir ||
+    context.cfg?.workspace?.dir ||
+    process.env.OPENCLAW_WORKSPACE ||
+    `${process.env.HOME}/.openclaw/workspace`;
   const agentId = getAgentId(workspaceDir);
   const memoryDir = path.join(workspaceDir, "memory");
 
@@ -199,14 +234,14 @@ const bootstrapContextHook = async (event) => {
 
   const sections = [];
 
-  // 0. Fetch behavioral lessons FIRST (highest priority — always at top of context)
   const lessons = await fetchLessons(agentId);
   if (lessons.length > 0) {
     console.warn(`[bootstrap-context] fetched ${lessons.length} lessons for ${agentId}`);
     const lessonLines = ["# Critical Lessons (Behavioral Memory)\n"];
     let lessonChars = 0;
     for (const l of lessons) {
-      const text = l.text || l.content || "";
+      const text = stripLowSignalText(l.text || l.content || "");
+      if (!text || isLowSignalMemory(text)) continue;
       const line = `- ${text.slice(0, 400)}`;
       lessonChars += line.length;
       if (lessonChars > MAX_LESSON_CHARS) break;
@@ -216,15 +251,14 @@ const bootstrapContextHook = async (event) => {
     sections.push(...lessonLines);
   }
 
-  // 1. Fetch recent memories from API (per-agent)
-  const memories = await fetchRecentMemories(agentId, event.sessionKey);
+  const memories = await fetchRecentMemories(agentId);
   if (memories && memories.length > 0) {
     console.warn(`[bootstrap-context] fetched ${memories.length} memories for ${agentId}`);
     const memLines = ["# Recent Memory Recall\n"];
     let memChars = 0;
     for (const mem of memories) {
       const text = mem.text || mem.content || JSON.stringify(mem);
-      if (isCronNoise(text)) continue;
+      if (isLowSignalMemory(text)) continue;
       const cat = mem.category ? ` [${mem.category}]` : "";
       const strength = mem.strength ? ` (strength: ${mem.strength})` : "";
       const line = `- ${text.slice(0, 300)}${cat}${strength}`;
@@ -237,8 +271,7 @@ const bootstrapContextHook = async (event) => {
     console.warn(`[bootstrap-context] no memories for ${agentId}`);
   }
 
-  // 1b. Cross-agent recall for specialists
-  if (agentId !== "main" && (!memories || memories.length < 5)) {
+  if (ENABLE_CROSS_AGENT_RECALL && _memoryApiKey && agentId !== "main" && (!memories || memories.length < 5)) {
     try {
       const mainRes = await fetch(`${MEMORY_API}/recall`, {
         method: "POST",
@@ -259,8 +292,8 @@ const bootstrapContextHook = async (event) => {
           let crossChars = 0;
           for (const mem of mainMemories.slice(0, 3)) {
             const t = mem.text || "";
-        if (isCronNoise(t)) continue;
-        const line = `- ${t.slice(0, 200)} [from main]`;
+            if (isLowSignalMemory(t)) continue;
+            const line = `- ${t.slice(0, 200)} [from main]`;
             crossChars += line.length;
             if (crossChars > MAX_CROSSAGENT_CHARS) break;
             crossLines.push(line);
@@ -268,28 +301,27 @@ const bootstrapContextHook = async (event) => {
           sections.push(...crossLines);
         }
       }
-    } catch (e) { console.warn("[bootstrap-context] error:", e.message || e); /* non-critical */ }
+    } catch (e) {
+      console.warn("[bootstrap-context] error:", e.message || e);
+    }
   }
 
-  // 1c. Decision-focused recall (second query)
   const decisions = await fetchDecisionMemories(agentId);
   if (decisions && decisions.length > 0) {
-    // Deduplicate against already-fetched memories
-    const existingTexts = new Set((memories || []).map(m => (m.text || "").slice(0, 100)));
-    const newDecisions = decisions.filter(d => !existingTexts.has((d.text || "").slice(0, 100)));
+    const existingTexts = new Set((memories || []).map((m) => (m.text || "").slice(0, 100)));
+    const newDecisions = decisions.filter((d) => !existingTexts.has((d.text || "").slice(0, 100)));
     if (newDecisions.length > 0) {
       console.warn(`[bootstrap-context] fetched ${newDecisions.length} unique decisions for ${agentId}`);
       const decLines = ["\n# Recent Decisions & Changes\n"];
       for (const dec of newDecisions.slice(0, 5)) {
         const text = dec.text || dec.content || "";
-        if (isCronNoise(text)) continue;
+        if (isLowSignalMemory(text)) continue;
         decLines.push(`- ${text.slice(0, 250)}`);
       }
       sections.push(...decLines);
     }
   }
 
-  // 2. Read last session summary
   const lastSession = await readLastSessionSummary(workspaceDir);
   if (lastSession) {
     console.warn(`[bootstrap-context] read last-session.md (${lastSession.length} chars)`);
@@ -297,7 +329,6 @@ const bootstrapContextHook = async (event) => {
     sections.push(lastSession);
   }
 
-  // 3. Read daily notes
   const dailyNotes = await readDailyNotes(memoryDir);
   if (dailyNotes) {
     const trimmedNotes = truncateSection(dailyNotes, MAX_DAILY_CHARS);

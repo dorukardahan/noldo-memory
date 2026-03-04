@@ -4,5 +4,5 @@ description: "Capture user messages and assistant responses to memory in real-ti
 metadata:
   openclaw:
     emoji: "⚡"
-    events: ["message_received"]
+    events: ["message:received", "message:sent"]
 ---
