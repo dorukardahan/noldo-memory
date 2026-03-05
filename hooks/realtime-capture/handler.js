@@ -1,0 +1,232 @@
+import path from "node:path";
+import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const MEMORY_API = "http://localhost:8787/v1";
+const API_KEY_PATH =
+  process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
+let _memoryApiKey = "";
+try {
+  _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim();
+} catch (e) {
+  console.warn("[realtime-capture] error:", e.message || e);
+}
+
+const DECISION_MARKERS = [
+  /\bkarar\b/i,
+  /yapalım/i,
+  /yapacağız/i,
+  /\btamam\b/i,
+  /anlaştık/i,
+  /\bdecided\b/i,
+  /\blet'?s do\b/i,
+];
+
+const CRON_PATTERNS = [
+  /^\[cron:/i,
+  /steward-engage/i,
+  /steward-post/i,
+  /\/steward-/i,
+  /HEARTBEAT_OK/i,
+];
+
+const LOW_SIGNAL_PATTERNS = [
+  /A new session was started via \/new or \/reset/i,
+  /Conversation info \(untrusted metadata\)/i,
+  /\[Subagent Context\]/i,
+  /^User:\s*Conversation info/i,
+  /\[System Message\]/i,
+  /\[Queued announce messages while agent was busy\]/i,
+  /\bA cron job\b/i,
+  /\bA subagent task\b/i,
+  /^System:\s*\[/i,
+];
+
+const FEEDBACK_TAG_PATTERNS = {
+  verification: [
+    /neden\s*(?:doğrulamadın|kontrol\s*etmedin|bakmadın)/i,
+    /\bverify\b/i,
+    /doğrula/i,
+  ],
+  fabrication: [/\bfabrication\b/i, /yanlış\s*(?:bilgi|söyledin)/i, /uydur(?:ma|dun)/i],
+  premature_suggestion: [/öner(?:i|im)/i, /premature\s*suggestion/i, /too\s*early\s*to\s*suggest/i],
+  did_not_read_code: [
+    /kodu\s*(?:okumadın|incelemedin)/i,
+    /did\s*not\s*read\s*code/i,
+    /read\s*the\s*code\s*first/i,
+  ],
+};
+
+const FEEDBACK_MARKERS = [
+  /kaç\s*kere\s*(?:dedim|söyledim)/i,
+  /neden\s*(?:doğrulamadın|kontrol\s*etmedin|bakmadın)/i,
+  /bir\s*daha\s*yapma/i,
+  /hata\s*(?:yaptın|yapıyorsun|tekrar)/i,
+  /yanlış\s*(?:yaptın|bilgi|söyledin)/i,
+  /\bfabrication\b/i,
+  /güven(?:i|ini)?\s*(?:kaybett|sarsar|kırıl)/i,
+  /sürekli\s*(?:aynı|böyle|yanlış)/i,
+  /aa\s*(?:zaten\s*)?varmış/i,
+  /don'?t\s*(?:repeat|do\s*that|make\s*that)/i,
+  /never\s*again/i,
+  /wrong\s*(?:again|info)/i,
+  /how\s*many\s*times/i,
+];
+
+function cleanMessage(raw = "") {
+  let text = String(raw || "").replace(/\r\n/g, "\n");
+  text = text.replace(/Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```/gi, "");
+  text = text.replace(/\[Subagent Context\][\s\S]*?(?=\n\n|$)/gi, "");
+  text = text.replace(/^\s*\[[^\]]+\]\s*\[System Message\].*$/gim, "");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function parseAgentIdFromSessionKey(sessionKey = "") {
+  const raw = String(sessionKey || "").trim().toLowerCase();
+  const parts = raw.split(":").filter(Boolean);
+  if (parts.length >= 3 && parts[0] === "agent" && parts[1]) {
+    return parts[1];
+  }
+  return null;
+}
+
+function parseAgentIdFromWorkspaceDir(workspaceDir = "") {
+  const base = path.basename(workspaceDir || "");
+  if (base === "workspace") return "main";
+  if (base.startsWith("workspace-")) return base.replace("workspace-", "");
+  return null;
+}
+
+function deriveSessionNamespace(sessionKey = "") {
+  const raw = String(sessionKey || "").trim().toLowerCase();
+  if (!raw) return null;
+  const hash = crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
+  return `session-${hash}`;
+}
+
+function detectFeedbackTags(text = "") {
+  const tags = [];
+  for (const [tag, patterns] of Object.entries(FEEDBACK_TAG_PATTERNS)) {
+    if (patterns.some((p) => p.test(text))) tags.push(tag);
+  }
+  return tags.length > 0 ? tags : ["verification"];
+}
+
+function isCronNoise(text = "") {
+  return CRON_PATTERNS.some((p) => p.test(text));
+}
+function isDecision(text = "") {
+  return DECISION_MARKERS.some((p) => p.test(text));
+}
+function isFeedback(text = "") {
+  return FEEDBACK_MARKERS.some((p) => p.test(text));
+}
+function isLowSignal(text = "") {
+  return LOW_SIGNAL_PATTERNS.some((p) => p.test(text));
+}
+
+function scoreImportance(text = "") {
+  if (!text || text.length < 15 || isCronNoise(text) || isLowSignal(text)) return 0;
+  let score = 0.35;
+  if (isDecision(text)) score = Math.max(score, 0.9);
+  if (text.length > 120) score += 0.05;
+  return Math.min(1.0, score);
+}
+
+function resolveAgentId(event) {
+  const fromContext = String(event?.context?.agentId || "")
+    .trim()
+    .toLowerCase();
+  if (fromContext) return fromContext;
+  const fromSessionKey = parseAgentIdFromSessionKey(event?.sessionKey);
+  if (fromSessionKey) return fromSessionKey;
+  const fromWorkspace = parseAgentIdFromWorkspaceDir(event?.context?.workspaceDir || "");
+  if (fromWorkspace) return fromWorkspace;
+  return "main";
+}
+
+function resolveMessage(event) {
+  if (event?.type !== "message") return null;
+  const content = cleanMessage(String(event?.context?.content || ""));
+  if (!content) return null;
+  if (event.action === "received") {
+    return { role: "user", content };
+  }
+  if (event.action === "sent") {
+    if (event?.context?.success === false) return null;
+    return { role: "assistant", content };
+  }
+  return null;
+}
+
+function shouldStoreAssistant(content = "") {
+  if (!content || content.length < 80) return false;
+  if (isCronNoise(content) || isLowSignal(content)) return false;
+  if (isDecision(content)) return true;
+  return content.length >= 220 || /\b(plan|next steps?|todo|aksiyon|yapılacak)\b/i.test(content);
+}
+
+async function store(text, category, importance, agent = "main", namespace = "default") {
+  if (!_memoryApiKey) return;
+  try {
+    const res = await fetch(`${MEMORY_API}/store`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
+      body: JSON.stringify({
+        text: text.slice(0, 3000),
+        category,
+        importance,
+        agent,
+        namespace,
+        source: "hook",
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) {
+      console.warn(
+        `[realtime-capture] store failed: status=${res.status} category=${category} agent=${agent}`
+      );
+    }
+  } catch (e) {
+    console.warn("[realtime-capture] error:", e.message || e);
+  }
+}
+
+const realtimeCaptureHook = async (event) => {
+  const message = resolveMessage(event);
+  if (!message) return;
+
+  const content = message.content;
+  if (!content || content.startsWith("/") || isCronNoise(content) || isLowSignal(content)) return;
+
+  const agentId = resolveAgentId(event);
+  const sessionNamespace = deriveSessionNamespace(event?.sessionKey) || "default";
+
+  if (message.role === "user") {
+    if (isFeedback(content)) {
+      const tags = detectFeedbackTags(content);
+      const tagged = tags.map((tag) => `[tag=${tag}]`).join("");
+      await store(`[Feedback]${tagged}[lang=tr] ${content}`, "lesson", 0.95, agentId, "default");
+      return;
+    }
+
+    if (isDecision(content)) {
+      await store(`[Decision] ${content}`, "decision", 0.9, agentId, "default");
+      return;
+    }
+
+    if (content.length > 50) {
+      const imp = scoreImportance(content);
+      if (imp >= 0.4) {
+        await store(content, "user", imp, agentId, sessionNamespace);
+      }
+    }
+    return;
+  }
+
+  if (!shouldStoreAssistant(content)) return;
+  const importance = isDecision(content) ? 0.85 : Math.max(0.5, scoreImportance(content));
+  await store(content, "assistant", importance, agentId, sessionNamespace);
+};
+
+export default realtimeCaptureHook;
