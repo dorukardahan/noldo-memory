@@ -28,7 +28,8 @@ This matches OpenClaw's internal hook contract.
 
 1. Reads last 15 messages from the ending session's JSONL file
 2. Builds Q&A pairs for proper memory structure
-3. Sends to Memory API `/v1/capture` with per-agent routing
+3. Sends to Memory API `/v1/capture` with per-agent + per-session namespace routing
+4. Keeps auto-generated behavioral lessons in `default` namespace for reuse across sessions
 
 ## Requirements
 

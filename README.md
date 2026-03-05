@@ -267,6 +267,7 @@ Agent Session
 | `/v1/admin/rotate-key` | POST | Admin | Rotate API key |
 
 All endpoints accept `?agent=<id>` for per-agent routing.
+`POST /v1/capture` and `POST /v1/store` also support `namespace` in JSON body (recommended for session-scoped memory isolation).
 
 ## Search Architecture
 

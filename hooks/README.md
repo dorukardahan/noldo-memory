@@ -8,9 +8,9 @@ These files are shipped as `handler.js.example` on purpose. Copy or rename to `h
 
 | Hook | Trigger event(s) | What it does | Memory API endpoint |
 |---|---|---|---|
-| `realtime-capture` | `message:received`, `message:sent` | Captures important user/assistant messages in real time with per-agent routing | `POST /v1/store` |
-| `session-end-capture` | `command:new`, `command:reset` | Captures session-transition context, builds QA pairs, writes `last-session.md` | `POST /v1/capture` |
-| `bootstrap-context` | `agent:bootstrap` | Recalls recent memories and injects `SESSION_CONTEXT` on session start | `POST /v1/recall` |
+| `realtime-capture` | `message:received`, `message:sent` | Captures important user/assistant messages in real time with per-agent + per-session namespace routing | `POST /v1/store` |
+| `session-end-capture` | `command:new`, `command:reset` | Captures session-transition context, builds QA pairs, writes `last-session.md` with per-session namespace capture | `POST /v1/capture` |
+| `bootstrap-context` | `agent:bootstrap` | Recalls session-scoped memories first, then agent-wide lessons/decisions, injects `SESSION_CONTEXT` | `POST /v1/recall` |
 | `after-tool-call` | `after_tool_call` (plugin hook) | Captures high-signal operational command outputs | `POST /v1/store` |
 | `post-compaction-restore` | `agent:bootstrap` | Restores `COMPACTION_RECOVERY` bootstrap context when compaction flag exists | No API call (filesystem snapshot restore) |
 | `pre-session-save` | `command:new` | Saves critical context snapshot before a reset/new | No API call by default (optional `POST /v1/capture`) |

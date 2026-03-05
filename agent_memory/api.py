@@ -443,6 +443,7 @@ class RecallRequest(RequestModel):
 
 class CaptureRequest(RequestModel):
     messages: List[Dict[str, Any]] = Field(..., max_length=200)
+    namespace: str = Field(default="default", description="Namespace for captured messages")
     agent: Optional[str] = None
 
     @field_validator("messages")
@@ -674,6 +675,7 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             category=it.get("category", "other"),
             importance=float(it.get("importance", 0.5)),
             source_session=it.get("source_session"),
+            namespace=req.namespace,
             memory_type=classify_memory_type(it["text"]),
             source="session_capture",
             trust_level="system",
@@ -700,6 +702,7 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
         "merged": merged_n,
         "total": len(req.messages),
         "agent": agent_key,
+        "namespace": req.namespace,
     }
 
 

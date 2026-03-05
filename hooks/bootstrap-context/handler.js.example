@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const MEMORY_API = "http://localhost:8787/v1";
@@ -61,119 +62,139 @@ function stripLowSignalText(text = "") {
   return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function getAgentId(workspaceDir) {
-  const base = path.basename(workspaceDir);
+function getAgentId(workspaceDir, event) {
+  const fromContext = String(event?.context?.agentId || "")
+    .trim()
+    .toLowerCase();
+  if (fromContext) return fromContext;
+  const base = path.basename(workspaceDir || "");
   if (base === "workspace") return "main";
   if (base.startsWith("workspace-")) return base.replace("workspace-", "");
   return "main";
 }
 
-async function fetchRecentMemories(agentId) {
-  if (!_memoryApiKey) return [];
-
-  const queries = ["recent decisions and configuration changes", "last conversation summary and active work"];
-  const allResults = [];
-  const seen = new Set();
-
-  for (const q of queries) {
-    try {
-      const res = await fetch(`${MEMORY_API}/recall`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-        body: JSON.stringify({
-          query: agentId !== "main" ? `${agentId}: ${q}` : q,
-          limit: 25,
-          min_score: 0.01,
-          agent: agentId,
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const results = data.results || data.memories || [];
-      for (const r of results) {
-        const text = r.text || r.content || "";
-        if (isLowSignalMemory(text)) continue;
-        const key = text.slice(0, 120);
-        if (!seen.has(key)) {
-          seen.add(key);
-          allResults.push(r);
-        }
-      }
-    } catch (e) {
-      console.warn("[bootstrap-context] error:", e.message || e);
-    }
-  }
-
-  return allResults;
+function deriveSessionNamespace(sessionKey = "") {
+  const raw = String(sessionKey || "").trim().toLowerCase();
+  if (!raw) return "default";
+  const hash = crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
+  return `session-${hash}`;
 }
 
-async function fetchDecisionMemories(agentId) {
-  if (!_memoryApiKey) return null;
+async function recall(agentId, query, options = {}) {
+  if (!_memoryApiKey) return [];
   try {
+    const payload = {
+      query,
+      limit: options.limit ?? 20,
+      min_score: options.minScore ?? 0.01,
+      agent: agentId,
+    };
+    if (options.namespace) payload.namespace = options.namespace;
+    if (options.memoryType) payload.memory_type = options.memoryType;
+
     const res = await fetch(`${MEMORY_API}/recall`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-      body: JSON.stringify({
-        query: "recent decisions, architectural choices, configuration changes",
-        limit: 5,
-        min_score: 0.01,
-        agent: agentId,
-      }),
-      signal: AbortSignal.timeout(4000),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 5000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
     return data.results || data.memories || [];
   } catch (e) {
     console.warn("[bootstrap-context] error:", e.message || e);
-    return null;
+    return [];
   }
+}
+
+function dedupeMemories(items) {
+  const deduped = [];
+  const seen = new Set();
+  for (const item of items || []) {
+    const text = item?.text || item?.content || "";
+    if (isLowSignalMemory(text)) continue;
+    const key = text.slice(0, 120);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+async function fetchRecentMemories(agentId, sessionNamespace) {
+  if (!_memoryApiKey) return [];
+
+  const queries = [
+    "recent decisions and configuration changes",
+    "last conversation summary and active work",
+  ];
+
+  const sessionScoped = [];
+  if (sessionNamespace && sessionNamespace !== "default") {
+    for (const q of queries) {
+      const scoped = await recall(agentId, q, {
+        namespace: sessionNamespace,
+        limit: 20,
+        minScore: 0.0,
+        timeoutMs: 4000,
+      });
+      sessionScoped.push(...scoped);
+    }
+  }
+
+  const dedupedSession = dedupeMemories(sessionScoped);
+  if (dedupedSession.length >= 6) {
+    return dedupedSession;
+  }
+
+  const global = [];
+  for (const q of queries) {
+    const query = agentId !== "main" ? `${agentId}: ${q}` : q;
+    const results = await recall(agentId, query, { limit: 20, minScore: 0.01, timeoutMs: 5000 });
+    global.push(...results);
+  }
+
+  return dedupeMemories([...dedupedSession, ...global]);
+}
+
+async function fetchDecisionMemories(agentId) {
+  if (!_memoryApiKey) return null;
+  return recall(agentId, "recent decisions, architectural choices, configuration changes", {
+    limit: 8,
+    minScore: 0.01,
+    timeoutMs: 4000,
+  });
 }
 
 async function fetchLessons(agentId) {
   if (!_memoryApiKey) return [];
-  try {
-    const res = await fetch(`${MEMORY_API}/recall`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-      body: JSON.stringify({
-        query: "behavioral lessons",
-        limit: 20,
-        min_score: 0.0,
-        memory_type: "lesson",
-        agent: agentId,
-      }),
-      signal: AbortSignal.timeout(4000),
+  const results = await recall(agentId, "behavioral lessons", {
+    limit: 20,
+    minScore: 0.0,
+    memoryType: "lesson",
+    timeoutMs: 4000,
+  });
+
+  const sorted = results.sort((a, b) => {
+    const imp = (Number(b.importance) || 0) - (Number(a.importance) || 0);
+    if (imp !== 0) return imp;
+    return (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
+  });
+
+  const deduped = [];
+  for (const item of sorted) {
+    const text = stripLowSignalText(item.text || item.content || "");
+    if (!text) continue;
+    if (isLowSignalMemory(text)) continue;
+    const isDuplicate = deduped.some((existing) => {
+      const prev = stripLowSignalText(existing.text || existing.content || "");
+      return prev.includes(text) || text.includes(prev);
     });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const results = data.results || data.memories || [];
-
-    const sorted = results.sort((a, b) => {
-      const imp = (Number(b.importance) || 0) - (Number(a.importance) || 0);
-      if (imp !== 0) return imp;
-      return (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
-    });
-
-    const deduped = [];
-    for (const item of sorted) {
-      const text = stripLowSignalText(item.text || item.content || "");
-      if (!text) continue;
-      if (isLowSignalMemory(text)) continue;
-      const isDuplicate = deduped.some((existing) => {
-        const prev = stripLowSignalText(existing.text || existing.content || "");
-        return prev.includes(text) || text.includes(prev);
-      });
-      if (!isDuplicate) deduped.push(item);
-      if (deduped.length >= 5) break;
-    }
-
-    return deduped;
-  } catch (e) {
-    console.warn("[bootstrap-context] error:", e.message || e);
-    return [];
+    if (!isDuplicate) deduped.push(item);
+    if (deduped.length >= 5) break;
   }
+
+  return deduped;
 }
 
 async function readLastSessionSummary(workspaceDir) {
@@ -227,10 +248,13 @@ const bootstrapContextHook = async (event) => {
     context.cfg?.workspace?.dir ||
     process.env.OPENCLAW_WORKSPACE ||
     `${process.env.HOME}/.openclaw/workspace`;
-  const agentId = getAgentId(workspaceDir);
+  const agentId = getAgentId(workspaceDir, event);
+  const sessionNamespace = deriveSessionNamespace(event?.sessionKey);
   const memoryDir = path.join(workspaceDir, "memory");
 
-  console.warn(`[bootstrap-context] hook fired (agent=${agentId})`);
+  console.warn(
+    `[bootstrap-context] hook fired (agent=${agentId} namespace=${sessionNamespace})`
+  );
 
   const sections = [];
 
@@ -251,9 +275,11 @@ const bootstrapContextHook = async (event) => {
     sections.push(...lessonLines);
   }
 
-  const memories = await fetchRecentMemories(agentId);
+  const memories = await fetchRecentMemories(agentId, sessionNamespace);
   if (memories && memories.length > 0) {
-    console.warn(`[bootstrap-context] fetched ${memories.length} memories for ${agentId}`);
+    console.warn(
+      `[bootstrap-context] fetched ${memories.length} memories for ${agentId} namespace=${sessionNamespace}`
+    );
     const memLines = ["# Recent Memory Recall\n"];
     let memChars = 0;
     for (const mem of memories) {

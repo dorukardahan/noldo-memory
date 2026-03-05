@@ -253,6 +253,34 @@ class TestCapture:
         assert resp.status_code == 200
         assert resp.json()["stored"] == 0
 
+    async def test_capture_with_namespace(self, client):
+        namespace = "session-test"
+        text = "namespace izolasyon testi için kayıt"
+
+        capture_resp = await client.post(
+            "/v1/capture",
+            json={
+                "messages": [{"text": text, "role": "user"}],
+                "namespace": namespace,
+            },
+        )
+        assert capture_resp.status_code == 200
+        assert capture_resp.json()["namespace"] == namespace
+        storage = api_module._storage_pool.get("main")
+        conn = storage._get_conn()
+        row = conn.execute(
+            "SELECT text, namespace FROM memories WHERE text LIKE ? ORDER BY created_at DESC LIMIT 1",
+            ("%namespace izolasyon testi%",),
+        ).fetchone()
+        assert row is not None
+        assert row["namespace"] == namespace
+
+        default_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM memories WHERE text LIKE ? AND namespace = 'default'",
+            ("%namespace izolasyon testi%",),
+        ).fetchone()
+        assert int(default_count["c"]) == 0
+
 
 # ---------------------------------------------------------------------------
 # /v1/forget

@@ -4,6 +4,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 
 const MEMORY_API = "http://localhost:8787/v1";
@@ -71,7 +72,18 @@ function parseAgentIdFromWorkspaceDir(workspaceDir = "") {
   return null;
 }
 
+function deriveSessionNamespace(sessionKey = "") {
+  const raw = String(sessionKey || "").trim().toLowerCase();
+  if (!raw) return "default";
+  const hash = crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
+  return `session-${hash}`;
+}
+
 function deriveAgentId(event = {}) {
+  const fromContext = String(event?.context?.agentId || "")
+    .trim()
+    .toLowerCase();
+  if (fromContext) return fromContext;
   const fromSessionKey = parseAgentIdFromSessionKey(event?.sessionKey);
   if (fromSessionKey) return fromSessionKey;
   const fromWorkspace = parseAgentIdFromWorkspaceDir(event?.context?.workspaceDir || "");
@@ -302,6 +314,7 @@ const sessionEndCaptureHook = async (event) => {
   }
 
   const agentId = deriveAgentId(event || {});
+  const sessionNamespace = deriveSessionNamespace(event?.sessionKey);
   const sessionFile = await resolveSessionFileFromEvent(event, agentId);
   if (!sessionFile) {
     console.warn(
@@ -333,6 +346,7 @@ const sessionEndCaptureHook = async (event) => {
         body: JSON.stringify({
           messages: pairs.map((p) => ({ role: p.role || "assistant", text: p.text })),
           agent: agentId,
+          namespace: sessionNamespace,
         }),
         signal: AbortSignal.timeout(30000),
       });
@@ -342,7 +356,7 @@ const sessionEndCaptureHook = async (event) => {
       } else {
         const payload = await captureRes.json().catch(() => ({}));
         console.warn(
-          `[session-end-capture] capture ok: stored=${payload?.stored ?? "?"} merged=${payload?.merged ?? "?"} total=${payload?.total ?? "?"}`
+          `[session-end-capture] capture ok: stored=${payload?.stored ?? "?"} merged=${payload?.merged ?? "?"} total=${payload?.total ?? "?"} namespace=${payload?.namespace ?? sessionNamespace}`
         );
       }
     } catch (err) {

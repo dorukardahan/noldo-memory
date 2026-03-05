@@ -1,4 +1,5 @@
 import path from "node:path";
+import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 
 const MEMORY_API = "http://localhost:8787/v1";
@@ -96,6 +97,13 @@ function parseAgentIdFromWorkspaceDir(workspaceDir = "") {
   return null;
 }
 
+function deriveSessionNamespace(sessionKey = "") {
+  const raw = String(sessionKey || "").trim().toLowerCase();
+  if (!raw) return null;
+  const hash = crypto.createHash("sha1").update(raw).digest("hex").slice(0, 16);
+  return `session-${hash}`;
+}
+
 function detectFeedbackTags(text = "") {
   const tags = [];
   for (const [tag, patterns] of Object.entries(FEEDBACK_TAG_PATTERNS)) {
@@ -126,6 +134,10 @@ function scoreImportance(text = "") {
 }
 
 function resolveAgentId(event) {
+  const fromContext = String(event?.context?.agentId || "")
+    .trim()
+    .toLowerCase();
+  if (fromContext) return fromContext;
   const fromSessionKey = parseAgentIdFromSessionKey(event?.sessionKey);
   if (fromSessionKey) return fromSessionKey;
   const fromWorkspace = parseAgentIdFromWorkspaceDir(event?.context?.workspaceDir || "");
@@ -154,7 +166,7 @@ function shouldStoreAssistant(content = "") {
   return content.length >= 220 || /\b(plan|next steps?|todo|aksiyon|yapılacak)\b/i.test(content);
 }
 
-async function store(text, category, importance, agent = "main") {
+async function store(text, category, importance, agent = "main", namespace = "default") {
   if (!_memoryApiKey) return;
   try {
     const res = await fetch(`${MEMORY_API}/store`, {
@@ -165,6 +177,7 @@ async function store(text, category, importance, agent = "main") {
         category,
         importance,
         agent,
+        namespace,
         source: "hook",
       }),
       signal: AbortSignal.timeout(15000),
@@ -187,24 +200,25 @@ const realtimeCaptureHook = async (event) => {
   if (!content || content.startsWith("/") || isCronNoise(content) || isLowSignal(content)) return;
 
   const agentId = resolveAgentId(event);
+  const sessionNamespace = deriveSessionNamespace(event?.sessionKey) || "default";
 
   if (message.role === "user") {
     if (isFeedback(content)) {
       const tags = detectFeedbackTags(content);
       const tagged = tags.map((tag) => `[tag=${tag}]`).join("");
-      await store(`[Feedback]${tagged}[lang=tr] ${content}`, "lesson", 0.95, agentId);
+      await store(`[Feedback]${tagged}[lang=tr] ${content}`, "lesson", 0.95, agentId, "default");
       return;
     }
 
     if (isDecision(content)) {
-      await store(`[Decision] ${content}`, "decision", 0.9, agentId);
+      await store(`[Decision] ${content}`, "decision", 0.9, agentId, "default");
       return;
     }
 
     if (content.length > 50) {
       const imp = scoreImportance(content);
       if (imp >= 0.4) {
-        await store(content, "user", imp, agentId);
+        await store(content, "user", imp, agentId, sessionNamespace);
       }
     }
     return;
@@ -212,7 +226,7 @@ const realtimeCaptureHook = async (event) => {
 
   if (!shouldStoreAssistant(content)) return;
   const importance = isDecision(content) ? 0.85 : Math.max(0.5, scoreImportance(content));
-  await store(content, "assistant", importance, agentId);
+  await store(content, "assistant", importance, agentId, sessionNamespace);
 };
 
 export default realtimeCaptureHook;
