@@ -360,17 +360,64 @@ def parse_session_file(path: Path, gap_hours: float = 4.0) -> List[Chunk]:
             except json.JSONDecodeError:
                 continue
 
-    return _chunk_session(entries, session_id=path.stem, gap_hours=gap_hours)
+    session_id = path.stem
+    try:
+        if path.parent.name == "sessions" and path.parent.parent.name:
+            session_id = f"{path.parent.parent.name}:{path.stem}"
+    except Exception:
+        session_id = path.stem
+
+    return _chunk_session(entries, session_id=session_id, gap_hours=gap_hours)
 
 
-def discover_sessions(sessions_dir: Optional[str] = None) -> List[Path]:
-    """Return all .jsonl session files sorted by modification time."""
-    cfg = load_config()
-    sdir = Path(sessions_dir or cfg.sessions_dir)
-    if not sdir.is_dir():
-        logger.warning("Sessions directory not found: %s", sdir)
+def _discover_session_files_in_dir(sessions_dir: Path) -> List[Path]:
+    if not sessions_dir.is_dir():
+        logger.warning("Sessions directory not found: %s", sessions_dir)
         return []
-    return sorted(sdir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    return sorted(sessions_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+
+
+def _discover_session_files_in_root(sessions_root: Path) -> List[Path]:
+    if not sessions_root.is_dir():
+        logger.warning("Sessions root not found: %s", sessions_root)
+        return []
+
+    files: list[Path] = []
+    for agent_dir in sorted(sessions_root.iterdir()):
+        if not agent_dir.is_dir():
+            continue
+        sessions_dir = agent_dir / "sessions"
+        if not sessions_dir.is_dir():
+            continue
+        files.extend(sessions_dir.glob("*.jsonl"))
+
+    return sorted(files, key=lambda p: p.stat().st_mtime)
+
+
+def discover_sessions(
+    sessions_dir: Optional[str] = None,
+    sessions_root: Optional[str] = None,
+) -> List[Path]:
+    """Return all .jsonl session files sorted by modification time.
+
+    Discovery precedence:
+    1. Explicit ``sessions_dir`` argument
+    2. Explicit ``sessions_root`` argument
+    3. ``AGENT_MEMORY_SESSIONS_ROOT`` / config.sessions_root
+    4. ``AGENT_MEMORY_SESSIONS_DIR`` / config.sessions_dir
+    """
+    cfg = load_config()
+
+    if sessions_dir:
+        return _discover_session_files_in_dir(Path(sessions_dir))
+
+    effective_root = sessions_root or cfg.sessions_root
+    if effective_root:
+        discovered = _discover_session_files_in_root(Path(effective_root))
+        if discovered:
+            return discovered
+
+    return _discover_session_files_in_dir(Path(cfg.sessions_dir))
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +428,7 @@ async def ingest_sessions(
     storage: MemoryStorage,
     embedder: OpenRouterEmbeddings,
     sessions_dir: Optional[str] = None,
+    sessions_root: Optional[str] = None,
     gap_hours: float = 4.0,
     batch_size: int = 50,
     progress_cb: Optional[Callable[[int, int], None]] = None,
@@ -397,7 +445,7 @@ async def ingest_sessions(
 
     Returns stats dict.
     """
-    sessions = discover_sessions(sessions_dir)
+    sessions = discover_sessions(sessions_dir=sessions_dir, sessions_root=sessions_root)
     if not sessions:
         return {"sessions": 0, "chunks": 0, "stored": 0, "skipped_dup": 0}
 

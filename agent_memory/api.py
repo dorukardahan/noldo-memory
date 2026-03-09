@@ -714,18 +714,10 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
 
     storage = _get_storage(req.agent, request=request)
 
+    # Async embedding: store without vector, let embed_worker handle it.
+    # This reduces store latency from ~8.8s to <100ms.
+    # embed_worker runs every 5 minutes and backfills vectorless memories.
     vector = None
-    if _embedder:
-        for attempt in range(3):
-            try:
-                vector = await _embedder.embed(req.text)
-                break
-            except Exception as exc:
-                if attempt < 2:
-                    logger.warning("Embed retry %d/3: %s", attempt + 1, exc)
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                else:
-                    logger.error("Embed failed after 3 attempts: %s", exc)
 
     # Rule detection: override category/importance if instruction detected
     category = req.category
@@ -776,18 +768,10 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
 
     storage = _get_storage(req.agent, request=request)
 
+    # Async embedding: store without vector, let embed_worker handle it.
+    # This reduces store latency from ~8.8s to <100ms.
+    # embed_worker runs every 5 minutes and backfills vectorless memories.
     vector = None
-    if _embedder:
-        for attempt in range(3):
-            try:
-                vector = await _embedder.embed(req.text)
-                break
-            except Exception as exc:
-                if attempt < 2:
-                    logger.warning("Embed retry %d/3: %s", attempt + 1, exc)
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                else:
-                    logger.error("Embed failed after 3 attempts: %s", exc)
 
     res = storage.merge_or_store(
         text=req.text,

@@ -7,6 +7,8 @@ set -euo pipefail
 # Resolve API key file: env var > ~/.agent-memory > legacy ~/.agent-memory-legacy
 if [ -n "${AGENT_MEMORY_API_KEY_FILE:-}" ]; then
   API_KEY_FILE="$AGENT_MEMORY_API_KEY_FILE"
+elif [ -f "$HOME/.asuman/memory-api-key" ]; then
+  API_KEY_FILE="$HOME/.asuman/memory-api-key"
 elif [ -f "$HOME/.agent-memory/memory-api-key" ]; then
   API_KEY_FILE="$HOME/.agent-memory/memory-api-key"
 elif [ -f "$HOME/.agent-memory-legacy/memory-api-key" ]; then

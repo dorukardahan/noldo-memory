@@ -64,6 +64,7 @@ class Config:
 
     # Sessions
     sessions_dir: str = str(Path.home() / ".openclaw" / "agents" / "main" / "sessions")
+    sessions_root: str = str(Path.home() / ".openclaw" / "agents")
 
     # Ingest
     chunk_gap_hours: float = 4.0
@@ -125,6 +126,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         AGENT_MEMORY_DIMENSIONS
         AGENT_MEMORY_HOST
         AGENT_MEMORY_SESSIONS_DIR
+        AGENT_MEMORY_SESSIONS_ROOT
         AGENT_MEMORY_W_SEMANTIC
         AGENT_MEMORY_W_KEYWORD
         AGENT_MEMORY_W_RECENCY
@@ -172,6 +174,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         "AGENT_MEMORY_DIMENSIONS": ("embedding_dimensions", int),
         "AGENT_MEMORY_HOST": ("api_host", str),
         "AGENT_MEMORY_SESSIONS_DIR": ("sessions_dir", str),
+        "AGENT_MEMORY_SESSIONS_ROOT": ("sessions_root", str),
         "OPENROUTER_BASE_URL": ("openrouter_base_url", str),
         "AGENT_MEMORY_API_KEY": ("api_key", str),
         "AGENT_MEMORY_W_SEMANTIC": ("weight_semantic", float),
@@ -206,6 +209,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         "ASUMAN_MEMORY_DIMENSIONS": "AGENT_MEMORY_DIMENSIONS",
         "ASUMAN_MEMORY_HOST": "AGENT_MEMORY_HOST",
         "ASUMAN_SESSIONS_DIR": "AGENT_MEMORY_SESSIONS_DIR",
+        "ASUMAN_SESSIONS_ROOT": "AGENT_MEMORY_SESSIONS_ROOT",
         "ASUMAN_MEMORY_CONFIG": "AGENT_MEMORY_CONFIG",
     }
 
