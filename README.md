@@ -102,8 +102,12 @@ python -m agent_memory
 
 ```json
 {
-  "memorySearch": {
-    "enabled": false
+  "agents": {
+    "defaults": {
+      "memorySearch": {
+        "enabled": false
+      }
+    }
   }
 }
 ```
@@ -123,16 +127,15 @@ python -m agent_memory
 **4c. Install hooks:**
 
 ```bash
-HOOKS_DIR="$HOME/.openclaw/workspace/hooks"
-
-for hook in realtime-capture session-end-capture bootstrap-context \
-            after-tool-call pre-session-save post-compaction-restore \
-            subagent-complete; do
-  mkdir -p "$HOOKS_DIR/$hook"
-  cp "hooks/$hook/handler.js.example" "$HOOKS_DIR/$hook/handler.js"
-  cp "hooks/$hook/HOOK.md" "$HOOKS_DIR/$hook/HOOK.md" 2>/dev/null
-done
+openclaw hooks install -l "$(pwd)/hooks"
 ```
+
+This keeps the repo as the source of truth via `hooks.internal.load.extraDirs`
+and avoids the old copied-handler drift inside `~/.openclaw/workspace/hooks/`.
+The hook pack now ships installable sanitized `handler.js` files, while keeping
+mirrored `handler.js.example` references for manual workflows.
+
+Fallback manual mode is still possible through [`hooks/README.md`](./hooks/README.md).
 
 **4d. Set the API key for hooks:**
 
@@ -142,7 +145,26 @@ echo "your-api-key-here" > ~/.noldomem/memory-api-key
 chmod 600 ~/.noldomem/memory-api-key
 ```
 
+Optional multi-workspace session discovery for maintenance/ingest utilities:
+
+```bash
+# In .env
+AGENT_MEMORY_SESSIONS_ROOT="$HOME/.openclaw/agents"
+```
+
 **4e. Restart OpenClaw** to load the hooks.
+
+Optional per-workspace policy file:
+
+```json
+{
+  "crossWorkspaceRecall": false,
+  "sharedNamespaces": [],
+  "dailyNotesEnabled": true
+}
+```
+
+Path: `workspace/.openclaw/noldo-memory.json`
 
 ### Step 5: Verify
 

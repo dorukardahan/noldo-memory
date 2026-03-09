@@ -20,6 +20,14 @@ Injects relevant memory context at the start of every agent session.
 3. Reads today's and yesterday's daily notes from `workspace/memory/`
 4. Pushes combined context as `SESSION_CONTEXT` bootstrap file
 
+## Workspace policy
+
+If present, `workspace/.openclaw/noldo-memory.json` can tune bootstrap behavior:
+
+- `crossWorkspaceRecall`: opt-in limited recall from the `main` agent/workspace
+- `sharedNamespaces`: include extra namespaces during bootstrap
+- `dailyNotesEnabled`: disable daily note injection for that workspace
+
 ## Requirements
 
 - Memory API running at `localhost:8787`

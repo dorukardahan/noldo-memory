@@ -232,6 +232,17 @@ class TestDiscoverSessions:
         sessions = discover_sessions("/tmp/nonexistent-agent-memory-test-dir")
         assert sessions == []
 
+    def test_discover_sessions_root(self, tmp_path):
+        agents_root = tmp_path / "agents"
+        (agents_root / "main" / "sessions").mkdir(parents=True)
+        (agents_root / "devops" / "sessions").mkdir(parents=True)
+        (agents_root / "main" / "sessions" / "a.jsonl").write_text("{}\n")
+        (agents_root / "devops" / "sessions" / "b.jsonl").write_text("{}\n")
+
+        sessions = discover_sessions(sessions_root=str(agents_root))
+        assert len(sessions) == 2
+        assert {path.parent.parent.name for path in sessions} == {"main", "devops"}
+
 
 # ---------------------------------------------------------------------------
 # Full ingest pipeline
@@ -340,6 +351,45 @@ class TestIngestSessions:
         )
 
         assert len(progress_calls) >= 1
+
+    async def test_ingest_multi_agent_sessions_root_preserves_agent_session_id(
+        self, tmp_path, tmp_storage, fake_embedder, sample_session_entries
+    ):
+        agents_root = tmp_path / "agents"
+        main_dir = agents_root / "main" / "sessions"
+        devops_dir = agents_root / "devops" / "sessions"
+        main_dir.mkdir(parents=True)
+        devops_dir.mkdir(parents=True)
+
+        for idx, (session_dir, name) in enumerate(((main_dir, "main-thread"), (devops_dir, "ops-thread"))):
+            session_file = session_dir / f"{name}.jsonl"
+            with open(session_file, "w") as f:
+                for entry_idx, entry in enumerate(sample_session_entries):
+                    row = dict(entry)
+                    if entry_idx == 0:
+                        row = {
+                            **row,
+                            "message": {
+                                **row["message"],
+                                "content": f"{row['message']['content']} [{name}-{idx}]",
+                            },
+                        }
+                    f.write(json.dumps(row) + "\n")
+
+        result = await ingest_sessions(
+            storage=tmp_storage,
+            embedder=fake_embedder,
+            sessions_root=str(agents_root),
+        )
+
+        assert result["sessions"] == 2
+        conn = tmp_storage._get_conn()
+        rows = conn.execute(
+            "SELECT DISTINCT source_session FROM memories WHERE source_session IS NOT NULL"
+        ).fetchall()
+        source_sessions = {row["source_session"] for row in rows}
+        assert any(value.startswith("main:") for value in source_sessions)
+        assert any(value.startswith("devops:") for value in source_sessions)
 
 
 class TestClassifyMemoryType:
