@@ -127,9 +127,51 @@ _OPS_NOUNS_RE = re.compile(
 )
 
 
+# Observation/conditional patterns — suppress operational classification
+# when text is a question, hypothesis, or observation ABOUT ops, not performing ops
+_OBSERVATION_SUPPRESSOR_RE = re.compile(
+    # Turkish: conditional/observational suffixes
+    r"(?:\w+\s+sonrası\b|\w+\s+edince\b|\w+\s+deyince\b|"
+    r"\w+\s+yapınca\b|\w+\s+edersen\b|\w+\s+eder\s?se\b|"
+    r"\w+\s+olunca\b|\w+\s+olursa\b|"
+    r"\bne\s+olur\b|\bne\s+oluyor\b|\bacaba\b|"
+    # English: conditional/question patterns
+    r"\bwhen\s+(?:you|I|we)\s+\w+|\bif\s+(?:you|I|we)\s+\w+|"
+    r"\bafter\s+\w+ing\b|\bwhat\s+happens\b|\bwhy\s+does\b|"
+    r"\bdoes\s+it\b)",
+    re.IGNORECASE | re.UNICODE,
+)
+# Turkish question particles (separate — very short patterns need own check)
+_QUESTION_PARTICLE_RE = re.compile(
+    r"\b(?:mu|mı|mü|mi)\b",
+    re.UNICODE,
+)
+
+
+def _is_observation(text: str) -> bool:
+    """Check if text is a question/observation about ops rather than performing ops."""
+    if _OBSERVATION_SUPPRESSOR_RE.search(text):
+        return True
+    # Question particle + question-like context
+    if _QUESTION_PARTICLE_RE.search(text) and "?" not in text:
+        # Turkish question particles without ? — likely embedded question
+        return True
+    if text.rstrip().endswith("?"):
+        return True
+    return False
+
+
 def _is_operational_event(text: str) -> bool:
-    """Detect operational events requiring BOTH an ops verb and an ops noun."""
-    return bool(_OPS_VERBS_RE.search(text) and _OPS_NOUNS_RE.search(text))
+    """Detect operational events requiring BOTH an ops verb and an ops noun.
+
+    Suppressed if text is a question/observation about ops (not an action).
+    """
+    if not (_OPS_VERBS_RE.search(text) and _OPS_NOUNS_RE.search(text)):
+        return False
+    # Suppress if this is an observation/question, not an actual operation
+    if _is_observation(text):
+        return False
+    return True
 
 
 # --- Incident detection (failure/crash/error + system noun) ---

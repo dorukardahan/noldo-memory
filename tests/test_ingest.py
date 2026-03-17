@@ -523,6 +523,46 @@ class TestClassifyMemoryType:
         from agent_memory.ingest import classify_memory_type
         assert classify_memory_type("Service stopped after migration") == "operational_event"
 
+    # --- Observation suppressor (bug reports should NOT be operational) ---
+
+    def test_obs_restart_sonrasi_turkish(self):
+        """Bug report about restart side effect should NOT be operational."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("PM2 restart sonrası eski kodu mu yüklüyor") != "operational_event"
+
+    def test_obs_restart_edince_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Gateway i restart edince session kopuyor") != "operational_event"
+
+    def test_obs_deyince_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("docker compose up deyince port conflict veriyor") != "operational_event"
+
+    def test_obs_edersen_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("service restart edersen ne olur") != "operational_event"
+
+    def test_obs_when_english(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("when you restart the service it crashes") != "operational_event"
+
+    def test_obs_if_english(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("if I restart docker what happens") != "operational_event"
+
+    def test_obs_question_mark(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("does the service crash after restart?") != "operational_event"
+
+    # Ensure actual ops still work with suppressor active
+    def test_ops_still_works_ettim(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("PM2 restart ettim") == "operational_event"
+
+    def test_ops_still_works_edildi(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Gateway restart edildi başarıyla") == "operational_event"
+
     # --- Incident detection ---
 
     def test_incident_deploy_failed(self):
