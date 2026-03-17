@@ -375,24 +375,34 @@ const bootstrapContextHook = async (event) => {
     }
   }
 
-  // Recent operational events — config changes, incidents, deployments
+  // Recent operational events — typed recall first, text recall fallback
   if (_memoryApiKey) {
-    const opsQueries = [
-      { query: "config change credential update .env modified", filter: /config|credential|\.env|güncellen|update/i, title: "Config/Credential Changes" },
-      { query: "service restart crash incident failure deploy", filter: /restart|crash|fail|incident|deploy|down|error/i, title: "Recent Incidents & Ops Events" },
+    const opsTypedQueries = [
+      { memoryType: "config_change", query: "config credential update", title: "Config/Credential Changes", limit: 5 },
+      { memoryType: "incident", query: "incident failure crash", title: "Recent Incidents", limit: 3 },
+      { memoryType: "deployment", query: "deploy release", title: "Recent Deployments", limit: 3 },
     ];
-    for (const oq of opsQueries) {
+    for (const oq of opsTypedQueries) {
       try {
-        const opsRecall = await recall(agentId, oq.query, {
-          limit: 5,
-          minScore: 0.3,
+        // Try typed recall first (precise)
+        let opsItems = await recall(agentId, oq.query, {
+          limit: oq.limit,
+          minScore: 0.1,
           timeoutMs: 3000,
+          memoryType: oq.memoryType,
         });
-        const opsItems = (opsRecall || []).filter((m) => oq.filter.test(m.text || ""));
-        if (opsItems.length > 0) {
+        // Fallback to text recall if typed returns nothing
+        if (!opsItems || opsItems.length === 0) {
+          opsItems = await recall(agentId, oq.query, {
+            limit: oq.limit,
+            minScore: 0.3,
+            timeoutMs: 3000,
+          });
+        }
+        if (opsItems && opsItems.length > 0) {
           const opsLines = [`\n# ${oq.title} (CHECK BEFORE ASKING USER)\n`];
           opsLines.push("> ⚠️ Check these memories FIRST before asking the user about related issues.\n");
-          for (const item of opsItems.slice(0, 5)) {
+          for (const item of opsItems.slice(0, oq.limit)) {
             const text = (item.text || "").slice(0, 300);
             opsLines.push(`- ${text}`);
           }

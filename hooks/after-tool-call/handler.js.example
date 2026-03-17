@@ -37,10 +37,15 @@ const IMPORTANT_CMD_PATTERNS = [
   /resize2fs|growpart/i,
 ];
 
+// Only capture mutating/meaningful dev commands, not read-only exploration
 const CAPTURE_COMMANDS = [
-  /^(git\s|gh\s|npm\s|pip\s|curl\s|ls\s|cat\s|grep\s|find\s|wc\s)/,
-  /^(python3?\s-m\spytest)/,
-  /^(ruff\s|black\s|mypy\s)/,
+  /^git\s+(?:push|commit|merge|tag|checkout\s+-b)/,
+  /^gh\s+(?:pr\s+(?:create|merge|close)|issue\s+(?:create|close)|release)/,
+  /^npm\s+(?:publish|install|update|uninstall)/,
+  /^pip3?\s+install/,
+  /^curl\s+.*-X\s*(?:POST|PUT|DELETE|PATCH)/i,
+  /^python3?\s+-m\s+pytest/,
+  /^(?:ruff|black|mypy)\s/,
 ];
 
 function getAgentId(workspaceDir) {
@@ -84,12 +89,19 @@ function shouldCapture(toolName, toolInput) {
 }
 
 // Classify exec command type for memory_type preassignment
+// Order matches Python classifier: incident > config > ops > deploy
+// Only preassign for high-confidence cases; null = let server classifier decide
 function classifyExecType(cmd) {
-  if (/systemctl|service\s|docker|compose|kubectl|pm2/i.test(cmd)) return "operational_event";
-  if (/deploy|push|publish|release|merge/i.test(cmd)) return "deployment";
-  if (/ufw|iptables|certbot|chmod|chown|ssl/i.test(cmd)) return "operational_event";
-  if (/\.env|\.conf|\.service|config/i.test(cmd)) return "config_change";
-  return null; // let classifier decide
+  // Config file mutations — high confidence
+  if (/(?:sed\s+-i|cp|mv|rm|edit|write)\s.*(?:\.env|\.conf|\.service|config)/i.test(cmd)) return "config_change";
+  // Service lifecycle — high confidence
+  if (/systemctl\s+(?:restart|stop|start|enable|disable)/i.test(cmd)) return "operational_event";
+  if (/docker\s+(?:compose\s+)?(?:up|down|restart|stop|start|build)/i.test(cmd)) return "operational_event";
+  // Deploy actions — high confidence
+  if (/git\s+push|npm\s+publish/i.test(cmd)) return "deployment";
+  // Security ops — high confidence
+  if (/ufw\s+(?:allow|deny|enable|disable)|iptables|certbot/i.test(cmd)) return "operational_event";
+  return null; // let server-side classifier decide for ambiguous commands
 }
 
 function scoreToolOutput(toolInput, toolOutput) {

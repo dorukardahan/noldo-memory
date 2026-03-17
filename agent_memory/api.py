@@ -465,7 +465,7 @@ class StoreRequest(RequestModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     namespace: str = Field(default="default", description="Namespace for topic-based grouping")
     source: Optional[str] = Field(default=None, description="Provenance label: api, hook, session_capture, import, auto_escalation")
-    memory_type: Optional[str] = Field(default=None, description="Pre-assigned memory type from hook (overrides classifier if set)")
+    memory_type: Optional[VALID_MEMORY_TYPES] = Field(default=None, description="Pre-assigned memory type from hook (overrides classifier if set)")
     agent: Optional[str] = None
 
 
