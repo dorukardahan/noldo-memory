@@ -74,15 +74,23 @@ _FACTUAL_PATTERNS_RE = re.compile(
 )
 
 # Config/credential change patterns — classify as "fact" with high retrievability
-_CONFIG_CHANGE_RE = re.compile(
-    r"(?:güncellen\w*|değiştir\w*|değiştiril\w*|update[ds]?\b|changed?\s+(?:to|from)|"
-    r"\bcredential\w*|\.env\b|config\s*(?:update|change|değişik)|"
-    r"rotate[ds]?\b|propagat\w*|migrat\w*|"
-    r"dosya\s*(?:güncellen|değişti|update)|"
-    r"(?:api|secret|token|key)\s*(?:güncellen|değişti|update|rotate|change)|"
-    r"(?:yeni|new)\s*(?:credential|token|key|şifre|password))",
+# Requires co-occurrence: a change verb + a config/credential noun in the same text
+_CONFIG_CHANGE_VERBS_RE = re.compile(
+    r"(?:güncellen\w*|değiştir\w*|değiştiril\w*|update[ds]?\b|changed?\b|"
+    r"rotate[ds]?\b|modify|modified|modif\w*|yenilen\w*|taşı\w*|"
+    r"propagat\w*|deploy\w*)",
     re.IGNORECASE | re.UNICODE,
 )
+_CONFIG_CHANGE_NOUNS_RE = re.compile(
+    r"(?:credential\w*|\.env\b|config\w*|secret\w*|token\w*|"
+    r"api.?key|password|şifre|parola|"
+    r"dosya\w*|file\w*|service\b|\.conf\b|\.yaml\b|\.yml\b|\.toml\b)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+def _is_config_change(text: str) -> bool:
+    """Detect config/credential changes requiring BOTH a change verb and a config noun."""
+    return bool(_CONFIG_CHANGE_VERBS_RE.search(text) and _CONFIG_CHANGE_NOUNS_RE.search(text))
 
 _PREFERENCE_KEYWORDS_RE = re.compile(
     r"\b(?:sevdiğim|sevdigim|prefer|like|hate|always|never)\b",
@@ -154,8 +162,8 @@ def classify_memory_type(text: str) -> str:
     # Lesson detection first (highest priority — behavioral corrections)
     if _LESSON_KEYWORDS_RE.search(content):
         return "lesson"
-    # Config/credential changes — high-priority facts
-    if _CONFIG_CHANGE_RE.search(content):
+    # Config/credential changes — high-priority facts (requires verb+noun co-occurrence)
+    if _is_config_change(content):
         return "fact"
     if _ENTITY_NAME_RE.search(content) or _FACTUAL_PATTERNS_RE.search(content):
         return "fact"

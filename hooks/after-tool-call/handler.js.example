@@ -51,11 +51,15 @@ function getAgentId(workspaceDir) {
 }
 
 // Config/credential file patterns — structured fact capture for edit/write tools
+// Narrowed to known config basenames to avoid noise from package.json, test fixtures, etc.
 const CONFIG_FILE_PATTERNS = [
-  /\.(env|conf|json|yaml|yml|toml|ini|cfg|service)$/i,
-  /credential/i,
-  /secret/i,
-  /\.env\./i,  // .env.local, .env.production etc.
+  /\.env(?:\.\w+)?$/i,                    // .env, .env.local, .env.production
+  /(?:^|\/)config\.\w+$/i,               // config.json, config.yaml, etc.
+  /(?:^|\/)settings\.\w+$/i,             // settings.json, settings.yaml
+  /(?:^|\/)docker-compose\.\w+$/i,       // docker-compose.yml
+  /\.(?:conf|service|ini|cfg)$/i,        // nginx.conf, systemd .service, .ini, .cfg
+  /credential/i,                          // anything with "credential" in path
+  /secret/i,                              // anything with "secret" in path
 ];
 
 function isConfigFile(filePath) {

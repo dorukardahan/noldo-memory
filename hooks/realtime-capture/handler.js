@@ -234,8 +234,15 @@ const realtimeCaptureHook = async (event) => {
     if (propagationMatch) {
       const claimedCount = parseInt(propagationMatch[1], 10);
       // Count actual file references in the message (paths with extensions)
-      const fileRefs = content.match(/[\w/.-]+\.\w{1,10}/g) || [];
-      const uniqueFiles = [...new Set(fileRefs.filter(f => /\.(env|conf|json|yaml|yml|toml|py|js|ts|sh|service|cfg|ini)$/i.test(f)))];
+      // Match both normal files (name.ext) and bare dotfiles (.env, .env.local)
+      const normalFiles = content.match(/[\w/.-]+\.\w{1,10}/g) || [];
+      const dotFiles = content.match(/(?:^|\s|,|:)(\.env(?:\.\w+)?)\b/gi) || [];
+      const cleanDotFiles = dotFiles.map(f => f.trim().replace(/^[,:\s]+/, ""));
+      const allFileRefs = [...normalFiles, ...cleanDotFiles];
+      const uniqueFiles = [...new Set(allFileRefs.filter(f =>
+        /\.(env|conf|json|yaml|yml|toml|py|js|ts|sh|service|cfg|ini)$/i.test(f) ||
+        /^\.env(?:\.\w+)?$/i.test(f)
+      ))];
       if (claimedCount > 0 && uniqueFiles.length > 0 && uniqueFiles.length < claimedCount) {
         const warning = `[Propagation Warning] Agent claimed ${claimedCount} files updated but only ${uniqueFiles.length} identified: ${uniqueFiles.join(", ")}. Verify all target files were actually modified.`;
         await store(warning, "lesson", 0.90, agentId, "default");
