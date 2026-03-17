@@ -224,6 +224,26 @@ const realtimeCaptureHook = async (event) => {
     return;
   }
 
+  // Propagation completeness check — detect "N files updated" claims
+  if (message.role === "assistant") {
+    const propagationMatch = content.match(
+      /(\d+)\s*(?:dosya|file|location|yer)\s*(?:güncellen|update|değiştir|changed|modified)/i
+    ) || content.match(
+      /(?:update[ds]?|güncellen|değiştir|changed|modified)\s*(?:in\s+)?(\d+)\s*(?:dosya|file|location|yer)/i
+    );
+    if (propagationMatch) {
+      const claimedCount = parseInt(propagationMatch[1], 10);
+      // Count actual file references in the message (paths with extensions)
+      const fileRefs = content.match(/[\w/.-]+\.\w{1,10}/g) || [];
+      const uniqueFiles = [...new Set(fileRefs.filter(f => /\.(env|conf|json|yaml|yml|toml|py|js|ts|sh|service|cfg|ini)$/i.test(f)))];
+      if (claimedCount > 0 && uniqueFiles.length > 0 && uniqueFiles.length < claimedCount) {
+        const warning = `[Propagation Warning] Agent claimed ${claimedCount} files updated but only ${uniqueFiles.length} identified: ${uniqueFiles.join(", ")}. Verify all target files were actually modified.`;
+        await store(warning, "lesson", 0.90, agentId, "default");
+        console.warn(`[realtime-capture] propagation warning: claimed=${claimedCount} found=${uniqueFiles.length}`);
+      }
+    }
+  }
+
   if (!shouldStoreAssistant(content)) return;
   const importance = isDecision(content) ? 0.85 : Math.max(0.5, scoreImportance(content));
   await store(content, "assistant", importance, agentId, sessionNamespace);

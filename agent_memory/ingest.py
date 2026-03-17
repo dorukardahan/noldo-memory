@@ -73,6 +73,17 @@ _FACTUAL_PATTERNS_RE = re.compile(
     re.IGNORECASE | re.UNICODE,
 )
 
+# Config/credential change patterns — classify as "fact" with high retrievability
+_CONFIG_CHANGE_RE = re.compile(
+    r"(?:güncellen\w*|değiştir\w*|değiştiril\w*|update[ds]?\b|changed?\s+(?:to|from)|"
+    r"\bcredential\w*|\.env\b|config\s*(?:update|change|değişik)|"
+    r"rotate[ds]?\b|propagat\w*|migrat\w*|"
+    r"dosya\s*(?:güncellen|değişti|update)|"
+    r"(?:api|secret|token|key)\s*(?:güncellen|değişti|update|rotate|change)|"
+    r"(?:yeni|new)\s*(?:credential|token|key|şifre|password))",
+    re.IGNORECASE | re.UNICODE,
+)
+
 _PREFERENCE_KEYWORDS_RE = re.compile(
     r"\b(?:sevdiğim|sevdigim|prefer|like|hate|always|never)\b",
     re.IGNORECASE | re.UNICODE,
@@ -143,6 +154,9 @@ def classify_memory_type(text: str) -> str:
     # Lesson detection first (highest priority — behavioral corrections)
     if _LESSON_KEYWORDS_RE.search(content):
         return "lesson"
+    # Config/credential changes — high-priority facts
+    if _CONFIG_CHANGE_RE.search(content):
+        return "fact"
     if _ENTITY_NAME_RE.search(content) or _FACTUAL_PATTERNS_RE.search(content):
         return "fact"
     if _PREFERENCE_KEYWORDS_RE.search(content):

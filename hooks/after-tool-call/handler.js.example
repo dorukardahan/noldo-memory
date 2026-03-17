@@ -50,7 +50,25 @@ function getAgentId(workspaceDir) {
   return "main";
 }
 
+// Config/credential file patterns — structured fact capture for edit/write tools
+const CONFIG_FILE_PATTERNS = [
+  /\.(env|conf|json|yaml|yml|toml|ini|cfg|service)$/i,
+  /credential/i,
+  /secret/i,
+  /\.env\./i,  // .env.local, .env.production etc.
+];
+
+function isConfigFile(filePath) {
+  return CONFIG_FILE_PATTERNS.some((p) => p.test(filePath || ""));
+}
+
 function shouldCapture(toolName, toolInput) {
+  // Capture edit/write to config/credential files
+  if (toolName === "edit" || toolName === "write") {
+    const filePath = toolInput?.file_path || toolInput?.path || "";
+    return isConfigFile(filePath);
+  }
+
   if (toolName !== "exec") return false;
 
   const cmd = (toolInput?.command || "").trim();
@@ -93,6 +111,32 @@ const afterToolCallHook = async (event, ctx) => {
 
   const workspaceDir = ctx?.workspaceDir || process.env.OPENCLAW_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
   const agentId = getAgentId(workspaceDir);
+
+  // Structured config change capture for edit/write tools
+  if ((toolName === "edit" || toolName === "write") && isConfigFile(toolInput?.file_path || toolInput?.path || "")) {
+    const filePath = toolInput?.file_path || toolInput?.path || "";
+    const fileName = path.basename(filePath);
+    // Store ONLY the fact that a config file changed — NEVER store content/secrets
+    const configMemory = `[Config Change] File: ${filePath} modified via ${toolName}. Agent: ${agentId}. Check propagation: were all related config files updated?`;
+    try {
+      await fetch(`${MEMORY_API}/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
+        body: JSON.stringify({
+          text: configMemory,
+          category: "config_change",
+          importance: 0.85,
+          agent: agentId,
+          source: "after-tool-call-hook",
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      console.warn(`[after-tool-call] config change captured: ${fileName} (agent=${agentId})`);
+    } catch (err) {
+      console.warn(`[after-tool-call] config capture failed: ${err.message}`);
+    }
+    return;
+  }
 
   const importance = scoreToolOutput(toolInput, toolOutput);
   const cmd = (toolInput.command || toolName).slice(0, 200);

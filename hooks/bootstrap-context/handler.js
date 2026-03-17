@@ -114,6 +114,7 @@ async function fetchRecentMemories(agentId, sessionNamespace) {
   const queries = [
     "recent decisions and configuration changes",
     "last conversation summary and active work",
+    "credential updates, config file changes, environment variable modifications",
   ];
 
   const sessionScoped = [];
@@ -371,6 +372,32 @@ const bootstrapContextHook = async (event) => {
         decLines.push(`- ${text.slice(0, 250)}`);
       }
       sections.push(...decLines);
+    }
+  }
+
+  // Recent config/credential changes — remind agent to check memory before asking user
+  if (_memoryApiKey) {
+    try {
+      const configRecall = await recall(agentId, "config change credential update .env modified propagation", {
+        limit: 5,
+        minScore: 0.3,
+        timeoutMs: 3000,
+      });
+      const configChanges = (configRecall || []).filter(
+        (m) => /config.change|credential|\.env|güncellen|update|propagat/i.test(m.text || "")
+      );
+      if (configChanges.length > 0) {
+        const ccLines = ["\n# Recent Config/Credential Changes (CHECK BEFORE ASKING USER)\n"];
+        ccLines.push("> ⚠️ If a config issue arises, check these memories FIRST before asking the user.\n");
+        for (const cc of configChanges.slice(0, 5)) {
+          const text = (cc.text || "").slice(0, 300);
+          ccLines.push(`- ${text}`);
+        }
+        sections.push(...ccLines);
+        console.warn(`[bootstrap-context] injected ${configChanges.length} config change reminders for ${agentId}`);
+      }
+    } catch (e) {
+      console.warn("[bootstrap-context] config recall error:", e.message || e);
     }
   }
 
