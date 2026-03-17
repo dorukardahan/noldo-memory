@@ -431,52 +431,55 @@ class TestClassifyMemoryType:
 
     def test_config_credential_update_turkish(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Twitter credential güncellendi, 4 dosya değişti") == "fact"
+        assert classify_memory_type("Twitter credential güncellendi, 4 dosya değişti") == "config_change"
 
     def test_config_env_update_turkish(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type(".env dosyası güncellendi") == "fact"
+        assert classify_memory_type(".env dosyası güncellendi") == "config_change"
 
     def test_config_api_key_rotated(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("API key rotated for production") == "fact"
+        assert classify_memory_type("API key rotated for production") == "config_change"
 
     def test_config_updated_settings(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Config updated in settings.json") == "fact"
+        assert classify_memory_type("Config updated in settings.json") == "config_change"
 
     def test_config_credentials_changed_turkish(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Credentials değiştirildi") == "fact"
+        assert classify_memory_type("Credentials değiştirildi") == "config_change"
 
     def test_config_env_updated_english(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("agent-asuman .env updated with new values") == "fact"
+        assert classify_memory_type("agent-asuman .env updated with new values") == "config_change"
 
     def test_config_token_renewed_turkish(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Token yenilendi, config dosyası değiştirildi") == "fact"
+        assert classify_memory_type("Token yenilendi, config dosyası değiştirildi") == "config_change"
 
     # --- False positive prevention (verb+noun co-occurrence required) ---
 
     def test_no_false_positive_check_env(self):
-        """Bare mention of .env without change verb should NOT be fact."""
+        """Bare mention of .env without change verb should NOT be config/fact."""
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Can you check .env?") != "fact"
+        result = classify_memory_type("Can you check .env?")
+        assert result not in ("fact", "config_change")
 
     def test_no_false_positive_update_casual(self):
-        """Casual 'update' without config noun should NOT be fact."""
+        """Casual 'update' without config noun should NOT be config/fact."""
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("I will update you later") != "fact"
+        result = classify_memory_type("I will update you later")
+        assert result not in ("fact", "config_change")
 
     def test_no_false_positive_migration_failure(self):
-        """'migration failed' without config noun should NOT be fact."""
+        """'migration failed' without config noun should NOT be config_change."""
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("This migration failed") != "fact"
+        result = classify_memory_type("This migration failed")
+        assert result != "config_change"
 
     def test_no_false_positive_normal_conversation(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("Hava güzel bugün") != "fact"
+        assert classify_memory_type("Hava güzel bugün") == "conversation"
 
     # --- March 16 propagation scenario ---
 
@@ -484,15 +487,121 @@ class TestClassifyMemoryType:
         """The exact March 16 incident: credential update across files."""
         from agent_memory.ingest import classify_memory_type
         text = "Twitter credential güncellendi. 4 dosya güncellendi ama .env atlandı"
-        assert classify_memory_type(text) == "fact"
+        assert classify_memory_type(text) == "config_change"
 
     def test_config_env_local_update(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type(".env.local dosyası değiştirildi") == "fact"
+        assert classify_memory_type(".env.local dosyası değiştirildi") == "config_change"
 
     def test_config_docker_compose_update(self):
         from agent_memory.ingest import classify_memory_type
-        assert classify_memory_type("docker-compose.yml updated with new config") == "fact"
+        assert classify_memory_type("docker-compose.yml updated with new config") == "config_change"
+
+    # --- Operational event detection ---
+
+    def test_ops_service_restart_english(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("systemctl restart noldo-memory.service completed") == "operational_event"
+
+    def test_ops_docker_compose_up(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("docker compose up -d finished for gateway") == "operational_event"
+
+    def test_ops_service_restart_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("noldo-memory servisi yeniden başlatıldı") == "operational_event"
+
+    def test_ops_gateway_restart(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("gateway için restart ettim, şimdi ayakta") == "operational_event"
+
+    def test_ops_container_restart(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("container durduruldu ve tekrar başlatıldı") == "operational_event"
+
+    def test_ops_service_stopped(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Service stopped after migration") == "operational_event"
+
+    # --- Incident detection ---
+
+    def test_incident_deploy_failed(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("deploy failed after migration") == "incident"
+
+    def test_incident_oom_killed(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("worker was OOM killed") == "incident"
+
+    def test_incident_gateway_refused(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("gateway refused connection on localhost") == "incident"
+
+    def test_incident_service_crash_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("servis çöktü ve ayağa kalkmadı") == "incident"
+
+    def test_incident_api_timeout_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("api yanıt vermiyor, timeout alıyoruz") == "incident"
+
+    def test_incident_migration_failed(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Database migration failed with error") == "incident"
+
+    # --- Deployment detection ---
+
+    def test_deploy_to_production(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("v1.3.0 deploy edildi production'a") == "deployment"
+
+    def test_deploy_pr_merged(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("PR merge edildi ve canlıya alındı") == "deployment"
+
+    def test_deploy_ci_passed(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("CI passed, rollout started") == "deployment"
+
+    def test_deploy_git_push(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("git push origin main completed") == "deployment"
+
+    def test_deploy_proda_cikti(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("prod'a çıktı") == "deployment"
+
+    # --- Verification detection ---
+
+    def test_verification_health_check(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("health check passed after restart") == "verification"
+
+    def test_verification_curl_200(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("curl ile kontrol ettim, 200 dönüyor") == "verification"
+
+    def test_verification_smoke_test(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("smoke test geçti") == "verification"
+
+    def test_verification_fix_confirmed(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("fix verified in production") == "verification"
+
+    # --- Ensure no false positives on casual text ---
+
+    def test_casual_not_operational(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Bu normal bir konuşma") == "conversation"
+
+    def test_casual_weather(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Hava çok güzel bugün, dışarı çıkalım") == "conversation"
+
+    def test_casual_greeting(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Merhaba, nasılsın?") == "conversation"
 
 
 # ---------------------------------------------------------------------------

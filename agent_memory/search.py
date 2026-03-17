@@ -523,7 +523,16 @@ class HybridSearch:
 
         # Memory type bonus layer: prioritize factual, preference, and lesson memories.
         memory_type_bonus: Dict[str, float] = {}
-        memory_type_bonus_weights = {"fact": 0.10, "preference": 0.10, "lesson": 0.20}
+        memory_type_bonus_weights = {
+            "lesson": 0.20,
+            "incident": 0.15,
+            "operational_event": 0.10,
+            "deployment": 0.10,
+            "config_change": 0.10,
+            "verification": 0.10,
+            "fact": 0.10,
+            "preference": 0.10,
+        }
         for mid, cand in all_candidates.items():
             cand_memory_type = str(cand.get("memory_type", "") or "").strip().lower()
             bonus = memory_type_bonus_weights.get(cand_memory_type)

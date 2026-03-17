@@ -84,13 +84,115 @@ _CONFIG_CHANGE_VERBS_RE = re.compile(
 _CONFIG_CHANGE_NOUNS_RE = re.compile(
     r"(?:credential\w*|\.env\b|config\w*|secret\w*|token\w*|"
     r"api.?key|password|şifre|parola|"
-    r"dosya\w*|file\w*|service\b|\.conf\b|\.yaml\b|\.yml\b|\.toml\b)",
+    r"dosya\w*|file\w*|service\b|\.conf\b|\.yaml\b|\.yml\b|\.toml\b|"
+    r"dns\b|record\w*|cname\b|a\s*record|nginx\w*|ssl\w*|cert\w*)",
     re.IGNORECASE | re.UNICODE,
 )
 
 def _is_config_change(text: str) -> bool:
     """Detect config/credential changes requiring BOTH a change verb and a config noun."""
     return bool(_CONFIG_CHANGE_VERBS_RE.search(text) and _CONFIG_CHANGE_NOUNS_RE.search(text))
+
+
+# --- Operational event detection (verb+noun co-occurrence) ---
+_OPS_VERBS_RE = re.compile(
+    r"(?:restart\w*|start(?:ed|ing)?\b|stop(?:ped|ping)?\b|"
+    r"enable[ds]?\b|disable[ds]?\b|reload\w*|redeploy\w*|"
+    r"migrat\w*|rollback\w*|restor\w*|install\w*|"
+    r"(?:up|down|build|run|exec)\s|finish\w*|complet\w*|"
+    r"eklen\w*|kaldır\w*|kaldirild\w*|çalıştır\w*|calistir\w*|"
+    r"oluştur\w*|olustur\w*|sil\w*|temizle\w*|"
+    r"yeniden\s*başlat\w*|restart\s*ett\w*|başlat\w*|durdur\w*|"
+    r"aktif\s*ett\w*|devre\s*dışı\w*|geri\s*ald\w*|"
+    r"push\w*|al(?:ın)?d\w*|geçir\w*|geçtik|seçildi|taşınd\w*|"
+    r"değiştirildi\w*|yapıld\w*)",
+    re.IGNORECASE | re.UNICODE,
+)
+_OPS_NOUNS_RE = re.compile(
+    r"(?:servi[cs]\w*|hizmet\w*|container\w*|docker\w*|"
+    r"systemctl|compose|kubectl|pm2|nginx|apache|"
+    r"worker\w*|gateway\w*|api\b|server\w*|daemon\w*|"
+    r"port\s*\d+|process\w*|pod\w*|sunucu\w*|"
+    r"database\w*|db\b|veritabanı\w*|sqlite\w*|"
+    r"cron\w*|task\w*|job\w*|backup\w*|yedek\w*|"
+    r"hook\w*|pipeline\w*|rule\w*|firewall\w*|ufw\b|"
+    r"ssh\b|key\b|dns\b|ssl\b|cert\w*|"
+    r"disk\w*|memory\b|cpu\b|swap\w*|"
+    r"versiyon\w*|version\w*|paket\w*|package\w*|pip\b|npm\b|"
+    r"migration\w*|schema\w*|tablo\w*|kolon\w*|"
+    r"model\w*|mimari\w*|architect\w*|workspace\w*|"
+    r"izin\w*|permission\w*|access\w*|yetki\w*|"
+    r"record\w*|kayıt\w*|a\s*record\w*|cname\w*)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_operational_event(text: str) -> bool:
+    """Detect operational events requiring BOTH an ops verb and an ops noun."""
+    return bool(_OPS_VERBS_RE.search(text) and _OPS_NOUNS_RE.search(text))
+
+
+# --- Incident detection (failure/crash/error + system noun) ---
+_INCIDENT_VERBS_RE = re.compile(
+    r"(?:fail\w*|crash\w*|kill\w*|oom\b|sigkill\b|"
+    r"denied\b|refused\b|timeout\w*|timed?\s*out|"
+    r"unreachable\b|down\b|exception\w*|panic\w*|"
+    r"başarısız\w*|çöktü|çökme|öldürüldü|"
+    r"reddedildi|zaman\s*aşımı|ulaşılamıyor|yanıt\s*vermiyor|"
+    r"dolu\b|full\b|exhausted\b|overflow\w*|out\s*of\s*space|"
+    r"(?:%\s*)?(?:9[0-9]|100)\s*(?:%|dolu|full))",
+    re.IGNORECASE | re.UNICODE,
+)
+_INCIDENT_NOUNS_RE = re.compile(
+    r"(?:servi[cs]\w*|api\b|worker\w*|gateway\w*|"
+    r"deploy\w*|migration\w*|job\w*|cron\w*|"
+    r"container\w*|docker\w*|process\w*|"
+    r"server\w*|database\w*|db\b|port\s*\d+|"
+    r"disk\w*|memory\b|cpu\b|sunucu\w*|veritabanı\w*|"
+    r"embed\w*|pipeline\w*|hook\w*|nginx\w*|ssl\w*)",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_incident(text: str) -> bool:
+    """Detect incidents requiring BOTH a failure verb and a system noun."""
+    return bool(_INCIDENT_VERBS_RE.search(text) and _INCIDENT_NOUNS_RE.search(text))
+
+
+# --- Deployment detection ---
+_DEPLOYMENT_RE = re.compile(
+    r"(?:deploy\s*(?:ett\w*|edildi|completed|to\s+prod)|"
+    r"release[ds]?\s+(?:to|v\d)|"
+    r"(?:git|gh)\s+push\b|pull\s*request\s*(?:merged|açıldı)|"
+    r"pr\s*merge\s*(?:ett\w*|edildi)|"
+    r"(?:build|ci)\s*(?:passed|geçti|başarılı)|"
+    r"prod'?a\s*(?:çıktı|alındı|çıkardık)|"
+    r"canlıya\s*(?:alındı|aldık|çıktı)|"
+    r"v\d+\.\d+\.\d+\s*(?:deploy|release|yayın))",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_deployment(text: str) -> bool:
+    """Detect deployment events (release, merge, CI pass, prod push)."""
+    return bool(_DEPLOYMENT_RE.search(text))
+
+
+# --- Verification detection ---
+_VERIFICATION_RE = re.compile(
+    r"(?:(?:health|smoke)\s*(?:check|test)\s*(?:passed|geçti|ok|tamam|başarılı)|"
+    r"(?:doğrulandı|verified|validated|confirmed)\s*.{0,30}(?:after|sonra|prod|deploy)|"
+    r"(?:curl|test|kontrol)\s*.{0,30}(?:200|ok|healthy|sağlıklı|passed|geçti)|"
+    r"fix\s*(?:verified|confirmed|doğrulandı)|"
+    r"(?:düzeldi|çalışıyor\s*şimdi|works?\s*now)\s*.{0,30}(?:after|sonra))",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _is_verification(text: str) -> bool:
+    """Detect verification/confirmation events."""
+    return bool(_VERIFICATION_RE.search(text))
+
 
 _PREFERENCE_KEYWORDS_RE = re.compile(
     r"\b(?:sevdiğim|sevdigim|prefer|like|hate|always|never)\b",
@@ -154,7 +256,20 @@ def sanitize_memory_text(text: str) -> str:
 
 
 def classify_memory_type(text: str) -> str:
-    """Classify memory text into lesson/fact/preference/rule/conversation."""
+    """Classify memory text into operational types.
+
+    Decision order (first match wins):
+    1. lesson — behavioral corrections, feedback
+    2. incident — failures, crashes, OOM, timeouts
+    3. config_change — credential/config/env updates
+    4. operational_event — service restarts, migrations
+    5. deployment — releases, merges, CI, prod pushes
+    6. verification — health checks, confirmations
+    7. fact — entity names, factual statements
+    8. preference — user preferences
+    9. rule — instructions, directives
+    10. conversation — fallback
+    """
     content = (text or "").strip()
     if not content:
         return "conversation"
@@ -162,9 +277,22 @@ def classify_memory_type(text: str) -> str:
     # Lesson detection first (highest priority — behavioral corrections)
     if _LESSON_KEYWORDS_RE.search(content):
         return "lesson"
-    # Config/credential changes — high-priority facts (requires verb+noun co-occurrence)
+    # Incident — failures, crashes (before config to catch "config failed")
+    if _is_incident(content):
+        return "incident"
+    # Config/credential changes
     if _is_config_change(content):
-        return "fact"
+        return "config_change"
+    # Operational events — service ops, restarts, migrations
+    if _is_operational_event(content):
+        return "operational_event"
+    # Deployments — releases, merges, CI
+    if _is_deployment(content):
+        return "deployment"
+    # Verification — health checks, confirmations
+    if _is_verification(content):
+        return "verification"
+    # Facts — entity names, factual statements
     if _ENTITY_NAME_RE.search(content) or _FACTUAL_PATTERNS_RE.search(content):
         return "fact"
     if _PREFERENCE_KEYWORDS_RE.search(content):

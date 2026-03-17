@@ -78,7 +78,18 @@ function shouldCapture(toolName, toolInput) {
   const cmd = (toolInput?.command || "").trim();
   if (!cmd || cmd.length < 3) return false;
 
-  return CAPTURE_COMMANDS.some((p) => p.test(cmd));
+  // Capture both standard dev commands AND important operational commands
+  return CAPTURE_COMMANDS.some((p) => p.test(cmd)) ||
+         IMPORTANT_CMD_PATTERNS.some((p) => p.test(cmd));
+}
+
+// Classify exec command type for memory_type preassignment
+function classifyExecType(cmd) {
+  if (/systemctl|service\s|docker|compose|kubectl|pm2/i.test(cmd)) return "operational_event";
+  if (/deploy|push|publish|release|merge/i.test(cmd)) return "deployment";
+  if (/ufw|iptables|certbot|chmod|chown|ssl/i.test(cmd)) return "operational_event";
+  if (/\.env|\.conf|\.service|config/i.test(cmd)) return "config_change";
+  return null; // let classifier decide
 }
 
 function scoreToolOutput(toolInput, toolOutput) {
@@ -132,6 +143,7 @@ const afterToolCallHook = async (event, ctx) => {
           importance: 0.85,
           agent: agentId,
           source: "after-tool-call-hook",
+          memory_type: "config_change",
         }),
         signal: AbortSignal.timeout(5000),
       });
@@ -164,6 +176,7 @@ const afterToolCallHook = async (event, ctx) => {
         category: "tool_output",
         importance,
         agent: agentId,
+        memory_type: classifyExecType(toolInput?.command || "") || undefined,
       }),
       signal: AbortSignal.timeout(5000),
     });

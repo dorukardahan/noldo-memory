@@ -375,29 +375,33 @@ const bootstrapContextHook = async (event) => {
     }
   }
 
-  // Recent config/credential changes — remind agent to check memory before asking user
+  // Recent operational events — config changes, incidents, deployments
   if (_memoryApiKey) {
-    try {
-      const configRecall = await recall(agentId, "config change credential update .env modified propagation", {
-        limit: 5,
-        minScore: 0.3,
-        timeoutMs: 3000,
-      });
-      const configChanges = (configRecall || []).filter(
-        (m) => /config.change|credential|\.env|güncellen|update|propagat/i.test(m.text || "")
-      );
-      if (configChanges.length > 0) {
-        const ccLines = ["\n# Recent Config/Credential Changes (CHECK BEFORE ASKING USER)\n"];
-        ccLines.push("> ⚠️ If a config issue arises, check these memories FIRST before asking the user.\n");
-        for (const cc of configChanges.slice(0, 5)) {
-          const text = (cc.text || "").slice(0, 300);
-          ccLines.push(`- ${text}`);
+    const opsQueries = [
+      { query: "config change credential update .env modified", filter: /config|credential|\.env|güncellen|update/i, title: "Config/Credential Changes" },
+      { query: "service restart crash incident failure deploy", filter: /restart|crash|fail|incident|deploy|down|error/i, title: "Recent Incidents & Ops Events" },
+    ];
+    for (const oq of opsQueries) {
+      try {
+        const opsRecall = await recall(agentId, oq.query, {
+          limit: 5,
+          minScore: 0.3,
+          timeoutMs: 3000,
+        });
+        const opsItems = (opsRecall || []).filter((m) => oq.filter.test(m.text || ""));
+        if (opsItems.length > 0) {
+          const opsLines = [`\n# ${oq.title} (CHECK BEFORE ASKING USER)\n`];
+          opsLines.push("> ⚠️ Check these memories FIRST before asking the user about related issues.\n");
+          for (const item of opsItems.slice(0, 5)) {
+            const text = (item.text || "").slice(0, 300);
+            opsLines.push(`- ${text}`);
+          }
+          sections.push(...opsLines);
+          console.warn(`[bootstrap-context] injected ${opsItems.length} ${oq.title} for ${agentId}`);
         }
-        sections.push(...ccLines);
-        console.warn(`[bootstrap-context] injected ${configChanges.length} config change reminders for ${agentId}`);
+      } catch (e) {
+        console.warn(`[bootstrap-context] ops recall error (${oq.title}):`, e.message || e);
       }
-    } catch (e) {
-      console.warn("[bootstrap-context] config recall error:", e.message || e);
     }
   }
 

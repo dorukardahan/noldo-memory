@@ -404,7 +404,10 @@ async def general_exception_handler(request, exc):
 # ---------------------------------------------------------------------------
 
 
-VALID_MEMORY_TYPES = Literal["fact", "preference", "rule", "conversation", "lesson", "other"]
+VALID_MEMORY_TYPES = Literal[
+    "fact", "preference", "rule", "conversation", "lesson", "other",
+    "config_change", "operational_event", "incident", "deployment", "verification",
+]
 NAMESPACE_PATTERN = re.compile(r'^[a-z0-9._-]{1,64}$')
 AGENT_PATTERN = re.compile(r'^[a-z0-9_-]{1,64}$')
 
@@ -462,6 +465,7 @@ class StoreRequest(RequestModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     namespace: str = Field(default="default", description="Namespace for topic-based grouping")
     source: Optional[str] = Field(default=None, description="Provenance label: api, hook, session_capture, import, auto_escalation")
+    memory_type: Optional[str] = Field(default=None, description="Pre-assigned memory type from hook (overrides classifier if set)")
     agent: Optional[str] = None
 
 
@@ -742,7 +746,7 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
         importance=importance,
         source_session=None,
         namespace=req.namespace,
-        memory_type=classify_memory_type(req.text),
+        memory_type=req.memory_type if req.memory_type else classify_memory_type(req.text),
         source=source,
         trust_level=trust_level,
     )
