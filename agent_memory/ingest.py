@@ -99,7 +99,7 @@ _OPS_VERBS_RE = re.compile(
     r"(?:\brestart\w*|\bstart(?:ed|ing)?\b|\bstop(?:ped|ping)?\b|"
     r"\benable[ds]?\b|\bdisable[ds]?\b|\breload\w*|\bredeploy\w*|"
     r"\bmigrat(?:ed?|ing)\b|\brollback\w*|\brestor\w*|\binstall\w*|"
-    r"\b(?:up|down|build|run|exec)\s|\bfinish\w*|\bcomplet\w*|"
+    r"\b(?:up|down|build|run|exec)\s|\bfinish\w*|\bcompleted\b|"
     r"\beklen\w*|\bkaldır\w*|\bkaldirild\w*|\bçalıştır\w*|\bcalistir\w*|"
     r"\boluştur\w*|\bolustur\w*|\bsild\w*|\bsilindi\w*|\btemizle\w*|"
     r"\byeniden\s*başlat\w*|\brestart\s*ett\w*|\bbaşlat\w*|\bdurdur\w*|"
