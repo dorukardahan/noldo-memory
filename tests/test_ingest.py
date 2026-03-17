@@ -629,6 +629,26 @@ class TestClassifyMemoryType:
         from agent_memory.ingest import classify_memory_type
         assert classify_memory_type("fix verified in production") == "verification"
 
+    # --- Priority order tests (first match wins) ---
+
+    def test_priority_incident_over_config(self):
+        """Incident should win when both config and failure are present."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("config updated but deploy failed") == "incident"
+
+    def test_priority_incident_over_config_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("credential güncellendi ama service crash etti") == "incident"
+
+    def test_priority_verification_over_deployment(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("health check passed after deploy") == "verification"
+
+    def test_priority_lesson_over_all(self):
+        """Lesson always wins — highest priority."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("[Lesson] config değiştirildi ama hatırlamamışım") == "lesson"
+
     # --- Ensure no false positives on casual text ---
 
     def test_casual_not_operational(self):

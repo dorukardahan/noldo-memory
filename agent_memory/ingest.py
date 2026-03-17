@@ -182,7 +182,10 @@ _INCIDENT_VERBS_RE = re.compile(
     r"başarısız\w*|çöktü|çökme|öldürüldü|"
     r"reddedildi|zaman\s*aşımı|ulaşılamıyor|yanıt\s*vermiyor|"
     r"dolu\b|full\b|exhausted\b|overflow\w*|out\s*of\s*space|"
-    r"(?:%\s*)?(?:9[0-9]|100)\s*(?:%|dolu|full))",
+    r"(?:%\s*)?(?:9[0-9]|100)\s*(?:%|dolu|full)|"
+    r"\b(?:50[0-9]|429|403)\b.*(?:error|hata|veriyor|returning|status)|"
+    r"connection\s*reset|broken\s*pipe|segfault|permission\s*error|"
+    r"read.only\s*filesystem)",
     re.IGNORECASE | re.UNICODE,
 )
 _INCIDENT_NOUNS_RE = re.compile(
