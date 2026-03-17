@@ -96,16 +96,16 @@ def _is_config_change(text: str) -> bool:
 
 # --- Operational event detection (verb+noun co-occurrence) ---
 _OPS_VERBS_RE = re.compile(
-    r"(?:restart\w*|start(?:ed|ing)?\b|stop(?:ped|ping)?\b|"
-    r"enable[ds]?\b|disable[ds]?\b|reload\w*|redeploy\w*|"
-    r"migrat\w*|rollback\w*|restor\w*|install\w*|"
-    r"(?:up|down|build|run|exec)\s|finish\w*|complet\w*|"
-    r"eklen\w*|kaldır\w*|kaldirild\w*|çalıştır\w*|calistir\w*|"
-    r"oluştur\w*|olustur\w*|sil\w*|temizle\w*|"
-    r"yeniden\s*başlat\w*|restart\s*ett\w*|başlat\w*|durdur\w*|"
-    r"aktif\s*ett\w*|devre\s*dışı\w*|geri\s*ald\w*|"
-    r"push\w*|al(?:ın)?d\w*|geçir\w*|geçtik|seçildi|taşınd\w*|"
-    r"değiştirildi\w*|yapıld\w*)",
+    r"(?:\brestart\w*|\bstart(?:ed|ing)?\b|\bstop(?:ped|ping)?\b|"
+    r"\benable[ds]?\b|\bdisable[ds]?\b|\breload\w*|\bredeploy\w*|"
+    r"\bmigrat(?:ed?|ing)\b|\brollback\w*|\brestor\w*|\binstall\w*|"
+    r"\b(?:up|down|build|run|exec)\s|\bfinish\w*|\bcomplet\w*|"
+    r"\beklen\w*|\bkaldır\w*|\bkaldirild\w*|\bçalıştır\w*|\bcalistir\w*|"
+    r"\boluştur\w*|\bolustur\w*|\bsild\w*|\bsilindi\w*|\btemizle\w*|"
+    r"\byeniden\s*başlat\w*|\brestart\s*ett\w*|\bbaşlat\w*|\bdurdur\w*|"
+    r"\baktif\s*ett\w*|\bdevre\s*dışı\w*|\bgeri\s*ald\w*|"
+    r"\bpush\w*|\bal(?:ın)?d\w*|\bgeçirdik|\bgeçtik|\bseçildi|\btaşınd\w*|"
+    r"\bdeğiştirildi\w*|\byapıld\w*)",
     re.IGNORECASE | re.UNICODE,
 )
 _OPS_NOUNS_RE = re.compile(
