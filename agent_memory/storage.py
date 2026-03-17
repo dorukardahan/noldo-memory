@@ -489,39 +489,41 @@ class MemoryStorage:
         decay_amount: float = 0.05,
         min_strength: float = 0.3,
     ) -> int:
-        """Aggressive Ebbinghaus decay + boost with importance-adjusted rate.
+        """Gentle Ebbinghaus decay + boost with importance-adjusted rate.
 
-        - 30+ days unaccessed -> drop to floor (importance-adjusted)
-        - < 7 days old -> protect (min 0.8)
-        - Very recent (last 24h) -> boost (+0.1)
-        - 7-30 days -> importance-adjusted decay (low importance decays faster)
-        - GC phase: soft-delete zombies at floor with low importance, unaccessed 14+ days
+        Timelines (relaxed — memories live longer):
+        - 60+ days unaccessed -> drop to floor (importance-adjusted)
+        - < 14 days old -> protect (min 0.8)
+        - Very recent (last 48h) -> boost (+0.1)
+        - 14-60 days -> importance-adjusted decay (gentler: 0.10 base)
+        - GC phase: soft-delete zombies at floor with low importance, unaccessed 30+ days
+        - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable forever.
         """
         conn = self._get_conn()
         now = time.time()
         try:
-            # Phase 1: Importance-adjusted decay
+            # Phase 1: Importance-adjusted decay (relaxed timelines)
             # decay_multiplier = 1.0 + (1.0 - importance)
             # importance=0.2 -> 1.8x decay, importance=0.8 -> 1.2x decay
             cur = conn.execute(
                 """
                 UPDATE memories
                    SET strength = CASE
-                       -- 1. Very stale (30+ days): Drop to floor
-                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 2592000)
+                       -- 1. Very stale (60+ days): Drop to floor
+                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 5184000)
                             THEN ?
 
-                       -- 2. Very recent (last 24h): Small boost
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 86400)
+                       -- 2. Very recent (last 48h): Small boost
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 172800)
                             THEN MIN(COALESCE(strength, 1.0) + 0.1, 5.0)
 
-                       -- 3. Recent (7-day window): Maintain high (min 0.8)
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 604800)
+                       -- 3. Recent (14-day window): Maintain high (min 0.8)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 1209600)
                             THEN MAX(COALESCE(strength, 1.0), 0.8)
 
-                       -- 4. Mid-stale (7-30 days): Importance-adjusted decay
+                       -- 4. Mid-stale (14-60 days): Gentler importance-adjusted decay
                        ELSE MAX(
-                           COALESCE(strength, 1.0) - (0.15 * (1.0 + (1.0 - COALESCE(importance, 0.5)))),
+                           COALESCE(strength, 1.0) - (0.10 * (1.0 + (1.0 - COALESCE(importance, 0.5)))),
                            ?
                        )
                    END
@@ -529,9 +531,9 @@ class MemoryStorage:
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') != 'lesson'
                    AND (
-                       (COALESCE(last_accessed_at, created_at) < ? - 604800) -- stale
+                       (COALESCE(last_accessed_at, created_at) < ? - 1209600) -- stale (14d)
                        OR
-                       (COALESCE(last_accessed_at, created_at) >= ? - 86400) -- very recent (for boost)
+                       (COALESCE(last_accessed_at, created_at) >= ? - 172800) -- very recent (for boost)
                    )
                 """,
                 (now, min_strength, now, now, min_strength, now, now),
@@ -539,25 +541,25 @@ class MemoryStorage:
             conn.commit()
             decayed = int(cur.rowcount or 0)
             logger.info(
-                "Decay phase 1: updated=%d (min_strength=%.2f, importance-adjusted)",
+                "Decay phase 1: updated=%d (min_strength=%.2f, importance-adjusted, relaxed)",
                 decayed,
                 min_strength,
             )
 
             # Phase 1b: Lesson decay (3x slower — lessons survive much longer)
-            # 90+ days stale -> floor, 21-day protect window, 21-90 days -> gentle decay
+            # 180+ days stale -> floor, 42-day protect window, 42-180 days -> gentle decay
             lesson_cur = conn.execute(
                 """
                 UPDATE memories
                    SET strength = CASE
-                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 7776000)
+                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 15552000)
                             THEN ?
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 86400)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 172800)
                             THEN MIN(COALESCE(strength, 1.0) + 0.1, 5.0)
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 1814400)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 3628800)
                             THEN MAX(COALESCE(strength, 1.0), 0.8)
                        ELSE MAX(
-                           COALESCE(strength, 1.0) - 0.05,
+                           COALESCE(strength, 1.0) - 0.03,
                            ?
                        )
                    END
@@ -565,9 +567,9 @@ class MemoryStorage:
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') = 'lesson'
                    AND (
-                       (COALESCE(last_accessed_at, created_at) < ? - 1814400)
+                       (COALESCE(last_accessed_at, created_at) < ? - 3628800)
                        OR
-                       (COALESCE(last_accessed_at, created_at) >= ? - 86400)
+                       (COALESCE(last_accessed_at, created_at) >= ? - 172800)
                    )
                 """,
                 (now, min_strength, now, now, min_strength, now, now),
@@ -575,10 +577,10 @@ class MemoryStorage:
             conn.commit()
             lesson_decayed = int(lesson_cur.rowcount or 0)
             if lesson_decayed:
-                logger.info("Decay phase 1b: lesson decay=%d (3x slower rate)", lesson_decayed)
+                logger.info("Decay phase 1b: lesson decay=%d (3x slower rate, relaxed)", lesson_decayed)
 
             # Phase 2: GC — soft-delete zombies at strength floor with low importance,
-            # unaccessed for 14+ days
+            # unaccessed for 30+ days (relaxed from 14 days)
             gc_cur = conn.execute(
                 """
                 UPDATE memories
@@ -588,7 +590,7 @@ class MemoryStorage:
                    AND COALESCE(memory_type, 'other') != 'lesson'
                    AND strength <= ?
                    AND importance <= 0.3
-                   AND COALESCE(last_accessed_at, created_at) < ? - 1209600
+                   AND COALESCE(last_accessed_at, created_at) < ? - 2592000
                 """,
                 (min_strength, now),
             )
@@ -607,56 +609,30 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     def gc_purge(self, soft_deleted_days: int = 30) -> Dict[str, int]:
-        """Permanently DELETE memories soft-deleted for *soft_deleted_days*+.
+        """Hard-delete is DISABLED. Soft-deleted memories are kept forever.
 
-        Also cleans orphaned vectors whose memories no longer exist.
-        Returns dict with counts: purged_memories, purged_vectors.
+        Previously this permanently deleted memories soft-deleted for N+ days.
+        Now it's a no-op that only logs the count of what *would* be purged,
+        preserving all data for potential recovery.
+
+        To re-enable, set AGENT_MEMORY_GC_PURGE_ENABLED=true (not yet implemented).
         """
         conn = self._get_conn()
         now = time.time()
         cutoff = now - (soft_deleted_days * 86400)
         try:
-            # Find memories to permanently delete
-            rows = conn.execute(
-                "SELECT id, vector_rowid FROM memories WHERE deleted_at IS NOT NULL AND deleted_at < ?",
+            count = conn.execute(
+                "SELECT COUNT(*) FROM memories WHERE deleted_at IS NOT NULL AND deleted_at < ?",
                 (cutoff,),
-            ).fetchall()
-
-            mem_ids = [r["id"] for r in rows]
-            vec_rowids = [r["vector_rowid"] for r in rows if r["vector_rowid"] is not None]
-
-            if not mem_ids:
-                return {"purged_memories": 0, "purged_vectors": 0}
-
-            # Delete from FTS
-            for mid in mem_ids:
-                try:
-                    conn.execute("DELETE FROM memory_fts WHERE id = ?", (mid,))
-                except Exception:
-                    pass
-
-            # Delete from memories table
-            placeholders = ",".join("?" * len(mem_ids))
-            conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", mem_ids)
-
-            # Delete orphaned vectors
-            purged_vecs = 0
-            for vr in vec_rowids:
-                try:
-                    conn.execute("DELETE FROM memory_vectors WHERE rowid = ?", (vr,))
-                    purged_vecs += 1
-                except Exception:
-                    pass
-
-            conn.commit()
-            logger.info(
-                "GC purge: permanently deleted %d memories, %d vectors",
-                len(mem_ids), purged_vecs,
-            )
-            return {"purged_memories": len(mem_ids), "purged_vectors": purged_vecs}
+            ).fetchone()[0]
+            if count > 0:
+                logger.info(
+                    "GC purge: DISABLED — %d memories eligible for purge but preserved (soft_deleted_days=%d)",
+                    count, soft_deleted_days,
+                )
+            return {"purged_memories": 0, "purged_vectors": 0}
         except Exception as exc:
-            conn.rollback()
-            logger.exception("gc_purge failed: %s", exc)
+            logger.exception("gc_purge check failed: %s", exc)
             return {"purged_memories": 0, "purged_vectors": 0}
 
     # ------------------------------------------------------------------
