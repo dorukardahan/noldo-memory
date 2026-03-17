@@ -427,6 +427,73 @@ class TestClassifyMemoryType:
         from agent_memory.ingest import classify_memory_type
         assert classify_memory_type("Merhaba, nasılsın?") == "conversation"
 
+    # --- Config/credential change detection (March 2026 incident regression) ---
+
+    def test_config_credential_update_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Twitter credential güncellendi, 4 dosya değişti") == "fact"
+
+    def test_config_env_update_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type(".env dosyası güncellendi") == "fact"
+
+    def test_config_api_key_rotated(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("API key rotated for production") == "fact"
+
+    def test_config_updated_settings(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Config updated in settings.json") == "fact"
+
+    def test_config_credentials_changed_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Credentials değiştirildi") == "fact"
+
+    def test_config_env_updated_english(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("agent-asuman .env updated with new values") == "fact"
+
+    def test_config_token_renewed_turkish(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Token yenilendi, config dosyası değiştirildi") == "fact"
+
+    # --- False positive prevention (verb+noun co-occurrence required) ---
+
+    def test_no_false_positive_check_env(self):
+        """Bare mention of .env without change verb should NOT be fact."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Can you check .env?") != "fact"
+
+    def test_no_false_positive_update_casual(self):
+        """Casual 'update' without config noun should NOT be fact."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("I will update you later") != "fact"
+
+    def test_no_false_positive_migration_failure(self):
+        """'migration failed' without config noun should NOT be fact."""
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("This migration failed") != "fact"
+
+    def test_no_false_positive_normal_conversation(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("Hava güzel bugün") != "fact"
+
+    # --- March 16 propagation scenario ---
+
+    def test_config_propagation_scenario(self):
+        """The exact March 16 incident: credential update across files."""
+        from agent_memory.ingest import classify_memory_type
+        text = "Twitter credential güncellendi. 4 dosya güncellendi ama .env atlandı"
+        assert classify_memory_type(text) == "fact"
+
+    def test_config_env_local_update(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type(".env.local dosyası değiştirildi") == "fact"
+
+    def test_config_docker_compose_update(self):
+        from agent_memory.ingest import classify_memory_type
+        assert classify_memory_type("docker-compose.yml updated with new config") == "fact"
+
 
 # ---------------------------------------------------------------------------
 # Prompt injection sanitization
