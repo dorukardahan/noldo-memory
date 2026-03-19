@@ -142,7 +142,7 @@ def main():
                 print(f"  {old} → {new}: {count}")
             print()
 
-    print(f"=== Summary ===")
+    print("=== Summary ===")
     print(f"Total memories scanned: {total_memories}")
     print(f"Total reclassified: {total_changed} ({total_changed * 100 // max(total_memories, 1)}%)")
     print()
@@ -153,7 +153,7 @@ def main():
             print(f"  {old:20s} → {new:20s}: {count}")
 
     if dry_run:
-        print(f"\nThis was a dry run. Use --apply to commit changes.")
+        print("\nThis was a dry run. Use --apply to commit changes.")
 
 
 if __name__ == "__main__":
