@@ -290,9 +290,20 @@ _INJECTION_PATTERNS = [
     re.compile(r'from now on,?\s+you', re.IGNORECASE),
     # Tool call injection
     re.compile(r'<(?:tool_use|function_call|antml:invoke)', re.IGNORECASE),
+    re.compile(r'<invoke\b', re.IGNORECASE),
     # Turkish variants
     re.compile(r'önceki talimatları(?:nı)?\s+(?:unut|görmezden gel|yok say)', re.IGNORECASE),
     re.compile(r'yeni talimat(?:lar)?:', re.IGNORECASE),
+    # DAN / jailbreak patterns
+    re.compile(r'\bact\s+as\s+DAN\b', re.IGNORECASE),
+    re.compile(r'\bDo\s+Anything\s+Now\b', re.IGNORECASE),
+    re.compile(r'IMPORTANT:\s*(?:Override|Ignore|Disregard|Bypass)\b', re.IGNORECASE),
+    # ChatML / Llama instruction tags
+    re.compile(r'<\|im_start\|>', re.IGNORECASE),
+    re.compile(r'\[INST\]', re.IGNORECASE),
+    re.compile(r'\[/INST\]', re.IGNORECASE),
+    # Zero-width character injection (used to bypass text filters)
+    re.compile(r'[\u200b\u200c\u200d\u200e\u200f\ufeff\u2060\u2062\u2063\u2064]'),
 ]
 
 
