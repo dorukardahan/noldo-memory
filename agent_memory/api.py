@@ -516,6 +516,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
     if temporal is not None:
         time_range = (temporal[0].timestamp(), temporal[1].timestamp())
 
+    agent_key = StoragePool.normalize_key(req.agent)
     results = await search.search(
         query=req.query,
         limit=req.limit,
@@ -523,9 +524,9 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         time_range=time_range,
         namespace=req.namespace,
         memory_type=req.memory_type,
+        agent=agent_key,
     )
 
-    agent_key = StoragePool.normalize_key(req.agent)
     result_dicts = [r.to_dict() for r in results]
 
     # Apply token budget trimming if requested
@@ -578,6 +579,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 min_score=req.min_score,
                 time_range=time_range,
                 memory_type=req.memory_type,
+                agent=agent_id,
             )
             for r in results:
                 d = r.to_dict()
@@ -628,8 +630,10 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
         if len(text) < 3:
             continue
         role = msg.get("role", "user")
-        from agent_memory.ingest import sanitize_memory_text as _sanitize
-        text = _sanitize(text)
+        from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal, normalize_memory_text as _normalize
+        text = _normalize(text)
+        if _is_low_signal(text):
+            continue
         cleaned.append({
             "text": text[:4000],  # raised from 2000 [S10, 2026-02-17]
             "role": role,
@@ -732,12 +736,18 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
         importance = 1.0
         logger.info("Rule detected in /v1/store: %s", req.text[:60])
 
-    from .ingest import classify_memory_type, sanitize_memory_text
-    req.text = sanitize_memory_text(req.text)
+    from .ingest import classify_memory_type, is_low_signal_memory_text, normalize_memory_text
+    req.text = normalize_memory_text(req.text)
+    if is_low_signal_memory_text(req.text):
+        raise HTTPException(400, "Memory text is low-signal transport metadata")
 
     # Provenance: use source from request if provided, default to 'api'
     source = getattr(req, 'source', None) or 'api'
     trust_level = 'system' if source in ('hook', 'auto_escalation') else 'user'
+
+    resolved_memory_type = req.memory_type if req.memory_type else classify_memory_type(req.text)
+    if category == "rule" and req.memory_type is None:
+        resolved_memory_type = "rule"
 
     res = storage.merge_or_store(
         text=req.text,
@@ -746,7 +756,7 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
         importance=importance,
         source_session=None,
         namespace=req.namespace,
-        memory_type=req.memory_type if req.memory_type else classify_memory_type(req.text),
+        memory_type=resolved_memory_type,
         source=source,
         trust_level=trust_level,
     )
@@ -777,12 +787,21 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
     # embed_worker runs every 5 minutes and backfills vectorless memories.
     vector = None
 
+    from .ingest import is_low_signal_memory_text, normalize_memory_text
+    req.text = normalize_memory_text(req.text)
+    if is_low_signal_memory_text(req.text):
+        raise HTTPException(400, "Memory text is low-signal transport metadata")
+
     res = storage.merge_or_store(
         text=req.text,
         vector=vector,
         category="rule",
         importance=1.0,
         source_session=None,
+        namespace=req.namespace,
+        memory_type="rule",
+        source=getattr(req, 'source', None) or 'api',
+        trust_level='user',
     )
 
     storage.invalidate_search_cache(agent=req.agent or "main")
@@ -861,9 +880,9 @@ async def search_interactive(
         return await _recall_all(req, request)
 
     search = _get_search(agent, request=request)
-    results = await search.search(query=query, limit=limit)
-
     agent_key = StoragePool.normalize_key(agent)
+    results = await search.search(query=query, limit=limit, agent=agent_key)
+
     return {
         "query": query,
         "agent": agent_key,
@@ -1334,6 +1353,8 @@ async def health_deep() -> Dict[str, Any]:
         "embedding": {"ok": False, "latency_ms": None},
         "vectorless": {"ok": False, "count": None},
         "disk_usage": {"ok": False, "db_path": None, "db_size_bytes": None},
+        "fts_probe": {"ok": False, "agents": []},
+        "permissions": {"ok": False, "readable_drift": []},
     }
 
     storage_available = False
@@ -1354,12 +1375,43 @@ async def health_deep() -> Dict[str, Any]:
                 "latency_ms": quick_check_latency,
             }
 
-            vectorless_row = conn.execute(
-                "SELECT COUNT(*) AS c FROM memories WHERE vector_rowid IS NULL"
-            ).fetchone()
+            vectorless_total = 0
+            fts_agents = []
+            permission_drift = []
+            for agent_id in _storage_pool.get_all_agents():
+                agent_storage = _storage_pool.get(agent_id)
+                agent_conn = agent_storage._get_conn()
+                vectorless_row = agent_conn.execute(
+                    "SELECT COUNT(*) AS c FROM memories WHERE vector_rowid IS NULL AND deleted_at IS NULL"
+                ).fetchone()
+                vectorless_total += int(vectorless_row["c"]) if vectorless_row else 0
+
+                fts_ok = True
+                fts_error = None
+                try:
+                    agent_conn.execute(
+                        "INSERT INTO memory_fts(memory_fts) VALUES('integrity-check')"
+                    )
+                except Exception as exc:
+                    fts_ok = False
+                    fts_error = str(exc)
+
+                fts_agents.append({"agent": agent_id, "ok": fts_ok, "error": fts_error})
+
+                for suffix in ("", "-wal", "-shm"):
+                    candidate = Path(f"{agent_storage.db_path}{suffix}")
+                    if not candidate.exists():
+                        continue
+                    mode = candidate.stat().st_mode & 0o777
+                    if mode & 0o077:
+                        permission_drift.append({
+                            "path": str(candidate),
+                            "mode": oct(mode),
+                        })
+
             checks["vectorless"] = {
                 "ok": True,
-                "count": int(vectorless_row["c"]) if vectorless_row else 0,
+                "count": vectorless_total,
             }
 
             db_path = Path(storage.db_path)
@@ -1367,6 +1419,14 @@ async def health_deep() -> Dict[str, Any]:
                 "ok": db_path.exists(),
                 "db_path": str(db_path),
                 "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
+            }
+            checks["fts_probe"] = {
+                "ok": all(item["ok"] for item in fts_agents),
+                "agents": fts_agents,
+            }
+            checks["permissions"] = {
+                "ok": len(permission_drift) == 0,
+                "readable_drift": permission_drift,
             }
         except Exception as exc:
             checks["db_integrity"]["error"] = str(exc)
@@ -1394,6 +1454,8 @@ async def health_deep() -> Dict[str, Any]:
         checks["db_integrity"].get("ok", False)
         and checks["vectorless"].get("ok", False)
         and checks["disk_usage"].get("ok", False)
+        and checks["fts_probe"].get("ok", False)
+        and checks["permissions"].get("ok", False)
     )
     embedding_ok = checks["embedding"].get("ok", False)
 
@@ -1526,8 +1588,9 @@ async def export_memories(
     rows = conn.execute(
         f"""
         SELECT id, text, category, importance, strength,
-               source_session, created_at, updated_at,
-               last_accessed_at, deleted_at
+               source_session, namespace, memory_type,
+               created_at, updated_at, last_accessed_at, deleted_at,
+               pinned, source, trust_level, lesson_status, lesson_scope, resolved_at
           FROM memories {where}
          ORDER BY created_at ASC
         """
@@ -1542,10 +1605,18 @@ async def export_memories(
             "importance": r["importance"],
             "strength": r["strength"],
             "source_session": r["source_session"],
+            "namespace": r["namespace"],
+            "memory_type": r["memory_type"],
             "created_at": r["created_at"],
             "updated_at": r["updated_at"],
             "last_accessed_at": r["last_accessed_at"],
             "deleted_at": r["deleted_at"],
+            "pinned": r["pinned"],
+            "source": r["source"],
+            "trust_level": r["trust_level"],
+            "lesson_status": r["lesson_status"],
+            "lesson_scope": r["lesson_scope"],
+            "resolved_at": r["resolved_at"],
         })
 
     logger.info("Exported %d memories for agent=%s", len(result), agent or "main")
@@ -1623,20 +1694,35 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                             exc,
                         )
 
-        from agent_memory.ingest import sanitize_memory_text as _sanitize_imp
-        text = _sanitize_imp(text)
+        from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
+        text = _normalize_imp(text)
+        if _is_low_signal_imp(text):
+            skipped += 1
+            continue
         storage.store_memory(
             text=text,
             vector=vector,
             category=mem.get("category", "other"),
             importance=float(mem.get("importance", 0.5)),
             source_session=mem.get("source_session"),
-            source="import",
-            trust_level="import",
+            namespace=mem.get("namespace", "default"),
+            memory_type=mem.get("memory_type", "other"),
+            source=mem.get("source", "import"),
+            trust_level=mem.get("trust_level", "import"),
+            strength=float(mem.get("strength", 1.0)),
+            created_at=mem.get("created_at"),
+            updated_at=mem.get("updated_at"),
+            last_accessed_at=mem.get("last_accessed_at"),
+            deleted_at=mem.get("deleted_at"),
+            pinned=int(mem.get("pinned", 0) or 0),
+            lesson_status=mem.get("lesson_status"),
+            lesson_scope=mem.get("lesson_scope"),
+            resolved_at=mem.get("resolved_at"),
             memory_id=mid,
         )
         imported += 1
 
+    storage.invalidate_search_cache(agent=agent_key or "main")
     logger.info(
         "Imported %d memories (skipped %d) for agent=%s",
         imported, skipped, req.agent or "main",
@@ -1743,6 +1829,7 @@ async def rotate_key(request: Request, expire_old_hours: int = 24) -> Dict[str, 
     os.makedirs(os.path.dirname(keys_path), exist_ok=True)
     with open(keys_path, "w") as f:
         _json.dump({"keys": existing_keys}, f, indent=2)
+    os.chmod(keys_path, 0o600)
 
     logger.info("API key rotated. Total keys: %d", len(existing_keys))
     return {

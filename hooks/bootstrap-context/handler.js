@@ -37,7 +37,8 @@ const LOW_SIGNAL_MEMORY_PATTERNS = [
   /^✅\s*Subagent\s+.+\s+finished/i,
   /\bA cron job\b/i,
   /\bA subagent task\b/i,
-  /^System:\s*\[/i,
+  /^System:\s*\[System Message\]/i,
+  /^System:\s*\[(?:Queued|Internal|Subagent)\b/i,
 ];
 
 function isCronNoise(text = "") {
@@ -56,7 +57,12 @@ function truncateSection(text, maxChars) {
 }
 
 function stripLowSignalText(text = "") {
-  const raw = String(text || "");
+  let raw = String(text || "");
+  // Strip OpenClaw Slack envelope prefix from recalled memories
+  raw = raw.replace(
+    /^System:\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+GMT[+-]\d+\]\s*Slack message(?:\s+edited)?\s+in\s+#\S+(?:\s+from\s+[^:]+)?[.:]\s*/gim,
+    ""
+  );
   const withoutBlocks = raw.replace(
     /Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```/gi,
     ""

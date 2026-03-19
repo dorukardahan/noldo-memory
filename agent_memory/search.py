@@ -5,7 +5,7 @@ Five-layer search:
 2. **Keyword**    — FTS5 BM25 ranking (weight 0.25)
 3. **Recency**    — Exponential decay (weight 0.10)
 4. **Strength**   — Ebbinghaus retention score (weight 0.07)
-5. **Importance** — write-time message importance (weight 0.25)
+5. **Importance** — write-time message importance (weight 0.08)
 
 Results from each layer are fused via RRF:
     ``score = Σ 1 / (k + rank_i)``  where k = 60
@@ -524,14 +524,15 @@ class HybridSearch:
         # Memory type bonus layer: prioritize factual, preference, and lesson memories.
         memory_type_bonus: Dict[str, float] = {}
         memory_type_bonus_weights = {
-            "lesson": 0.20,
-            "incident": 0.15,
-            "operational_event": 0.10,
-            "deployment": 0.10,
-            "config_change": 0.10,
-            "verification": 0.10,
-            "fact": 0.10,
-            "preference": 0.10,
+            # Keep bonus on the same order of magnitude as fused RRF scores.
+            "lesson": 0.006,
+            "incident": 0.004,
+            "operational_event": 0.003,
+            "deployment": 0.003,
+            "config_change": 0.003,
+            "verification": 0.003,
+            "fact": 0.002,
+            "preference": 0.002,
         }
         for mid, cand in all_candidates.items():
             cand_memory_type = str(cand.get("memory_type", "") or "").strip().lower()
@@ -614,7 +615,7 @@ class HybridSearch:
                 # unambiguous queries while preserving quality for close calls.
                 _scores = [r.score for r in results[:5]]
                 _spread = (_scores[0] - _scores[-1]) if len(_scores) >= 2 else 0.0
-                _RERANK_SPREAD_THRESHOLD = 0.005  # tune: higher = rerank less often
+                _RERANK_SPREAD_THRESHOLD = 0.015  # tuned for low-magnitude RRF scores
                 need_rerank = (
                     query_token_count >= 2
                     and _spread < _RERANK_SPREAD_THRESHOLD

@@ -45,6 +45,27 @@ export function deriveSessionNamespace(sessionKey = "") {
   return `session-${hash}`;
 }
 
+/**
+ * Strip OpenClaw channel envelope prefixes from message content.
+ * OpenClaw wraps inbound messages with metadata headers:
+ *   "System: [2026-03-10 14:30:00 GMT+3] Slack message in #channel from User: content"
+ * This function extracts only the user's actual content.
+ */
+export function stripChannelEnvelope(text = "") {
+  let cleaned = String(text || "");
+  // Slack envelope: System: [timestamp] Slack message [edited] in #channel [from User]: content
+  cleaned = cleaned.replace(
+    /^System:\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+GMT[+-]\d+\]\s*Slack message(?:\s+edited)?\s+in\s+#\S+(?:\s+from\s+[^:]+)?[.:]\s*/i,
+    ""
+  );
+  // OpenClaw runtime context preamble (cron/subagent delivered messages)
+  cleaned = cleaned.replace(
+    /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+GMT[+-]\d+\]\s*OpenClaw runtime context \(internal\):[\s\S]*?(?=\n\n|$)/gi,
+    ""
+  );
+  return cleaned;
+}
+
 export async function readWorkspacePolicy(workspaceDir = "") {
   const policyPath = path.join(workspaceDir, ".openclaw", "noldo-memory.json");
   try {

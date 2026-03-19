@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import time
 import uuid
@@ -165,6 +166,17 @@ class MemoryStorage:
     # Connection helpers
     # ------------------------------------------------------------------
 
+    def _harden_db_permissions(self) -> None:
+        """Best-effort permission remediation for DB and SQLite sidecar files."""
+        for suffix in ("", "-wal", "-shm"):
+            candidate = f"{self.db_path}{suffix}"
+            if not os.path.exists(candidate):
+                continue
+            try:
+                os.chmod(candidate, 0o600)
+            except OSError as exc:
+                logger.warning("Failed to chmod %s to 600: %s", candidate, exc)
+
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(self.db_path)
@@ -176,6 +188,7 @@ class MemoryStorage:
             self._conn.execute("PRAGMA mmap_size = 300000000")  # 300MB mmap
             self._conn.execute("PRAGMA temp_store = MEMORY")
             _load_vec_extension(self._conn)
+            self._harden_db_permissions()
         return self._conn
 
     def close(self) -> None:
@@ -297,11 +310,23 @@ class MemoryStorage:
         memory_type: str = "other",
         source: str = "api",
         trust_level: str = "user",
+        strength: float = 1.0,
+        created_at: Optional[float] = None,
+        updated_at: Optional[float] = None,
+        last_accessed_at: Optional[float] = None,
+        deleted_at: Optional[float] = None,
+        pinned: int = 0,
+        lesson_status: Optional[str] = None,
+        lesson_scope: Optional[str] = None,
+        resolved_at: Optional[float] = None,
     ) -> str:
         """Insert a memory. Returns the memory ID."""
         conn = self._get_conn()
         mid = memory_id or uuid.uuid4().hex[:16]
         now = time.time()
+        created_at = now if created_at is None else float(created_at)
+        updated_at = created_at if updated_at is None else float(updated_at)
+        last_accessed_at = created_at if last_accessed_at is None else float(last_accessed_at)
 
         vector_rowid: Optional[int] = None
         if vector is not None:
@@ -315,8 +340,9 @@ class MemoryStorage:
             """INSERT OR REPLACE INTO memories
                (id, text, category, memory_type, importance, source_session, namespace,
                 created_at, updated_at, vector_rowid,
-                strength, last_accessed_at, deleted_at, source, trust_level)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)""",
+                strength, last_accessed_at, deleted_at, pinned,
+                source, trust_level, lesson_status, lesson_scope, resolved_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 mid,
                 text,
@@ -325,13 +351,18 @@ class MemoryStorage:
                 importance,
                 source_session,
                 namespace,
-                now,
-                now,
+                created_at,
+                updated_at,
                 vector_rowid,
-                1.0,
-                now,
+                float(strength or 1.0),
+                last_accessed_at,
+                deleted_at,
+                int(pinned or 0),
                 source,
                 trust_level,
+                lesson_status,
+                lesson_scope,
+                resolved_at,
             ),
         )
 
@@ -483,6 +514,20 @@ class MemoryStorage:
             logger.debug("boost_strength failed for %s: %s", memory_id, exc)
             return False
 
+    def cleanup_fts_orphans(self) -> int:
+        """Delete FTS rows that no longer map to an active memory row."""
+        conn = self._get_conn()
+        cur = conn.execute(
+            """
+            DELETE FROM memory_fts
+             WHERE id NOT IN (
+                SELECT id FROM memories WHERE deleted_at IS NULL
+             )
+            """
+        )
+        conn.commit()
+        return int(cur.rowcount or 0)
+
     def decay_all(
         self,
         days_threshold: int = 7,
@@ -491,39 +536,48 @@ class MemoryStorage:
     ) -> int:
         """Gentle Ebbinghaus decay + boost with importance-adjusted rate.
 
-        Timelines (relaxed — memories live longer):
-        - 60+ days unaccessed -> drop to floor (importance-adjusted)
-        - < 14 days old -> protect (min 0.8)
-        - Very recent (last 48h) -> boost (+0.1)
-        - 14-60 days -> importance-adjusted decay (gentler: 0.10 base)
-        - GC phase: soft-delete zombies at floor with low importance, unaccessed 30+ days
-        - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable forever.
+        Timeline v2 (conservative — memories live much longer):
+        - 90+ days unaccessed -> drop to floor (importance-adjusted)
+        - < 21 days old -> protect (min 0.8)
+        - Very recent (last 72h) -> boost (+0.1)
+        - 21-90 days -> importance-adjusted decay (gentle: 0.07 base)
+        - GC phase: soft-delete zombies at floor with low importance, unaccessed 60+ days
+        - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable.
+        - Lessons: 270+ days floor, 60-day protect, 60-270 days -> 0.02 decay
+        - FTS orphan cleanup runs after GC to prevent index bloat.
         """
         conn = self._get_conn()
         now = time.time()
+
+        # Seconds constants for clarity
+        _72H  = 259200      # 3 days
+        _21D  = 1814400     # 21 days
+        _90D  = 7776000     # 90 days
+        _60D_GC = 5184000   # 60 days (GC threshold)
+        _60D  = 5184000     # 60 days (lesson protect)
+        _270D = 23328000    # 270 days (lesson stale floor)
+
         try:
-            # Phase 1: Importance-adjusted decay (relaxed timelines)
-            # decay_multiplier = 1.0 + (1.0 - importance)
-            # importance=0.2 -> 1.8x decay, importance=0.8 -> 1.2x decay
+            # Phase 1: Importance-adjusted decay (conservative timelines)
             cur = conn.execute(
                 """
                 UPDATE memories
                    SET strength = CASE
-                       -- 1. Very stale (60+ days): Drop to floor
-                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 5184000)
+                       -- 1. Very stale (90+ days): Drop to floor
+                       WHEN (COALESCE(last_accessed_at, created_at) < ? - ?)
                             THEN ?
 
-                       -- 2. Very recent (last 48h): Small boost
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 172800)
+                       -- 2. Very recent (last 72h): Small boost
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - ?)
                             THEN MIN(COALESCE(strength, 1.0) + 0.1, 5.0)
 
-                       -- 3. Recent (14-day window): Maintain high (min 0.8)
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 1209600)
+                       -- 3. Recent (21-day window): Maintain high (min 0.8)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - ?)
                             THEN MAX(COALESCE(strength, 1.0), 0.8)
 
-                       -- 4. Mid-stale (14-60 days): Gentler importance-adjusted decay
+                       -- 4. Mid-stale (21-90 days): Gentle importance-adjusted decay
                        ELSE MAX(
-                           COALESCE(strength, 1.0) - (0.10 * (1.0 + (1.0 - COALESCE(importance, 0.5)))),
+                           COALESCE(strength, 1.0) - (0.07 * (1.0 + (1.0 - COALESCE(importance, 0.5)))),
                            ?
                        )
                    END
@@ -531,35 +585,35 @@ class MemoryStorage:
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') != 'lesson'
                    AND (
-                       (COALESCE(last_accessed_at, created_at) < ? - 1209600) -- stale (14d)
+                       (COALESCE(last_accessed_at, created_at) < ? - ?)
                        OR
-                       (COALESCE(last_accessed_at, created_at) >= ? - 172800) -- very recent (for boost)
+                       (COALESCE(last_accessed_at, created_at) >= ? - ?)
                    )
                 """,
-                (now, min_strength, now, now, min_strength, now, now),
+                (now, _90D, min_strength, now, _72H, now, _21D, min_strength, now, _21D, now, _72H),
             )
             conn.commit()
             decayed = int(cur.rowcount or 0)
             logger.info(
-                "Decay phase 1: updated=%d (min_strength=%.2f, importance-adjusted, relaxed)",
+                "Decay phase 1: updated=%d (min_strength=%.2f, conservative v2)",
                 decayed,
                 min_strength,
             )
 
-            # Phase 1b: Lesson decay (3x slower — lessons survive much longer)
-            # 180+ days stale -> floor, 42-day protect window, 42-180 days -> gentle decay
+            # Phase 1b: Lesson decay (very slow — lessons survive much longer)
+            # 270+ days stale -> floor, 60-day protect window, 60-270 days -> 0.02 decay
             lesson_cur = conn.execute(
                 """
                 UPDATE memories
                    SET strength = CASE
-                       WHEN (COALESCE(last_accessed_at, created_at) < ? - 15552000)
+                       WHEN (COALESCE(last_accessed_at, created_at) < ? - ?)
                             THEN ?
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 172800)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - ?)
                             THEN MIN(COALESCE(strength, 1.0) + 0.1, 5.0)
-                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - 3628800)
+                       WHEN (COALESCE(last_accessed_at, created_at) >= ? - ?)
                             THEN MAX(COALESCE(strength, 1.0), 0.8)
                        ELSE MAX(
-                           COALESCE(strength, 1.0) - 0.03,
+                           COALESCE(strength, 1.0) - 0.02,
                            ?
                        )
                    END
@@ -567,20 +621,20 @@ class MemoryStorage:
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') = 'lesson'
                    AND (
-                       (COALESCE(last_accessed_at, created_at) < ? - 3628800)
+                       (COALESCE(last_accessed_at, created_at) < ? - ?)
                        OR
-                       (COALESCE(last_accessed_at, created_at) >= ? - 172800)
+                       (COALESCE(last_accessed_at, created_at) >= ? - ?)
                    )
                 """,
-                (now, min_strength, now, now, min_strength, now, now),
+                (now, _270D, min_strength, now, _72H, now, _60D, min_strength, now, _60D, now, _72H),
             )
             conn.commit()
             lesson_decayed = int(lesson_cur.rowcount or 0)
             if lesson_decayed:
-                logger.info("Decay phase 1b: lesson decay=%d (3x slower rate, relaxed)", lesson_decayed)
+                logger.info("Decay phase 1b: lesson decay=%d (very slow, conservative v2)", lesson_decayed)
 
             # Phase 2: GC — soft-delete zombies at strength floor with low importance,
-            # unaccessed for 30+ days (relaxed from 14 days)
+            # unaccessed for 60+ days (relaxed from 30 days)
             gc_cur = conn.execute(
                 """
                 UPDATE memories
@@ -590,14 +644,18 @@ class MemoryStorage:
                    AND COALESCE(memory_type, 'other') != 'lesson'
                    AND strength <= ?
                    AND importance <= 0.3
-                   AND COALESCE(last_accessed_at, created_at) < ? - 2592000
+                   AND COALESCE(last_accessed_at, created_at) < ? - ?
                 """,
-                (min_strength, now),
+                (min_strength, now, _60D_GC),
             )
             conn.commit()
             gc_count = int(gc_cur.rowcount or 0)
             if gc_count > 0:
                 logger.info("Decay GC phase: soft-deleted %d zombie memories", gc_count)
+
+            orphan_count = self.cleanup_fts_orphans()
+            if orphan_count > 0:
+                logger.info("Decay cleanup: removed %d orphan FTS rows", orphan_count)
 
             return decayed + gc_count
         except Exception as exc:
@@ -1181,11 +1239,22 @@ class MemoryStorage:
         return row["results_json"] if row else None
 
     def invalidate_search_cache(self, agent: Optional[str] = None) -> None:
-        """Delete expired cache entries, or all entries for a specific agent."""
+        """Delete expired cache entries, or all entries for a specific agent.
+
+        Per-agent DBs historically stored rows under agent='main'. Clear both the
+        normalized agent key and legacy 'main' rows on any explicit invalidation.
+        """
         conn = self._get_conn()
         now = time.time()
         if agent:
-            conn.execute("DELETE FROM search_result_cache WHERE agent = ?", (agent,))
+            agent_norm = str(agent or "main").strip().lower() or "main"
+            if agent_norm == "main":
+                conn.execute("DELETE FROM search_result_cache WHERE agent = ?", ("main",))
+            else:
+                conn.execute(
+                    "DELETE FROM search_result_cache WHERE agent IN (?, ?)",
+                    (agent_norm, "main"),
+                )
         else:
             conn.execute("DELETE FROM search_result_cache WHERE expires_at <= ?", (now,))
         conn.commit()

@@ -39,6 +39,20 @@ _SKIP_PREFIXES: tuple[str, ...] = (
     "NO_REPLY",
 )
 
+_TRANSPORT_WRAPPER_PATTERNS_RE = [
+    re.compile(
+        r"^System:\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+GMT[+-]\d+\]\s*Slack message(?:\s+edited)?\s+in\s+#\S+(?:\s+from\s+[^:]+)?[.:]\s*",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    re.compile(
+        r"^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+GMT[+-]\d+\]\s*OpenClaw runtime context \(internal\):[\s\S]*?(?=\n\n|$)",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+    re.compile(r"Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```", re.IGNORECASE),
+    re.compile(r"\[Subagent Context\][\s\S]*?(?=\n\n|$)", re.IGNORECASE),
+    re.compile(r"^\s*\[[^\]]+\]\s*\[System Message\].*$", re.IGNORECASE | re.MULTILINE),
+]
+
 # System noise patterns — gateway connects, test msgs, cron boilerplate [S9, 2026-02-17]
 _NOISE_PATTERNS_RE = [
     re.compile(r"whatsapp gateway (?:connected|disconnected)", re.IGNORECASE),
@@ -209,7 +223,7 @@ _DEPLOYMENT_RE = re.compile(
     r"(?:deploy\s*(?:ett\w*|edildi|completed|to\s+prod)|"
     r"release[ds]?\s+(?:to|v\d)|"
     r"(?:git|gh)\s+push\b|pull\s*request\s*(?:merged|açıldı)|"
-    r"pr\s*merge\s*(?:ett\w*|edildi)|"
+    r"pr\s*(?:merged|merge)\s*(?:to|into|ett\w*|edildi)?|"
     r"(?:build|ci)\s*(?:passed|geçti|başarılı)|"
     r"prod'?a\s*(?:çıktı|alındı|çıkardık)|"
     r"canlıya\s*(?:alındı|aldık|çıktı)|"
@@ -282,6 +296,39 @@ _INJECTION_PATTERNS = [
 ]
 
 
+def strip_transport_wrappers(text: str) -> str:
+    """Remove OpenClaw transport wrappers and noisy metadata blocks."""
+    original = str(text or "")
+    cleaned = original.replace("\r\n", "\n")
+    changed = cleaned != original
+    for pattern in _TRANSPORT_WRAPPER_PATTERNS_RE:
+        next_cleaned = pattern.sub("", cleaned)
+        if next_cleaned != cleaned:
+            changed = True
+        cleaned = next_cleaned
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip() if changed else cleaned
+
+
+LOW_SIGNAL_STORE_PATTERNS_RE = [
+    re.compile(r"^Conversation info \(untrusted metadata\)", re.IGNORECASE),
+    re.compile(r"^User:\s*Conversation info", re.IGNORECASE),
+    re.compile(r"^\[Subagent Context\]", re.IGNORECASE),
+    re.compile(r"^\[queued messages while agent was busy\]", re.IGNORECASE),
+    re.compile(r"^A new session was started via /new or /reset", re.IGNORECASE),
+    re.compile(r"^HEARTBEAT_OK$", re.IGNORECASE),
+    re.compile(r"^NO_REPLY$", re.IGNORECASE),
+]
+
+
+def is_low_signal_memory_text(text: str) -> bool:
+    """Return True for content that should not be stored as memory."""
+    stripped = str(text or "").strip()
+    if not stripped or len(stripped) < 3:
+        return True
+    return any(pattern.search(stripped) for pattern in LOW_SIGNAL_STORE_PATTERNS_RE)
+
+
 def sanitize_memory_text(text: str) -> str:
     """Strip or defang prompt injection patterns from memory text.
 
@@ -298,6 +345,11 @@ def sanitize_memory_text(text: str) -> str:
         sanitized = f'[SANITIZED] {sanitized}'
 
     return sanitized
+
+
+def normalize_memory_text(text: str) -> str:
+    """Apply wrapper stripping + prompt-injection sanitization for all write paths."""
+    return sanitize_memory_text(strip_transport_wrappers(text))
 
 
 def classify_memory_type(text: str) -> str:
@@ -337,13 +389,14 @@ def classify_memory_type(text: str) -> str:
     # Verification — health checks, confirmations
     if _is_verification(content):
         return "verification"
+    # Rule/instruction content should outrank factual patterns in direct stores
+    if rule_detector.detect(content) or rule_detector.check_safeword(content):
+        return "rule"
     # Facts — entity names, factual statements
     if _ENTITY_NAME_RE.search(content) or _FACTUAL_PATTERNS_RE.search(content):
         return "fact"
     if _PREFERENCE_KEYWORDS_RE.search(content):
         return "preference"
-    if rule_detector.detect(content) or rule_detector.check_safeword(content):
-        return "rule"
     return "conversation"
 
 

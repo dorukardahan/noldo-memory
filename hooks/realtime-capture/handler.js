@@ -39,7 +39,8 @@ const LOW_SIGNAL_PATTERNS = [
   /\[Queued announce messages while agent was busy\]/i,
   /\bA cron job\b/i,
   /\bA subagent task\b/i,
-  /^System:\s*\[/i,
+  /^System:\s*\[System Message\]/i,
+  /^System:\s*\[(?:Queued|Internal|Subagent)\b/i,
 ];
 
 const FEEDBACK_TAG_PATTERNS = {
@@ -75,6 +76,16 @@ const FEEDBACK_MARKERS = [
 
 function cleanMessage(raw = "") {
   let text = String(raw || "").replace(/\r\n/g, "\n");
+  // Strip OpenClaw Slack envelope prefix (RC-1 fix: this prefix caused isLowSignal to match ALL Slack messages)
+  text = text.replace(
+    /^System:\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+GMT[+-]\d+\]\s*Slack message(?:\s+edited)?\s+in\s+#\S+(?:\s+from\s+[^:]+)?[.:]\s*/i,
+    ""
+  );
+  // Strip OpenClaw runtime context preamble
+  text = text.replace(
+    /^\[(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+GMT[+-]\d+\]\s*OpenClaw runtime context \(internal\):[\s\S]*?(?=\n\n|$)/gi,
+    ""
+  );
   text = text.replace(/Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```/gi, "");
   text = text.replace(/\[Subagent Context\][\s\S]*?(?=\n\n|$)/gi, "");
   text = text.replace(/^\s*\[[^\]]+\]\s*\[System Message\].*$/gim, "");
@@ -180,7 +191,7 @@ async function store(text, category, importance, agent = "main", namespace = "de
         namespace,
         source: "hook",
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000),
     });
     if (!res.ok) {
       console.warn(
