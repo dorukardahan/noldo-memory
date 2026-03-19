@@ -30,7 +30,10 @@ jobs:
         run: ruff check agent_memory/ tests/ scripts/
 
       - name: Security audit
-        run: pip install pip-audit && pip-audit
+        run: |
+          pip install pip-audit
+          # nltk 3.9.3 is latest available; CVEs have no fix version yet (transitive dep of zeyrek)
+          pip-audit --ignore-vuln GHSA-rf74-v2fm-23pw --ignore-vuln CVE-2026-33230 --ignore-vuln CVE-2026-33231
 
       - name: Run tests
         env:
