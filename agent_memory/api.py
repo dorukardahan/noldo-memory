@@ -1671,9 +1671,17 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                 skipped += 1
                 continue
 
-        # Embed if embedder available
+        # Normalize BEFORE embedding so vector matches stored text
+        from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
+        text = _normalize_imp(text)
+        if _is_low_signal_imp(text):
+            skipped += 1
+            continue
+
+        # Embed the cleaned text (skip for soft-deleted imports)
         vector = None
-        if _embedder is not None:
+        is_deleted = mem.get("deleted_at") is not None
+        if _embedder is not None and not is_deleted:
             for attempt in range(3):
                 try:
                     vector = await _embedder.embed(text)
@@ -1693,12 +1701,6 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                             mid or "new",
                             exc,
                         )
-
-        from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
-        text = _normalize_imp(text)
-        if _is_low_signal_imp(text):
-            skipped += 1
-            continue
         storage.store_memory(
             text=text,
             vector=vector,

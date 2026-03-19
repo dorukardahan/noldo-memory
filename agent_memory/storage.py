@@ -366,11 +366,12 @@ class MemoryStorage:
             ),
         )
 
-        # FTS5 sync
-        conn.execute(
-            "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",
-            (mid, text),
-        )
+        # FTS5 sync — skip for soft-deleted imports to avoid polluting search
+        if deleted_at is None:
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",
+                (mid, text),
+            )
         conn.commit()
         return mid
 
