@@ -77,6 +77,61 @@ def _lexical_overlap(query: str, text: str) -> float:
     return len(q & d) / len(q)
 
 
+_MEMORY_TYPE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "lesson": ("lesson", "ders", "öğren", "hata", "mistake", "learning"),
+    "decision": ("karar", "decision", "decided", "onaylandı"),
+    "config_change": ("config", "ayar", "setting", "değişiklik"),
+    "preference": ("tercih", "preference", "prefer"),
+    "rule": ("kural", "rule", "policy"),
+}
+
+
+def _query_mentions_memory_type(query: str, memory_type: str) -> bool:
+    """Return True when the query explicitly mentions a memory-type keyword."""
+    q = (query or "").casefold()
+    for keyword in _MEMORY_TYPE_KEYWORDS.get(memory_type, ()):
+        if keyword.casefold() in q:
+            return True
+    return False
+
+
+def _detect_memory_type_intent(query: str) -> Optional[str]:
+    """Infer a primary memory_type filter from simple keyword intent.
+
+    Rules:
+    - lesson/rule/learning style queries bias to lesson memories
+    - decision queries bias to decision memories
+    - config queries bias to config_change memories
+    - preference queries bias to preference memories
+    """
+    if not query:
+        return None
+
+    if _query_mentions_memory_type(query, "lesson") or _query_mentions_memory_type(query, "rule"):
+        return "lesson"
+    if _query_mentions_memory_type(query, "decision"):
+        return "decision"
+    if _query_mentions_memory_type(query, "config_change"):
+        return "config_change"
+    if _query_mentions_memory_type(query, "preference"):
+        return "preference"
+    return None
+
+
+def _build_cache_query_norm(
+    query_norm: str,
+    namespace: Optional[str],
+    memory_type: Optional[str],
+) -> str:
+    """Namespace/filter-aware cache key without changing public API."""
+    parts = [query_norm]
+    if namespace:
+        parts.append(f"ns:{namespace}")
+    if memory_type:
+        parts.append(f"mt:{memory_type}")
+    return " | ".join(parts)
+
+
 @dataclass
 class SearchWeights:
     """Configurable weights for each search layer.
@@ -375,12 +430,15 @@ class HybridSearch:
         self.last_search_degraded = False
         self.last_search_mode = "full"
 
-        # 1. Query Normalization + Result Cache Check
+        # 1. Query normalization + intent-aware filter selection + cache check
         q_norm = normalize_query(query)
+        effective_memory_type = memory_type or _detect_memory_type_intent(q_norm)
+        cache_query_norm = _build_cache_query_norm(q_norm, namespace, effective_memory_type)
+
         # Skip cache for temporal queries — time_range changes daily
         if time_range is None:
             cached_json = self.storage.get_cached_search_result(
-                query_norm=q_norm, limit_val=limit, min_score=min_score, agent=agent
+                query_norm=cache_query_norm, limit_val=limit, min_score=min_score, agent=agent
             )
             if cached_json:
                 try:
@@ -408,17 +466,64 @@ class HybridSearch:
             return self.storage.search_vectors(
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
-                memory_type=memory_type,
+                memory_type=effective_memory_type,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
             """FTS5 BM25 search (sync, runs in event loop — fast enough)."""
-            return self.storage.search_text(q_norm, candidate_limit, namespace, memory_type=memory_type)
+            return self.storage.search_text(
+                q_norm,
+                candidate_limit,
+                namespace,
+                memory_type=effective_memory_type,
+            )
+
+        async def _metadata_type_search() -> List[Dict[str, Any]]:
+            """Direct metadata lookup by memory_type when query is explicit."""
+            explicit_types = [
+                mt for mt in _MEMORY_TYPE_KEYWORDS
+                if _query_mentions_memory_type(q_norm, mt)
+            ]
+            if not explicit_types:
+                return []
+
+            conn = self.storage._get_conn()
+            seen: Set[str] = set()
+            merged: List[Dict[str, Any]] = []
+            for explicit_type in explicit_types:
+                sql = """
+                    SELECT *
+                    FROM memories
+                    WHERE deleted_at IS NULL
+                      AND importance >= 0.05
+                      AND COALESCE(memory_type, 'other') = ?
+                """
+                params: List[Any] = [explicit_type]
+                if namespace is not None:
+                    sql += " AND namespace = ?"
+                    params.append(namespace)
+                if explicit_type == "lesson":
+                    sql += " AND COALESCE(lesson_status, 'active') = 'active'"
+                sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+                params.append(candidate_limit)
+
+                for row in conn.execute(sql, tuple(params)).fetchall():
+                    item = dict(row)
+                    mid = item.get("id")
+                    if mid and mid not in seen:
+                        seen.add(mid)
+                        merged.append(item)
+            return merged
 
         sem_results: List[Dict[str, Any]] = []
         kw_results: List[Dict[str, Any]] = []
+        metadata_results: List[Dict[str, Any]] = []
 
         # Run both layers in parallel
+        metadata_task: Optional[asyncio.Task[List[Dict[str, Any]]]] = None
+        if any(_query_mentions_memory_type(q_norm, mt) for mt in _MEMORY_TYPE_KEYWORDS):
+            metadata_task = asyncio.create_task(_metadata_type_search())
+
         if use_semantic and self.embedder is not None and use_keyword:
             sem_task = asyncio.create_task(_semantic_search())
             kw_task = asyncio.create_task(_keyword_search())
@@ -449,6 +554,12 @@ class HybridSearch:
             except Exception as exc:
                 logger.warning("Keyword search failed: %s", exc)
 
+        if metadata_task is not None:
+            try:
+                metadata_results = await metadata_task
+            except Exception as exc:
+                logger.warning("Metadata memory_type search failed: %s", exc)
+
         # Merge semantic results
         for r in sem_results:
             mid = r["id"]
@@ -463,11 +574,17 @@ class HybridSearch:
             if mid not in all_candidates:
                 all_candidates[mid] = r
 
+        # Merge direct metadata results (memory_type lookup) into candidate pool.
+        for r in metadata_results:
+            mid = r["id"]
+            if mid not in all_candidates:
+                all_candidates[mid] = r
+
         if not all_candidates:
             return []
 
-        if memory_type:
-            memory_type_norm = memory_type.strip().lower()
+        if effective_memory_type:
+            memory_type_norm = effective_memory_type.strip().lower()
             all_candidates = {
                 mid: c for mid, c in all_candidates.items()
                 if str(c.get("memory_type", "") or "").strip().lower() == memory_type_norm
@@ -525,14 +642,16 @@ class HybridSearch:
         memory_type_bonus: Dict[str, float] = {}
         memory_type_bonus_weights = {
             # Keep bonus on the same order of magnitude as fused RRF scores.
-            "lesson": 0.006,
+            "lesson": 0.35 / 60.0,
             "incident": 0.004,
             "operational_event": 0.003,
             "deployment": 0.003,
-            "config_change": 0.003,
+            "config_change": 0.25 / 60.0,
             "verification": 0.003,
             "fact": 0.002,
-            "preference": 0.002,
+            "rule": 0.30 / 60.0,
+            "decision": 0.25 / 60.0,
+            "preference": 0.20 / 60.0,
         }
         for mid, cand in all_candidates.items():
             cand_memory_type = str(cand.get("memory_type", "") or "").strip().lower()
@@ -684,6 +803,7 @@ class HybridSearch:
         if time_range is None:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
+                cache_query_norm=cache_query_norm,
                 limit=limit,
                 min_score=min_score,
                 agent=agent,
@@ -711,7 +831,7 @@ class HybridSearch:
             try:
                 results_json = json.dumps([r.to_dict() for r in results])
                 self.storage.cache_search_result(
-                    query_norm=q_norm,
+                    query_norm=cache_query_norm,
                     limit_val=limit,
                     min_score=min_score,
                     agent=agent,

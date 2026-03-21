@@ -545,6 +545,7 @@ class MemoryStorage:
         - GC phase: soft-delete zombies at floor with low importance, unaccessed 60+ days
         - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable.
         - Lessons: 270+ days floor, 60-day protect, 60-270 days -> 0.02 decay
+          min_strength for lessons is 0.8 (immune from dropping below useful threshold)
         - FTS orphan cleanup runs after GC to prevent index bloat.
         """
         conn = self._get_conn()
@@ -602,7 +603,9 @@ class MemoryStorage:
             )
 
             # Phase 1b: Lesson decay (very slow — lessons survive much longer)
-            # 270+ days stale -> floor, 60-day protect window, 60-270 days -> 0.02 decay
+            # 270+ days stale -> floor 0.8, 60-day protect window, 60-270 days -> 0.02 decay
+            # Lesson floor is 0.8 (not min_strength 0.3) — lessons must stay useful
+            _LESSON_MIN_STRENGTH = 0.8
             lesson_cur = conn.execute(
                 """
                 UPDATE memories
@@ -627,7 +630,7 @@ class MemoryStorage:
                        (COALESCE(last_accessed_at, created_at) >= ? - ?)
                    )
                 """,
-                (now, _270D, min_strength, now, _72H, now, _60D, min_strength, now, _60D, now, _72H),
+                (now, _270D, _LESSON_MIN_STRENGTH, now, _72H, now, _60D, _LESSON_MIN_STRENGTH, now, _60D, now, _72H),
             )
             conn.commit()
             lesson_decayed = int(lesson_cur.rowcount or 0)
