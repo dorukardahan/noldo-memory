@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "noldo-memory"
-version = "1.11.1"
+version = "1.12.0"
 description = "Long-term memory for AI agents for AI agents — hybrid search, Turkish NLP, per-agent routing"
 readme = "README.md"
 requires-python = ">=3.10"
