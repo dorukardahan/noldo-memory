@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_memories_importance ON memories(importance);
+CREATE INDEX IF NOT EXISTS idx_memories_memory_type ON memories(memory_type);
+CREATE INDEX IF NOT EXISTS idx_memories_type_ns ON memories(memory_type, namespace);
 
 -- Full-text search (trigram tokenizer for Turkish/multilingual)
 CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(

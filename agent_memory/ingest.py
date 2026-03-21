@@ -367,6 +367,7 @@ def classify_memory_type(text: str) -> str:
     """Classify memory text into operational types.
 
     Decision order (first match wins):
+    0. decision — explicit decisions (KARAR, [Decision], decided, onaylandı)
     1. lesson — behavioral corrections, feedback
     2. incident — failures, crashes, OOM, timeouts
     3. config_change — credential/config/env updates
@@ -382,7 +383,11 @@ def classify_memory_type(text: str) -> str:
     if not content:
         return "conversation"
 
-    # Lesson detection first (highest priority — behavioral corrections)
+    # Decision detection first — explicit decision markers
+    if re.search(r'\[Decision\]|\bKARAR\b|\bdecided\b|\bonaylandı\b|\bkarar(?:laştır|veril)', content, re.IGNORECASE):
+        return "decision"
+
+    # Lesson detection (highest priority after decision — behavioral corrections)
     if _LESSON_KEYWORDS_RE.search(content):
         return "lesson"
     # Incident — failures, crashes (before config to catch "config failed")
