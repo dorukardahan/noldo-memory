@@ -41,6 +41,8 @@ const LOW_SIGNAL_PATTERNS = [
   /\bA subagent task\b/i,
   /^System:\s*\[System Message\]/i,
   /^System:\s*\[(?:Queued|Internal|Subagent)\b/i,
+  // Repetitive health check alerts (devops cron fires every 2h, creates duplicates)
+  /(?:system\s+(?:health|watchdog)\s+alert|DOCKER\s+HEALTHY\s+COUNT)/i,
 ];
 
 const FEEDBACK_TAG_PATTERNS = {
@@ -143,8 +145,9 @@ function scoreImportance(text = "") {
   if (isFeedback(text)) score = Math.max(score, 0.85);
   if (text.length > 80) score += 0.05;
   if (text.length > 200) score += 0.05;
-  // Boost corrections, confirmations, results
-  if (/\b(evet|hayır|tamam|onaylıyorum|hayır yapma|yes|no|confirmed|approved)\b/i.test(text)) score += 0.10;
+  // Boost corrections, confirmations, results — only when message has substance (>30ch)
+  // to avoid capturing bare acknowledgments like "tamam" or "evet"
+  if (text.length > 30 && /\b(evet|hayır|tamam|onaylıyorum|hayır yapma|yes|no|confirmed|approved)\b/i.test(text)) score += 0.10;
   if (/\b(hata|bug|fix|düzelt|sorun|problem|error)\b/i.test(text)) score += 0.10;
   return Math.min(1.0, score);
 }
