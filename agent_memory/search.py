@@ -88,10 +88,15 @@ _MEMORY_TYPE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
 
 
 def _query_mentions_memory_type(query: str, memory_type: str) -> bool:
-    """Return True when the query explicitly mentions a memory-type keyword."""
+    """Return True when the query explicitly mentions a memory-type keyword.
+
+    Uses word boundary matching to avoid false positives from substrings.
+    """
     q = (query or "").casefold()
     for keyword in _MEMORY_TYPE_KEYWORDS.get(memory_type, ()):
-        if keyword.casefold() in q:
+        kw = keyword.casefold()
+        # Word boundary check: keyword must be surrounded by non-alphanumeric chars
+        if re.search(r'(?<![a-zçğıöşü0-9])' + re.escape(kw) + r'(?![a-zçğıöşü0-9])', q):
             return True
     return False
 
@@ -99,17 +104,16 @@ def _query_mentions_memory_type(query: str, memory_type: str) -> bool:
 def _detect_memory_type_intent(query: str) -> Optional[str]:
     """Infer a primary memory_type filter from simple keyword intent.
 
-    Rules:
-    - lesson/rule/learning style queries bias to lesson memories
-    - decision queries bias to decision memories
-    - config queries bias to config_change memories
-    - preference queries bias to preference memories
+    Returns None when no strong signal is detected — recall runs unfiltered.
+    Rule queries map to "rule" (not "lesson") for consistency.
     """
     if not query:
         return None
 
-    if _query_mentions_memory_type(query, "lesson") or _query_mentions_memory_type(query, "rule"):
+    if _query_mentions_memory_type(query, "lesson"):
         return "lesson"
+    if _query_mentions_memory_type(query, "rule"):
+        return "rule"
     if _query_mentions_memory_type(query, "decision"):
         return "decision"
     if _query_mentions_memory_type(query, "config_change"):
