@@ -79,7 +79,7 @@ def _lexical_overlap(query: str, text: str) -> float:
 
 _MEMORY_TYPE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     # "hata" removed — too common in non-lesson contexts (API errors, bug reports)
-    "lesson": ("lesson", "ders", "öğren", "mistake", "learning", "hatadan öğren"),
+    "lesson": ("lesson", "lessons", "ders", "dersler", "öğren", "mistake", "learning", "hatadan öğren"),
     "decision": ("karar", "decision", "decided", "onaylandı"),
     "config_change": ("config", "ayar", "setting", "değişiklik"),
     "preference": ("tercih", "preference", "prefer"),
