@@ -78,7 +78,8 @@ def _lexical_overlap(query: str, text: str) -> float:
 
 
 _MEMORY_TYPE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
-    "lesson": ("lesson", "ders", "öğren", "hata", "mistake", "learning"),
+    # "hata" removed — too common in non-lesson contexts (API errors, bug reports)
+    "lesson": ("lesson", "ders", "öğren", "mistake", "learning", "hatadan öğren"),
     "decision": ("karar", "decision", "decided", "onaylandı"),
     "config_change": ("config", "ayar", "setting", "değişiklik"),
     "preference": ("tercih", "preference", "prefer"),
@@ -479,7 +480,15 @@ class HybridSearch:
             )
 
         async def _metadata_type_search() -> List[Dict[str, Any]]:
-            """Direct metadata lookup by memory_type when query is explicit."""
+            """Direct metadata lookup by memory_type when query is explicit.
+
+            Skipped when explicit memory_type parameter overrides intent detection
+            to avoid wasted work (Kimi review finding #6).
+            """
+            # Skip if explicit memory_type was passed by caller
+            if memory_type is not None:
+                return []
+
             explicit_types = [
                 mt for mt in _MEMORY_TYPE_KEYWORDS
                 if _query_mentions_memory_type(q_norm, mt)
@@ -491,20 +500,21 @@ class HybridSearch:
             seen: Set[str] = set()
             merged: List[Dict[str, Any]] = []
             for explicit_type in explicit_types:
-                sql = """
-                    SELECT *
-                    FROM memories
-                    WHERE deleted_at IS NULL
-                      AND importance >= 0.05
-                      AND COALESCE(memory_type, 'other') = ?
-                """
+                # Build WHERE with parameterized values only — all fragments
+                # are static strings from code, values via ? placeholders.
+                where_parts = [
+                    "deleted_at IS NULL",
+                    "importance >= 0.05",
+                    "COALESCE(memory_type, 'other') = ?",
+                ]
                 params: List[Any] = [explicit_type]
                 if namespace is not None:
-                    sql += " AND namespace = ?"
+                    where_parts.append("namespace = ?")
                     params.append(namespace)
                 if explicit_type == "lesson":
-                    sql += " AND COALESCE(lesson_status, 'active') = 'active'"
-                sql += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+                    where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
+                where_clause = " AND ".join(where_parts)
+                sql = f"SELECT * FROM memories WHERE {where_clause} ORDER BY importance DESC, created_at DESC LIMIT ?"
                 params.append(candidate_limit)
 
                 for row in conn.execute(sql, tuple(params)).fetchall():
