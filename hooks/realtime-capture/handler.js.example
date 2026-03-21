@@ -137,10 +137,15 @@ function isLowSignal(text = "") {
 }
 
 function scoreImportance(text = "") {
-  if (!text || text.length < 15 || isCronNoise(text) || isLowSignal(text)) return 0;
-  let score = 0.35;
+  if (!text || text.length < 10 || isCronNoise(text) || isLowSignal(text)) return 0;
+  let score = 0.45;
   if (isDecision(text)) score = Math.max(score, 0.9);
-  if (text.length > 120) score += 0.05;
+  if (isFeedback(text)) score = Math.max(score, 0.85);
+  if (text.length > 80) score += 0.05;
+  if (text.length > 200) score += 0.05;
+  // Boost corrections, confirmations, results
+  if (/\b(evet|hayır|tamam|onaylıyorum|hayır yapma|yes|no|confirmed|approved)\b/i.test(text)) score += 0.10;
+  if (/\b(hata|bug|fix|düzelt|sorun|problem|error)\b/i.test(text)) score += 0.10;
   return Math.min(1.0, score);
 }
 
@@ -171,10 +176,11 @@ function resolveMessage(event) {
 }
 
 function shouldStoreAssistant(content = "") {
-  if (!content || content.length < 80) return false;
+  if (!content || content.length < 60) return false;
   if (isCronNoise(content) || isLowSignal(content)) return false;
   if (isDecision(content)) return true;
-  return content.length >= 220 || /\b(plan|next steps?|todo|aksiyon|yapılacak)\b/i.test(content);
+  // Lowered from 220 to 80 chars — let API-side classify importance
+  return content.length >= 80 || /\b(plan|next steps?|todo|aksiyon|yapılacak|fix|result|sonuç|tamamlandı|done|verified)\b/i.test(content);
 }
 
 async function store(text, category, importance, agent = "main", namespace = "default") {
@@ -226,10 +232,13 @@ const realtimeCaptureHook = async (event) => {
       return;
     }
 
-    if (content.length > 50) {
+    if (content.length > 15) {
       const imp = scoreImportance(content);
-      if (imp >= 0.4) {
+      if (imp >= 0.3) {
         await store(content, "user", imp, agentId, sessionNamespace);
+        console.log(`[realtime-capture] stored user msg (${content.length}ch, imp=${imp.toFixed(2)}, agent=${agentId})`);
+      } else if (content.length > 50) {
+        console.log(`[realtime-capture] dropped user msg (${content.length}ch, imp=${imp.toFixed(2)}, agent=${agentId})`);
       }
     }
     return;
@@ -262,9 +271,15 @@ const realtimeCaptureHook = async (event) => {
     }
   }
 
-  if (!shouldStoreAssistant(content)) return;
-  const importance = isDecision(content) ? 0.85 : Math.max(0.5, scoreImportance(content));
+  if (!shouldStoreAssistant(content)) {
+    if (content.length > 100) {
+      console.log(`[realtime-capture] dropped assistant msg (${content.length}ch, agent=${agentId})`);
+    }
+    return;
+  }
+  const importance = isDecision(content) ? 0.85 : Math.max(0.45, scoreImportance(content));
   await store(content, "assistant", importance, agentId, sessionNamespace);
+  console.log(`[realtime-capture] stored assistant msg (${content.length}ch, imp=${importance.toFixed(2)}, agent=${agentId})`);
 };
 
 export default realtimeCaptureHook;

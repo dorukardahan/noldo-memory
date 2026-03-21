@@ -253,9 +253,10 @@ def _is_system_noise(text_lower: str) -> bool:
 def score_importance(text: str, metadata: Optional[Dict] = None) -> float:
     """Calculate importance score for a message (0.0 – 1.0).
 
-    Recalibrated 2026-02-20: cron penalty, conversation boost, Turkish decisions.
+    Recalibrated 2026-03-21: raised base from 0.20 to 0.35, lowered search floor
+    to 0.05 so ranking (not filtering) controls recall visibility.
     """
-    score = 0.20
+    score = 0.35
     text_lower = text.lower().strip()
     metadata = metadata or {}
 

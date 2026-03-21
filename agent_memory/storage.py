@@ -927,7 +927,7 @@ class MemoryStorage:
     # SECURITY: All WHERE fragments are static strings from code, never from user input.
     # Values are always parameterized via ? placeholders.
     _ALLOWED_WHERE_FRAGMENTS = frozenset([
-        "vector_rowid = ?", "id = ?", "deleted_at IS NULL", "importance >= 0.3",
+        "vector_rowid = ?", "id = ?", "deleted_at IS NULL", "importance >= 0.05",
         "namespace = ?", "COALESCE(memory_type, 'other') = ?",
         "COALESCE(lesson_status, 'active') = 'active'",
     ])
@@ -980,7 +980,7 @@ class MemoryStorage:
             similarity = 1.0 - (r["distance"] / 2.0)
             if similarity < min_score:
                 continue
-            where = ["vector_rowid = ?", "deleted_at IS NULL", "importance >= 0.3"]
+            where = ["vector_rowid = ?", "deleted_at IS NULL", "importance >= 0.05"]
             params: List[Any] = [r["vec_rowid"]]
             if namespace is not None:
                 where.append("namespace = ?")
@@ -1029,7 +1029,7 @@ class MemoryStorage:
 
         results: List[Dict[str, Any]] = []
         for r in rows:
-            where = ["id = ?", "deleted_at IS NULL", "importance >= 0.3"]
+            where = ["id = ?", "deleted_at IS NULL", "importance >= 0.05"]
             params: List[Any] = [r["id"]]
             if namespace is not None:
                 where.append("namespace = ?")
