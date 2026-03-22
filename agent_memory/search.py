@@ -465,13 +465,17 @@ class HybridSearch:
         keyword_ids: List[str] = []
         all_candidates: Dict[str, Dict[str, Any]] = {}
 
+        # Only hard-filter at DB level when caller explicitly passed memory_type.
+        # Inferred types use soft-boost in RRF, not DB-level exclusion.
+        db_filter_type = memory_type  # None if inferred, preserving cross-type candidates
+
         async def _semantic_search() -> List[Dict[str, Any]]:
             """Embed query + vector search (async)."""
             query_vec = await self.embedder.embed(q_norm)
             return self.storage.search_vectors(
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
-                memory_type=effective_memory_type,
+                memory_type=db_filter_type,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
@@ -480,7 +484,7 @@ class HybridSearch:
                 q_norm,
                 candidate_limit,
                 namespace,
-                memory_type=effective_memory_type,
+                memory_type=db_filter_type,
             )
 
         async def _metadata_type_search() -> List[Dict[str, Any]]:
@@ -597,8 +601,12 @@ class HybridSearch:
         if not all_candidates:
             return []
 
-        if effective_memory_type:
-            memory_type_norm = effective_memory_type.strip().lower()
+        # Type filtering strategy:
+        # - Explicit memory_type parameter (caller intent) → hard filter
+        # - Inferred intent (keyword detection) → soft boost only, keep cross-type results
+        if memory_type:
+            # Hard filter: caller explicitly requested a type
+            memory_type_norm = memory_type.strip().lower()
             all_candidates = {
                 mid: c for mid, c in all_candidates.items()
                 if str(c.get("memory_type", "") or "").strip().lower() == memory_type_norm
@@ -667,10 +675,17 @@ class HybridSearch:
             "decision": 0.25 / 60.0,
             "preference": 0.20 / 60.0,
         }
+        # Inferred intent boost: when intent detection found a type but we're not
+        # hard-filtering, give matching candidates a stronger boost (2x normal bonus)
+        inferred_type = None if memory_type else (effective_memory_type or "").strip().lower()
+
         for mid, cand in all_candidates.items():
             cand_memory_type = str(cand.get("memory_type", "") or "").strip().lower()
-            bonus = memory_type_bonus_weights.get(cand_memory_type)
-            if bonus is not None:
+            bonus = memory_type_bonus_weights.get(cand_memory_type, 0.0)
+            # Double the bonus when this type matches the inferred intent
+            if inferred_type and cand_memory_type == inferred_type:
+                bonus = max(bonus * 2.0, 0.012)  # At least ~80% of typical RRF score
+            if bonus > 0:
                 memory_type_bonus[mid] = bonus
 
         # RRF fusion ----------------------------------------------------------

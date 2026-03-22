@@ -531,6 +531,67 @@ class MemoryStorage:
         conn.commit()
         return int(cur.rowcount or 0)
 
+    def sync_fts_missing(self) -> int:
+        """Add missing memories to FTS index (gap repair)."""
+        conn = self._get_conn()
+        cur = conn.execute(
+            """
+            INSERT INTO memory_fts(id, text)
+            SELECT id, text FROM memories
+             WHERE deleted_at IS NULL
+               AND text IS NOT NULL
+               AND length(text) > 0
+               AND id NOT IN (SELECT id FROM memory_fts)
+            """
+        )
+        conn.commit()
+        count = int(cur.rowcount or 0)
+        if count > 0:
+            logger.info("FTS sync: added %d missing entries", count)
+        return count
+
+    def cleanup_envelope_noise(self) -> int:
+        """Strip Slack/OpenClaw metadata envelopes from memory text.
+
+        Runs as maintenance — removes Conversation info JSON blocks,
+        Sender metadata, EXTERNAL_UNTRUSTED_CONTENT blocks, and
+        Slack message prefixes that dilute semantic search quality.
+        """
+        import re as _re
+        conn = self._get_conn()
+        patterns = [
+            (_re.compile(r'Conversation info \(untrusted metadata\):\s*```json[\s\S]*?```\s*', _re.IGNORECASE), ''),
+            (_re.compile(r'Sender \(untrusted metadata\):\s*```json[\s\S]*?```\s*', _re.IGNORECASE), ''),
+            (_re.compile(r'<<<EXTERNAL_UNTRUSTED_CONTENT[\s\S]*?<<<END_EXTERNAL_UNTRUSTED_CONTENT[^>]*>>>\s*', _re.IGNORECASE), ''),
+            (_re.compile(r'^(?:User:\s*)?System:\s*\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?\s+GMT[+-]\d+\]\s*Slack message(?:\s+edited)?\s+in\s+#\S+(?:\s+from\s+[^:]+)?[.:]\s*', _re.IGNORECASE | _re.MULTILINE), ''),
+        ]
+
+        rows = conn.execute(
+            """SELECT id, text FROM memories
+               WHERE deleted_at IS NULL
+               AND (text LIKE '%Conversation info (untrusted metadata)%'
+                    OR text LIKE '%EXTERNAL_UNTRUSTED_CONTENT%'
+                    OR text LIKE '%Sender (untrusted metadata)%')"""
+        ).fetchall()
+
+        cleaned = 0
+        now = time.time()
+        for row in rows:
+            text = row[1] if isinstance(row, tuple) else row["text"]
+            mid = row[0] if isinstance(row, tuple) else row["id"]
+            new_text = text
+            for pattern, replacement in patterns:
+                new_text = pattern.sub(replacement, new_text)
+            new_text = _re.sub(r'\n{3,}', '\n\n', new_text).strip()
+            if new_text != text and len(new_text) > 10:
+                conn.execute('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?',
+                             (new_text, now, mid))
+                cleaned += 1
+        conn.commit()
+        if cleaned > 0:
+            logger.info("Envelope cleanup: cleaned %d memories", cleaned)
+        return cleaned
+
     def decay_all(
         self,
         days_threshold: int = 7,
@@ -662,6 +723,10 @@ class MemoryStorage:
             orphan_count = self.cleanup_fts_orphans()
             if orphan_count > 0:
                 logger.info("Decay cleanup: removed %d orphan FTS rows", orphan_count)
+
+            # Phase 3: FTS sync + envelope cleanup (drift prevention)
+            self.sync_fts_missing()
+            self.cleanup_envelope_noise()
 
             return decayed + gc_count
         except Exception as exc:
