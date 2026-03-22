@@ -61,8 +61,8 @@ const FEEDBACK_TAG_PATTERNS = {
     /yanlış\s*(?:bilgi|söyledin|anladın)/i,
     /uydur(?:ma|dun)/i,
     /hayır\s*öyle\s*değil/i,
-    /that'?s\s*wrong/i,
-    /actually/i,
+    /that'?s\s*(?:wrong|incorrect|not\s*(?:right|true))/i,
+    /actually,?\s*(?:that'?s|it'?s|you'?re)\s*(?:wrong|incorrect|not)/i,
     /no\s*that'?s\s*not/i,
   ],
   premature_suggestion: [/öner(?:i|im)/i, /premature\s*suggestion/i, /too\s*early\s*to\s*suggest/i],
@@ -94,30 +94,30 @@ const FEEDBACK_MARKERS = [
   /never\s*again/i,
   /wrong\s*(?:again|info)/i,
   /how\s*many\s*times/i,
-  // New: broader feedback patterns (TR + EN)
+  // Broader feedback patterns (TR + EN) — require error/correction context
   /hayır\s*öyle\s*değil/i,
   /tekrar\s*oku/i,
-  /bak\s*kaynak/i,
-  /kontrol\s*et/i,
-  /that'?s\s*wrong/i,
-  /check\s*again/i,
+  /bak\s*(?:kaynak|koda|dosyaya)/i,
+  /(?:neden|niye)\s*kontrol\s*etmedin/i,  // "kontrol et" alone too broad, require "neden/niye"
+  /that'?s\s*(?:wrong|incorrect|not\s*right)/i,
+  /check\s*(?:again|the\s*source|the\s*code)/i,
   /no\s*that'?s\s*not/i,
-  /look\s*at\s*the\s*source/i,
+  /look\s*at\s*the\s*(?:source|code|file)/i,
 ];
 
 // Agent self-correction markers — capture when agent admits mistakes
+// Patterns must be specific to avoid FP on casual speech
 const SELF_CORRECTION_MARKERS = [
   /yanılmışım/i,
-  /pardon/i,
+  /pardon,?\s*(?:yanlış|hata)/i,    // "pardon" only with error context, not as politeness
   /düzeltiyorum/i,
   /hatalıydım/i,
   /yanlış\s*söyledim/i,
   /I\s*was\s*wrong/i,
   /my\s*mistake/i,
   /I\s*(?:was\s*)?incorrect/i,
-  /correction/i,
   /let\s*me\s*correct/i,
-  /actually,?\s*(?:it|that|I)/i,
+  /I\s*(?:should\s*have|need\s*to)\s*(?:check|verify|look)/i,
 ];
 
 function cleanMessage(raw = "") {

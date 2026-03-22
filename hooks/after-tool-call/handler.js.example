@@ -148,7 +148,6 @@ function detectVerifiedFact(cmd, output) {
     if (!match) continue;
 
     const subject = match[1] || cmd.slice(0, 60);
-    const outputLower = output.toLowerCase();
 
     // Determine if the check found something or not
     const found = output.length > 0 &&
@@ -161,13 +160,17 @@ function detectVerifiedFact(cmd, output) {
       .toLowerCase()
       .slice(0, 50);
 
+    // Sanitize source — never store raw output (may contain secrets from .env, config)
+    // Only store command type + subject + boolean result
+    const sanitizedSource = `${type}: ${subject.slice(0, 60)} (${found ? "found" : "not found"})`;
+
     return {
       key: `${type}-${slug}`,
       claim: found
         ? `${subject} exists/is available (verified by ${type})`
         : `${subject} not found/not available (verified by ${type})`,
-      verified: true,
-      source: `${cmd.slice(0, 150)} → ${output.slice(0, 100)}`,
+      verified: found,  // verified = found (not always true)
+      source: sanitizedSource,
       found,
     };
   }

@@ -113,51 +113,43 @@ async function recallForQuestion(agentId, keywords) {
   if (!_memoryApiKey || keywords.length === 0) return [];
 
   const query = keywords.join(" ");
-  const results = [];
 
-  // Search lessons first (most relevant for preventing repeat mistakes)
-  try {
-    const lessonRes = await fetch(`${MEMORY_API}/recall`, {
+  // Single global deadline for entire recall (both calls must finish within budget)
+  const deadline = AbortSignal.timeout(RECALL_TIMEOUT_MS);
+
+  // Run lesson + general recall in parallel with shared deadline
+  const [lessonResult, generalResult] = await Promise.allSettled([
+    fetch(`${MEMORY_API}/recall`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
       body: JSON.stringify({
         query,
         limit: MAX_RESULTS,
-        min_score: 0.15,
+        min_score: 0.20,
         agent: agentId,
         memory_type: "lesson",
       }),
-      signal: AbortSignal.timeout(RECALL_TIMEOUT_MS),
-    });
-    if (lessonRes.ok) {
-      const data = await lessonRes.json();
-      results.push(...(data.results || []).map((r) => ({ ...r, _source: "lesson" })));
-    }
-  } catch (e) {
-    console.warn("[message-recall] lesson recall timeout/error:", e.message);
-  }
+      signal: deadline,
+    }).then((r) => r.ok ? r.json() : { results: [] }),
+    fetch(`${MEMORY_API}/recall`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
+      body: JSON.stringify({
+        query,
+        limit: MAX_RESULTS,
+        min_score: 0.25,
+        agent: agentId,
+      }),
+      signal: deadline,
+    }).then((r) => r.ok ? r.json() : { results: [] }),
+  ]);
 
-  // Search verified facts + general memories
-  if (results.length < MAX_RESULTS) {
-    try {
-      const factRes = await fetch(`${MEMORY_API}/recall`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-        body: JSON.stringify({
-          query,
-          limit: MAX_RESULTS - results.length,
-          min_score: 0.20,
-          agent: agentId,
-        }),
-        signal: AbortSignal.timeout(RECALL_TIMEOUT_MS),
-      });
-      if (factRes.ok) {
-        const data = await factRes.json();
-        results.push(...(data.results || []).map((r) => ({ ...r, _source: "general" })));
-      }
-    } catch (e) {
-      console.warn("[message-recall] general recall timeout/error:", e.message);
-    }
+  const results = [];
+  if (lessonResult.status === "fulfilled") {
+    results.push(...(lessonResult.value.results || []).map((r) => ({ ...r, _source: "lesson" })));
+  }
+  if (generalResult.status === "fulfilled") {
+    results.push(...(generalResult.value.results || []).map((r) => ({ ...r, _source: "general" })));
   }
 
   return results.slice(0, MAX_RESULTS);

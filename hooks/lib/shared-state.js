@@ -7,9 +7,21 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const TOOL_STATE_FILE = "/tmp/noldo-recent-tools.json";
 const TOOL_CALL_TTL_MS = 300_000; // 5 minutes
+
+/**
+ * Atomic write — write to temp file then rename to avoid race conditions.
+ * @param {string} filePath
+ * @param {string} content
+ */
+function atomicWrite(filePath, content) {
+  const tmpPath = `${filePath}.${crypto.randomBytes(4).toString("hex")}.tmp`;
+  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
+  fs.renameSync(tmpPath, filePath);
+}
 
 /**
  * Record a tool call for later evidence checking.
@@ -42,7 +54,7 @@ export function recordToolCall(sessionKey, toolName, command) {
       if (state.calls[key].length === 0) delete state.calls[key];
     }
 
-    fs.writeFileSync(TOOL_STATE_FILE, JSON.stringify(state), "utf-8");
+    atomicWrite(TOOL_STATE_FILE, JSON.stringify(state));
   } catch (err) {
     console.warn("[shared-state] recordToolCall error:", err.message);
   }
@@ -67,31 +79,50 @@ export function getRecentToolCalls(sessionKey, windowMs = 120_000) {
 
 /**
  * Check if any recent tool calls match verification patterns
- * (grep, find, cat, curl, exec with specific patterns).
+ * AND are relevant to the given claim keywords.
  * @param {string} sessionKey
+ * @param {string[]} claimKeywords - Keywords extracted from the claim context
  * @returns {boolean}
  */
-export function hasRecentVerificationTool(sessionKey) {
+export function hasRecentVerificationTool(sessionKey, claimKeywords = []) {
   const calls = getRecentToolCalls(sessionKey, 120_000);
   if (calls.length === 0) return false;
+
+  // Verification-shaped commands (not just "any exec")
   const verifyPatterns = [
     /\bgrep\b/i,
     /\bfind\b/i,
     /\bcat\b/i,
     /\bcurl\b/i,
-    /\bls\b/i,
-    /\bread\b/i,
     /\bhead\b/i,
     /\btail\b/i,
-    /\bwc\b/i,
-    /\bfile\b/i,
     /\btest\s+-/i,
     /\bstat\b/i,
+    /\bwhich\b/i,
+    /\bdpkg\b/i,
+    /\bsystemctl\s+status\b/i,
   ];
-  return calls.some((c) =>
-    c.tool === "exec" || c.tool === "read" || c.tool === "web_search" || c.tool === "web_fetch" ||
-    verifyPatterns.some((p) => p.test(c.cmd))
-  );
+
+  const isVerificationCall = (c) => {
+    // read and web_search/web_fetch are always verification-shaped
+    if (c.tool === "read" || c.tool === "web_search" || c.tool === "web_fetch") return true;
+    // exec must match a verification pattern (not just any command)
+    if (c.tool === "exec") return verifyPatterns.some((p) => p.test(c.cmd));
+    return false;
+  };
+
+  const verifyCalls = calls.filter(isVerificationCall);
+  if (verifyCalls.length === 0) return false;
+
+  // If no claim keywords provided, just check verification tool existence
+  if (!claimKeywords || claimKeywords.length === 0) return true;
+
+  // Check if any verification call is relevant to the claim
+  const keywords = claimKeywords.map((k) => k.toLowerCase());
+  return verifyCalls.some((c) => {
+    const cmdLower = (c.cmd || "").toLowerCase();
+    return keywords.some((kw) => cmdLower.includes(kw));
+  });
 }
 
 // ── Fabrication Log ──
@@ -148,7 +179,7 @@ export function appendFabricationIncident(workspaceDir, incident) {
       byRootCause,
     };
 
-    fs.writeFileSync(logPath, JSON.stringify(log, null, 2), "utf-8");
+    atomicWrite(logPath, JSON.stringify(log, null, 2));
     console.warn(`[shared-state] fabrication incident logged: ${incident.type} (total=${log.stats.total})`);
   } catch (err) {
     console.warn("[shared-state] appendFabricationIncident error:", err.message);
@@ -198,7 +229,7 @@ export function writeVerifiedFact(workspaceDir, key, fact) {
       }
     }
 
-    fs.writeFileSync(factsPath, JSON.stringify(data, null, 2), "utf-8");
+    atomicWrite(factsPath, JSON.stringify(data, null, 2));
     console.warn(`[shared-state] verified fact stored: ${key}`);
   } catch (err) {
     console.warn("[shared-state] writeVerifiedFact error:", err.message);

@@ -41,10 +41,11 @@ const SCAN_TIMEOUT_MS = 3000;
 // ── Claim Detection Patterns ──
 
 const NEGATIVE_CLAIM_PATTERNS = [
-  // Turkish
-  { pattern: /(?:destekle(?:miyor|nmez|nmedi)|yok|mevcut\s+değil|bulunmuyor)/i, type: "feature_claim" },
+  // Turkish — require technical context around "yok" to avoid FP on casual speech
+  { pattern: /(?:destekle(?:miyor|nmez|nmedi)|mevcut\s+değil|bulunmuyor)/i, type: "feature_claim" },
+  { pattern: /(?:özellik|feature|endpoint|config|service|hook|plugin|api|port|komut)\s+(?:\w+\s+)?yok\b/i, type: "feature_claim" },
   { pattern: /(?:yapamıyor|kullanılamaz|çalışmıyor|aktif\s+değil)/i, type: "feature_claim" },
-  { pattern: /(?:mümkün\s+değil|imkansız|olmaz)/i, type: "feature_claim" },
+  { pattern: /(?:mümkün\s+değil|imkansız)/i, type: "feature_claim" },
   // English
   { pattern: /(?:not\s+support(?:ed)?|doesn'?t\s+(?:have|support|exist|include))/i, type: "feature_claim" },
   { pattern: /(?:not\s+available|not\s+(?:possible|implemented|enabled))/i, type: "feature_claim" },
@@ -68,16 +69,6 @@ const CONFIG_CLAIM_PATTERNS = [
   // Password/credential mentions with specific values
   { pattern: /(?:password|şifre|parola)\s*(?:is|=|:)\s*\S+/i, type: "credential_claim" },
   { pattern: /(?:token|api[_-]?key|secret)\s*(?:is|=|:)\s*\S+/i, type: "credential_claim" },
-];
-
-// Skip patterns — don't flag these contexts
-const SKIP_CONTEXTS = [
-  /```[\s\S]*?```/g,        // Code blocks
-  /`[^`]+`/g,               // Inline code
-  /^\s*#/gm,                // Headers
-  /^\s*\|.*\|/gm,           // Table rows
-  /HEARTBEAT_OK/i,
-  /NO_REPLY/i,
 ];
 
 // Low-signal response patterns — don't scan short/trivial responses
@@ -161,40 +152,52 @@ const claimScannerHook = async (event) => {
   const workspaceDir = resolveWorkspaceDir(event);
   const agentId = resolveAgentId(event, workspaceDir);
 
-  // Check if there were recent tool calls that could serve as evidence
-  const hasEvidence = hasRecentVerificationTool(sessionKey);
+  // Extract keywords from claim contexts for targeted evidence matching
+  const claimKeywords = claims
+    .flatMap((c) => (c.context || "").split(/\s+/))
+    .filter((w) => w.length > 3)
+    .map((w) => w.toLowerCase().replace(/[^a-z0-9çğıöşü]/gi, ""))
+    .filter(Boolean);
+  const uniqueKeywords = [...new Set(claimKeywords)].slice(0, 10);
+
+  // Check if there were recent tool calls relevant to these specific claims
+  const hasEvidence = hasRecentVerificationTool(sessionKey, uniqueKeywords);
 
   if (hasEvidence) {
-    console.warn(`[claim-scanner] ${claims.length} claims found but tool evidence exists (agent=${agentId})`);
-    return; // Claims are backed by tool calls — OK
+    console.warn(`[claim-scanner] ${claims.length} claims found but relevant tool evidence exists (agent=${agentId})`);
+    return; // Claims are backed by related tool calls — OK
   }
 
   console.warn(`[claim-scanner] ${claims.length} UNVERIFIED claims detected (agent=${agentId})`);
 
-  // Store each unverified claim
-  for (const claim of claims.slice(0, 3)) { // Max 3 per response
-    // Store to NoldoMem
-    if (_memoryApiKey) {
-      try {
-        await fetch(`${MEMORY_API}/store`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-          body: JSON.stringify({
-            text: `[Unverified Claim] ${claim.direction}: "${claim.context}" — No tool verification found in session. Agent should verify with grep/cat/curl before making such claims.`,
-            category: "unverified_claim",
-            importance: 0.80,
-            agent: agentId,
-            source: "claim-scanner-hook",
-            memory_type: "lesson",
-          }),
-          signal: AbortSignal.timeout(SCAN_TIMEOUT_MS),
-        });
-      } catch (e) {
-        console.warn("[claim-scanner] store failed:", e.message);
-      }
-    }
+  const claimsToProcess = claims.slice(0, 3);
 
-    // Log to fabrication-log.json
+  // Fire-and-forget: store all claims in parallel with shared deadline
+  const deadline = AbortSignal.timeout(SCAN_TIMEOUT_MS);
+
+  // NoldoMem stores — parallel, not sequential
+  if (_memoryApiKey) {
+    const storePromises = claimsToProcess.map((claim) =>
+      fetch(`${MEMORY_API}/store`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
+        body: JSON.stringify({
+          text: `[Unverified Claim] ${claim.direction}: "${claim.context}" — No tool verification found in session. Agent should verify with grep/cat/curl before making such claims.`,
+          category: "unverified_claim",
+          importance: 0.80,
+          agent: agentId,
+          source: "claim-scanner-hook",
+          memory_type: "fabrication_incident",
+        }),
+        signal: deadline,
+      }).catch((e) => console.warn("[claim-scanner] store failed:", e.message))
+    );
+    // Don't await individually — allSettled with shared deadline
+    await Promise.allSettled(storePromises);
+  }
+
+  // Log to fabrication-log.json (sync file I/O, fast)
+  for (const claim of claimsToProcess) {
     appendFabricationIncident(workspaceDir, {
       date: new Date().toISOString(),
       type: claim.type,
