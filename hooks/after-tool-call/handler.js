@@ -12,6 +12,7 @@ import path from "node:path";
 
 const MEMORY_API = "http://localhost:8787/v1";
 import { readFileSync } from "node:fs";
+import { recordToolCall, writeVerifiedFact } from "../lib/shared-state.js";
 const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
 try { _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim(); } catch (e) { console.warn("[after-tool-call] error:", e.message || e); }
@@ -125,6 +126,55 @@ function scoreToolOutput(toolInput, toolOutput) {
   return importance;
 }
 
+// ── Verified Fact Detection ──
+
+const VERIFICATION_CMD_PATTERNS = [
+  // grep/find for feature/file existence
+  { pattern: /\bgrep\s+(?:-[rnilw]+\s+)*['"]?(\S+)['"]?/i, type: "feature_check" },
+  { pattern: /\bfind\s+\S+\s+.*-name\s+['"]?(\S+)['"]?/i, type: "file_check" },
+  // curl health/status checks
+  { pattern: /\bcurl\s+.*(?:health|status|ping|version)/i, type: "service_check" },
+  // systemctl status
+  { pattern: /\bsystemctl\s+(?:--user\s+)?status\s+(\S+)/i, type: "service_check" },
+  // dpkg/which for package existence
+  { pattern: /\b(?:which|dpkg\s+-l|command\s+-v)\s+(\S+)/i, type: "tool_check" },
+];
+
+function detectVerifiedFact(cmd, output) {
+  if (!cmd || !output) return null;
+
+  for (const { pattern, type } of VERIFICATION_CMD_PATTERNS) {
+    const match = cmd.match(pattern);
+    if (!match) continue;
+
+    const subject = match[1] || cmd.slice(0, 60);
+    const outputLower = output.toLowerCase();
+
+    // Determine if the check found something or not
+    const found = output.length > 0 &&
+      !/(no such file|not found|command not found|no matches|error|usage:)/i.test(output);
+
+    const slug = subject
+      .replace(/[^a-z0-9]/gi, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase()
+      .slice(0, 50);
+
+    return {
+      key: `${type}-${slug}`,
+      claim: found
+        ? `${subject} exists/is available (verified by ${type})`
+        : `${subject} not found/not available (verified by ${type})`,
+      verified: true,
+      source: `${cmd.slice(0, 150)} → ${output.slice(0, 100)}`,
+      found,
+    };
+  }
+
+  return null;
+}
+
 const afterToolCallHook = async (event, ctx) => {
   // Event shape varies — handle both possible structures
   const toolName = event.toolName;
@@ -134,10 +184,51 @@ const afterToolCallHook = async (event, ctx) => {
     typeof toolResult === "string" ? toolResult : JSON.stringify(toolResult);
 
   if (!toolName) return;
-  if (!shouldCapture(toolName, toolInput)) return;
 
   const workspaceDir = ctx?.workspaceDir || process.env.OPENCLAW_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
   const agentId = getAgentId(workspaceDir);
+  const sessionKey = event?.sessionKey || ctx?.sessionKey || "";
+
+  // Always record tool calls for claim-scanner cross-reference
+  recordToolCall(sessionKey, toolName, toolInput?.command || toolInput?.file_path || toolInput?.path || toolName);
+
+  // Check for verified facts from exec commands
+  if (toolName === "exec" && toolInput?.command && toolOutput) {
+    const fact = detectVerifiedFact(toolInput.command, toolOutput);
+    if (fact) {
+      writeVerifiedFact(workspaceDir, fact.key, {
+        claim: fact.claim,
+        verified: fact.verified,
+        source: fact.source,
+        agent: agentId,
+        found: fact.found,
+      });
+
+      // Also store to NoldoMem as verified_fact
+      if (_memoryApiKey) {
+        try {
+          await fetch(`${MEMORY_API}/store`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
+            body: JSON.stringify({
+              text: `[Verified Fact] ${fact.claim}. Source: ${fact.source.slice(0, 200)}`,
+              category: "verified_fact",
+              importance: 0.75,
+              agent: agentId,
+              source: "after-tool-call-hook",
+              memory_type: "fact",
+            }),
+            signal: AbortSignal.timeout(5000),
+          });
+          console.warn(`[after-tool-call] verified fact stored: ${fact.key} (agent=${agentId})`);
+        } catch (err) {
+          console.warn(`[after-tool-call] verified fact store failed: ${err.message}`);
+        }
+      }
+    }
+  }
+
+  if (!shouldCapture(toolName, toolInput)) return;
 
   // Structured config change capture for edit/write tools
   if ((toolName === "edit" || toolName === "write") && isConfigFile(toolInput?.file_path || toolInput?.path || "")) {

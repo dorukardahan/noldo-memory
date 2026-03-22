@@ -50,13 +50,33 @@ const FEEDBACK_TAG_PATTERNS = {
     /neden\s*(?:doğrulamadın|kontrol\s*etmedin|bakmadın)/i,
     /\bverify\b/i,
     /doğrula/i,
+    /kontrol\s*et/i,
+    /bak\s*(?:kaynak|koda|dosyaya)/i,
+    /tekrar\s*(?:oku|bak|kontrol)/i,
+    /check\s*again/i,
+    /look\s*at\s*the\s*source/i,
   ],
-  fabrication: [/\bfabrication\b/i, /yanlış\s*(?:bilgi|söyledin)/i, /uydur(?:ma|dun)/i],
+  fabrication: [
+    /\bfabrication\b/i,
+    /yanlış\s*(?:bilgi|söyledin|anladın)/i,
+    /uydur(?:ma|dun)/i,
+    /hayır\s*öyle\s*değil/i,
+    /that'?s\s*wrong/i,
+    /actually/i,
+    /no\s*that'?s\s*not/i,
+  ],
   premature_suggestion: [/öner(?:i|im)/i, /premature\s*suggestion/i, /too\s*early\s*to\s*suggest/i],
   did_not_read_code: [
     /kodu\s*(?:okumadın|incelemedin)/i,
     /did\s*not\s*read\s*code/i,
     /read\s*the\s*code\s*first/i,
+  ],
+  context_loss: [
+    /ne\s*yapmaya\s*çalış(?:ıyordun|tın)/i,
+    /context\s*(?:loss|kaybı)/i,
+    /az\s*önce\s*(?:söyledim|anlattım|konuştuk)/i,
+    /daha\s*(?:yeni|demin)\s*(?:söyledim|konuştuk)/i,
+    /we\s*just\s*(?:talked|discussed)/i,
   ],
 };
 
@@ -65,7 +85,7 @@ const FEEDBACK_MARKERS = [
   /neden\s*(?:doğrulamadın|kontrol\s*etmedin|bakmadın)/i,
   /bir\s*daha\s*yapma/i,
   /hata\s*(?:yaptın|yapıyorsun|tekrar)/i,
-  /yanlış\s*(?:yaptın|bilgi|söyledin)/i,
+  /yanlış\s*(?:yaptın|bilgi|söyledin|anladın)/i,
   /\bfabrication\b/i,
   /güven(?:i|ini)?\s*(?:kaybett|sarsar|kırıl)/i,
   /sürekli\s*(?:aynı|böyle|yanlış)/i,
@@ -74,6 +94,30 @@ const FEEDBACK_MARKERS = [
   /never\s*again/i,
   /wrong\s*(?:again|info)/i,
   /how\s*many\s*times/i,
+  // New: broader feedback patterns (TR + EN)
+  /hayır\s*öyle\s*değil/i,
+  /tekrar\s*oku/i,
+  /bak\s*kaynak/i,
+  /kontrol\s*et/i,
+  /that'?s\s*wrong/i,
+  /check\s*again/i,
+  /no\s*that'?s\s*not/i,
+  /look\s*at\s*the\s*source/i,
+];
+
+// Agent self-correction markers — capture when agent admits mistakes
+const SELF_CORRECTION_MARKERS = [
+  /yanılmışım/i,
+  /pardon/i,
+  /düzeltiyorum/i,
+  /hatalıydım/i,
+  /yanlış\s*söyledim/i,
+  /I\s*was\s*wrong/i,
+  /my\s*mistake/i,
+  /I\s*(?:was\s*)?incorrect/i,
+  /correction/i,
+  /let\s*me\s*correct/i,
+  /actually,?\s*(?:it|that|I)/i,
 ];
 
 function cleanMessage(raw = "") {
@@ -245,6 +289,14 @@ const realtimeCaptureHook = async (event) => {
       }
     }
     return;
+  }
+
+  // Self-correction capture — agent admitting mistakes → store as lesson
+  if (message.role === "assistant" && SELF_CORRECTION_MARKERS.some((p) => p.test(content))) {
+    if (content.length > 30) {
+      await store(`[Self-Correction] ${content}`, "lesson", 0.85, agentId, "default");
+      console.log(`[realtime-capture] self-correction captured (${content.length}ch, agent=${agentId})`);
+    }
   }
 
   // Propagation completeness check — detect "N files updated" claims

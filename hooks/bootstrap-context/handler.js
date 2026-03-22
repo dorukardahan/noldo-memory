@@ -7,6 +7,10 @@ import {
   resolveAgentId,
   resolveWorkspaceDir,
 } from "../lib/runtime.js";
+import {
+  readFabricationLog,
+  readVerifiedFacts,
+} from "../lib/shared-state.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -426,6 +430,50 @@ const bootstrapContextHook = async (event) => {
     console.warn(`[bootstrap-context] read last-session.md (${lastSession.length} chars)`);
     sections.push("\n# Last Session Summary\n");
     sections.push(lastSession);
+  }
+
+  // ── Fabrication Stats Injection ──
+  try {
+    const fabLog = readFabricationLog(workspaceDir);
+    if (fabLog.stats && fabLog.stats.total > 0) {
+      const s = fabLog.stats;
+      const fabLines = ["\n# Fabrication Alert\n"];
+      if (s.last7d >= 3) {
+        fabLines.push(`> ⚠️ **Son 7 günde ${s.last7d} fabrication incident.** Tool ile doğrulama zorunlu.\n`);
+      }
+      fabLines.push(`Toplam: ${s.total} | Son 7 gün: ${s.last7d}`);
+      if (s.byType && Object.keys(s.byType).length > 0) {
+        fabLines.push(`Türe göre: ${Object.entries(s.byType).map(([k, v]) => `${k}=${v}`).join(", ")}`);
+      }
+      if (s.byRootCause && Object.keys(s.byRootCause).length > 0) {
+        fabLines.push(`Kök neden: ${Object.entries(s.byRootCause).map(([k, v]) => `${k}=${v}`).join(", ")}`);
+      }
+      sections.push(...fabLines);
+      console.warn(`[bootstrap-context] fabrication stats injected: total=${s.total} last7d=${s.last7d}`);
+    }
+  } catch (e) {
+    console.warn("[bootstrap-context] fabrication log read error:", e.message);
+  }
+
+  // ── Verified Facts Injection ──
+  try {
+    const vf = readVerifiedFacts(workspaceDir);
+    const facts = Object.entries(vf.facts || {}).filter(([, f]) => !f.stale);
+    if (facts.length > 0) {
+      const vfLines = ["\n# Verified Facts (auto-captured)\n"];
+      const MAX_VF = 10;
+      for (const [key, fact] of facts.slice(0, MAX_VF)) {
+        const status = fact.verified ? "✅" : "❌";
+        vfLines.push(`- ${status} ${fact.claim || key} (${new Date(fact.verifiedAt).toISOString().split("T")[0]})`);
+      }
+      if (facts.length > MAX_VF) {
+        vfLines.push(`... ve ${facts.length - MAX_VF} tane daha (verified-facts.json'da)`);
+      }
+      sections.push(...vfLines);
+      console.warn(`[bootstrap-context] verified facts injected: ${facts.length}`);
+    }
+  } catch (e) {
+    console.warn("[bootstrap-context] verified facts read error:", e.message);
   }
 
   if (policy.dailyNotesEnabled !== false) {
