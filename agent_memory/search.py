@@ -712,7 +712,11 @@ class HybridSearch:
 
         if kg_task is not None:
             try:
-                kg_results = await kg_task
+                # 200ms timeout — KG lookup is best-effort, don't block recall
+                kg_results = await asyncio.wait_for(kg_task, timeout=0.2)
+            except asyncio.TimeoutError:
+                logger.debug("KG entity search timed out (200ms limit)")
+                kg_task.cancel()
             except Exception as exc:
                 logger.warning("KG entity search failed: %s", exc)
 
