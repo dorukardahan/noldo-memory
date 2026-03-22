@@ -139,6 +139,56 @@ class TestStats:
 
 
 # ---------------------------------------------------------------------------
+# /v1/dashboard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+class TestDashboard:
+    async def test_dashboard_returns_summary(self, client):
+        main_storage = api_module._storage_pool.get("main")
+        main_storage.store_memory(
+            text="hook lesson memory",
+            vector=None,
+            memory_type="lesson",
+            source="hook",
+            strength=1.2,
+        )
+        main_storage.store_memory(
+            text="api decision memory",
+            vector=None,
+            memory_type="decision",
+            source="api",
+        )
+
+        other_storage = api_module._storage_pool.get("worker")
+        other_storage.store_memory(
+            text="Conversation info (untrusted metadata): ```json {} ```",
+            vector=None,
+            memory_type="fact",
+            source="hook",
+        )
+
+        resp = await client.get("/v1/dashboard")
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data["summary"]["total_agents"] == 2
+        assert data["summary"]["total_memories"] == 3
+        assert data["capture_health"]["hook_rate_7d"] == 2
+        assert data["capture_health"]["api_rate_7d"] == 1
+        assert data["capture_health"]["hook_pct"] == pytest.approx(66.7, rel=0, abs=0.1)
+        assert data["memory_types"]["lesson"] == 1
+        assert data["memory_types"]["decision"] == 1
+        assert data["quality"]["fts_gap"] == 0
+        assert data["quality"]["vectorless"] == 3
+        assert data["quality"]["envelope_noise"] == 1
+        assert data["quality"]["avg_lesson_strength"] == pytest.approx(1.2, rel=0, abs=0.01)
+        assert data["per_agent"][0]["agent"] == "main"
+        assert data["per_agent"][0]["lessons"] == 1
+        assert data["per_agent"][0]["decisions"] == 1
+
+
+# ---------------------------------------------------------------------------
 # /v1/store
 # ---------------------------------------------------------------------------
 
@@ -434,6 +484,7 @@ class TestDocs:
         assert "/v1/forget" in data["paths"]
         assert "/v1/search" in data["paths"]
         assert "/v1/stats" in data["paths"]
+        assert "/v1/dashboard" in data["paths"]
         assert "/v1/capture" in data["paths"]
 
     async def test_docs_page(self, client):

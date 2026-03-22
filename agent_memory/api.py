@@ -32,6 +32,7 @@ import sqlite3
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from collections import defaultdict
 from typing import Any, Dict, List, Literal, Optional
 
 import numpy as np
@@ -1239,6 +1240,161 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
         "total_before": total_before,
         "total_after": total_after,
     }
+
+
+def _count_scalar(conn: sqlite3.Connection, query: str, params: tuple[Any, ...] = ()) -> int:
+    """Run a COUNT-style query and normalize NULL to 0."""
+    row = conn.execute(query, params).fetchone()
+    if row is None:
+        return 0
+    return int(row[0] or 0)
+
+
+def _get_dashboard_data(request: Request) -> Dict[str, Any]:
+    """Build an aggregated cross-agent dashboard summary."""
+    if _storage_pool is None:
+        raise HTTPException(503, "Storage pool not initialised")
+
+    agents = _storage_pool.get_all_agents()
+    per_agent: List[Dict[str, Any]] = []
+    memory_types: dict[str, int] = defaultdict(int)
+    summary = {
+        "total_memories": 0,
+        "total_agents": len(agents),
+        "total_entities": 0,
+        "total_relationships": 0,
+    }
+    capture_health = {
+        "hook_rate_7d": 0,
+        "api_rate_7d": 0,
+        "hook_pct": 0.0,
+    }
+    quality = {
+        "fts_gap": 0,
+        "vectorless": 0,
+        "envelope_noise": 0,
+        "avg_lesson_strength": 0.0,
+    }
+
+    week_ago = time.time() - (7 * 86400)
+    lesson_strength_total = 0.0
+    lesson_strength_count = 0
+
+    for agent_id in agents:
+        storage = _get_storage(agent_id, request=request)
+        conn = storage._get_conn()
+
+        stats = storage.stats()
+        summary["total_entities"] += int(stats.get("entities", 0) or 0)
+        summary["total_relationships"] += int(stats.get("relationships", 0) or 0)
+
+        active_total = _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL",
+        )
+        summary["total_memories"] += active_total
+        hook_total = _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND source = 'hook'",
+        )
+        api_total = _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND source = 'api'",
+        )
+        lesson_total = _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND memory_type = 'lesson'",
+        )
+        decision_total = _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND memory_type = 'decision'",
+        )
+
+        per_agent.append({
+            "agent": agent_id,
+            "total": active_total,
+            "hook": hook_total,
+            "api": api_total,
+            "lessons": lesson_total,
+            "decisions": decision_total,
+        })
+
+        recent_row = conn.execute(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE source = 'hook') AS hook_rate_7d,
+                COUNT(*) FILTER (WHERE source = 'api') AS api_rate_7d
+            FROM memories
+            WHERE deleted_at IS NULL AND created_at >= ?
+            """,
+            (week_ago,),
+        ).fetchone()
+        capture_health["hook_rate_7d"] += int(recent_row["hook_rate_7d"] or 0)
+        capture_health["api_rate_7d"] += int(recent_row["api_rate_7d"] or 0)
+
+        type_rows = conn.execute(
+            """
+            SELECT COALESCE(memory_type, 'other') AS memory_type, COUNT(*) AS count
+            FROM memories
+            WHERE deleted_at IS NULL
+            GROUP BY COALESCE(memory_type, 'other')
+            """
+        ).fetchall()
+        for row in type_rows:
+            memory_types[str(row["memory_type"])] += int(row["count"] or 0)
+
+        fts_count = _count_scalar(
+            conn,
+            """
+            SELECT COUNT(*)
+            FROM memories m
+            WHERE m.deleted_at IS NULL
+              AND EXISTS (SELECT 1 FROM memory_fts f WHERE f.id = m.id)
+            """,
+        )
+        quality["fts_gap"] += max(active_total - fts_count, 0)
+        quality["vectorless"] += _count_scalar(
+            conn,
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND vector_rowid IS NULL",
+        )
+        quality["envelope_noise"] += _count_scalar(
+            conn,
+            """
+            SELECT COUNT(*)
+            FROM memories
+            WHERE deleted_at IS NULL
+              AND (
+                text LIKE '%Conversation info (untrusted metadata)%'
+                OR text LIKE '%Sender (untrusted metadata)%'
+                OR text LIKE '%EXTERNAL_UNTRUSTED_CONTENT%'
+              )
+            """,
+        )
+
+        lesson_avg_row = conn.execute(
+            "SELECT AVG(strength) AS avg_strength, COUNT(*) AS count FROM memories WHERE deleted_at IS NULL AND memory_type = 'lesson'"
+        ).fetchone()
+        lesson_strength_total += float(lesson_avg_row["avg_strength"] or 0.0) * int(lesson_avg_row["count"] or 0)
+        lesson_strength_count += int(lesson_avg_row["count"] or 0)
+
+    capture_total = capture_health["hook_rate_7d"] + capture_health["api_rate_7d"]
+    capture_health["hook_pct"] = round((capture_health["hook_rate_7d"] / capture_total * 100.0), 1) if capture_total else 0.0
+    quality["avg_lesson_strength"] = round((lesson_strength_total / lesson_strength_count), 2) if lesson_strength_count else 0.0
+
+    per_agent.sort(key=lambda item: (-item["total"], item["agent"]))
+    return {
+        "summary": summary,
+        "per_agent": per_agent,
+        "capture_health": capture_health,
+        "memory_types": dict(sorted(memory_types.items())),
+        "quality": quality,
+    }
+
+
+@app.get("/v1/dashboard")
+async def dashboard(request: Request) -> Dict[str, Any]:
+    """Return a Slack-friendly cross-agent memory dashboard summary."""
+    return _get_dashboard_data(request)
 
 
 @app.get("/v1/stats")
