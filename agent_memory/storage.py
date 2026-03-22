@@ -586,10 +586,18 @@ class MemoryStorage:
             if new_text != text and len(new_text) > 10:
                 conn.execute('UPDATE memories SET text = ?, updated_at = ? WHERE id = ?',
                              (new_text, now, mid))
+                # Also refresh FTS index for this row (Codex review finding:
+                # text mutation without FTS update leaves stale search artifacts)
+                conn.execute('DELETE FROM memory_fts WHERE id = ?', (mid,))
+                conn.execute('INSERT INTO memory_fts(id, text) VALUES (?, ?)',
+                             (mid, new_text))
+                # Mark vector as stale so embed worker re-embeds with clean text
+                conn.execute('UPDATE memories SET vector_rowid = NULL WHERE id = ? AND vector_rowid IS NOT NULL',
+                             (mid,))
                 cleaned += 1
         conn.commit()
         if cleaned > 0:
-            logger.info("Envelope cleanup: cleaned %d memories", cleaned)
+            logger.info("Envelope cleanup: cleaned %d memories, refreshed FTS + flagged re-embed", cleaned)
         return cleaned
 
     def decay_all(
@@ -724,9 +732,10 @@ class MemoryStorage:
             if orphan_count > 0:
                 logger.info("Decay cleanup: removed %d orphan FTS rows", orphan_count)
 
-            # Phase 3: FTS sync + envelope cleanup (drift prevention)
-            self.sync_fts_missing()
+            # Phase 3: envelope cleanup first (mutates text + refreshes FTS),
+            # then FTS sync catches any remaining gaps
             self.cleanup_envelope_noise()
+            self.sync_fts_missing()
 
             return decayed + gc_count
         except Exception as exc:
