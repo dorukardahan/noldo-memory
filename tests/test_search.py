@@ -82,3 +82,22 @@ class TestHybridSearch:
         search = HybridSearch(storage=storage, embedder=mock_embedder)
         results = await search.search("hatırlıyor", limit=5)
         assert len(results) >= 1
+
+    async def test_kg_entity_lookup_adds_candidate_without_keyword_hit(self, storage):
+        memory_id = storage.store_memory(
+            text="Alice and Bob shipped the project last week",
+            category="user",
+        )
+        alice_id = storage.store_entity("Alice", entity_type="person")
+        bob_id = storage.store_entity("Bob", entity_type="person")
+        storage.link_entities(
+            alice_id,
+            bob_id,
+            relation_type="mentioned_with",
+            context="Alice and Bob shipped the project last week",
+        )
+
+        search = HybridSearch(storage=storage, embedder=None)
+        results = await search.search('What did "Alice" do?', limit=5)
+
+        assert any(r.id == memory_id for r in results)

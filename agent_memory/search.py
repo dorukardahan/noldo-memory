@@ -57,6 +57,41 @@ def normalize_query(text: str) -> str:
     return t.strip()
 
 
+def _extract_query_entities(query: str) -> List[str]:
+    """Extract simple entity-like terms from a query.
+
+    Uses quoted phrases first, then capitalized words / short title-case spans.
+    Returns de-duplicated candidates in query order.
+    """
+    if not query:
+        return []
+
+    candidates: List[str] = []
+    seen: Set[str] = set()
+
+    def _add(value: str) -> None:
+        cleaned = re.sub(r"\s+", " ", (value or "").strip(" \t\n\r\"'“”‘’.:,;!?()[]{}"))
+        if len(cleaned) < 2:
+            return
+        key = cleaned.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append(cleaned)
+
+    for quoted in re.findall(r"[\"“”']([^\"“”']{2,80})[\"“”']", query):
+        _add(quoted)
+
+    for match in re.finditer(
+        r"\b(?:[A-ZÇĞİÖŞÜ][\wçğıöşüÇĞİÖŞÜ.-]*)(?:\s+[A-ZÇĞİÖŞÜ][\wçğıöşüÇĞİÖŞÜ.-]*){0,2}\b",
+        query,
+        re.UNICODE,
+    ):
+        _add(match.group(0))
+
+    return candidates
+
+
 def _tokenize_for_rerank(text: str) -> set[str]:
     """Very light lexical tokenizer for reranking.
 
@@ -487,6 +522,99 @@ class HybridSearch:
                 memory_type=db_filter_type,
             )
 
+        async def _kg_entity_search() -> List[Dict[str, Any]]:
+            """Use KG entity matches to pull extra memory candidates.
+
+            This is a candidate source only, not a standalone RRF lane.
+            """
+            entity_terms = _extract_query_entities(query)
+            if not entity_terms:
+                return []
+
+            conn = self.storage._get_conn()
+            matched_entities: Dict[str, Dict[str, Any]] = {}
+            for term in entity_terms:
+                try:
+                    for ent in self.storage.search_entities(term, limit=10):
+                        eid = ent.get("id")
+                        if eid and eid not in matched_entities:
+                            matched_entities[eid] = ent
+                except Exception as exc:
+                    logger.debug("KG entity search failed for %r: %s", term, exc)
+
+            if not matched_entities:
+                return []
+
+            entity_scores: List[Tuple[str, int]] = []
+            for eid in matched_entities:
+                rel_count_row = conn.execute(
+                    "SELECT COUNT(*) AS c FROM relationships WHERE source_id = ? OR target_id = ?",
+                    (eid, eid),
+                ).fetchone()
+                rel_count = int((rel_count_row["c"] if rel_count_row else 0) or 0)
+                entity_scores.append((eid, rel_count))
+
+            top_entity_ids = [eid for eid, _ in sorted(entity_scores, key=lambda x: x[1], reverse=True)[:10]]
+
+            memory_ids: List[str] = []
+            seen_memory_ids: Set[str] = set()
+
+            def _add_memory_id(memory_id: Optional[str]) -> None:
+                if not memory_id or memory_id in seen_memory_ids:
+                    return
+                seen_memory_ids.add(memory_id)
+                memory_ids.append(memory_id)
+
+            for eid in top_entity_ids:
+                for row in conn.execute(
+                    "SELECT source_memory_id FROM temporal_facts WHERE entity_id = ? AND source_memory_id IS NOT NULL ORDER BY valid_from DESC LIMIT ?",
+                    (eid, candidate_limit),
+                ).fetchall():
+                    _add_memory_id(row["source_memory_id"])
+
+                rel_rows = conn.execute(
+                    "SELECT context FROM relationships WHERE source_id = ? OR target_id = ? ORDER BY confidence DESC, created_at DESC LIMIT ?",
+                    (eid, eid, 5),
+                ).fetchall()
+                entity_name = matched_entities[eid].get("name", "")
+                search_phrases = [entity_name]
+                for rel_row in rel_rows:
+                    context = str(rel_row["context"] or "").strip()
+                    if context:
+                        search_phrases.append(context[:200])
+
+                for phrase in search_phrases:
+                    if len(seen_memory_ids) >= candidate_limit:
+                        break
+                    for mem in self.storage.search_text(
+                        phrase,
+                        candidate_limit,
+                        namespace,
+                        memory_type=db_filter_type,
+                    ):
+                        _add_memory_id(mem.get("id"))
+                        if len(seen_memory_ids) >= candidate_limit:
+                            break
+
+            if not memory_ids:
+                return []
+
+            placeholders = ",".join("?" for _ in memory_ids)
+            where_parts = [f"id IN ({placeholders})", "deleted_at IS NULL"]
+            params: List[Any] = list(memory_ids)
+            if namespace is not None:
+                where_parts.append("namespace = ?")
+                params.append(namespace)
+            if db_filter_type is not None:
+                where_parts.append("COALESCE(memory_type, 'other') = ?")
+                params.append(db_filter_type)
+            sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
+
+            rows = conn.execute(sql, tuple(params)).fetchall()
+            row_map = {row["id"]: dict(row) for row in rows}
+            return [row_map[mid] for mid in memory_ids if mid in row_map]
+
+
         async def _metadata_type_search() -> List[Dict[str, Any]]:
             """Direct metadata lookup by memory_type when query is explicit.
 
@@ -536,11 +664,15 @@ class HybridSearch:
         sem_results: List[Dict[str, Any]] = []
         kw_results: List[Dict[str, Any]] = []
         metadata_results: List[Dict[str, Any]] = []
+        kg_results: List[Dict[str, Any]] = []
 
         # Run both layers in parallel
         metadata_task: Optional[asyncio.Task[List[Dict[str, Any]]]] = None
+        kg_task: Optional[asyncio.Task[List[Dict[str, Any]]]] = None
         if any(_query_mentions_memory_type(q_norm, mt) for mt in _MEMORY_TYPE_KEYWORDS):
             metadata_task = asyncio.create_task(_metadata_type_search())
+        if _extract_query_entities(query):
+            kg_task = asyncio.create_task(_kg_entity_search())
 
         if use_semantic and self.embedder is not None and use_keyword:
             sem_task = asyncio.create_task(_semantic_search())
@@ -578,6 +710,12 @@ class HybridSearch:
             except Exception as exc:
                 logger.warning("Metadata memory_type search failed: %s", exc)
 
+        if kg_task is not None:
+            try:
+                kg_results = await kg_task
+            except Exception as exc:
+                logger.warning("KG entity search failed: %s", exc)
+
         # Merge semantic results
         for r in sem_results:
             mid = r["id"]
@@ -594,6 +732,12 @@ class HybridSearch:
 
         # Merge direct metadata results (memory_type lookup) into candidate pool.
         for r in metadata_results:
+            mid = r["id"]
+            if mid not in all_candidates:
+                all_candidates[mid] = r
+
+        # Merge KG entity lookup results into candidate pool only.
+        for r in kg_results:
             mid = r["id"]
             if mid not in all_candidates:
                 all_candidates[mid] = r
