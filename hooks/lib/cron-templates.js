@@ -10,6 +10,18 @@
  * Created: 2026-03-24 [MAST P2]
  */
 
+/** Sanitize a string for safe embedding in agent instructions. */
+function sanitize(str, maxLen = 200) {
+  return String(str || "").replace(/[`$(){}\\]/g, "").slice(0, maxLen);
+}
+
+/** Clamp interval to safe range (minimum 0.5h to prevent busy-loop). */
+function safeInterval(hours) {
+  const h = Number(hours);
+  if (!h || h < 0.5) return 0.5;
+  return h;
+}
+
 /**
  * Tier 1: Health Check templates.
  * Quick checks that should run frequently and fail gracefully.
@@ -17,16 +29,16 @@
 export const HEALTH_CHECK = {
   /** Service health endpoint check */
   serviceHealth: (name, url, intervalHours = 2) => ({
-    name: `${name} Health Check`,
-    schedule: { kind: "every", everyMs: intervalHours * 60 * 60 * 1000 },
+    name: `${sanitize(name)} Health Check`,
+    schedule: { kind: "every", everyMs: safeInterval(intervalHours) * 60 * 60 * 1000 },
     payload: {
       kind: "agentTurn",
       message: [
-        `Health check for ${name}.`,
-        `1. Check if ${url} is reachable (curl with 10s timeout)`,
+        `Health check for ${sanitize(name)}.`,
+        `1. Check if ${sanitize(url, 500)} is reachable (curl with 10s timeout)`,
         `2. Verify response status is 200`,
         `3. If unhealthy: report the error clearly`,
-        `4. If healthy: reply with a single line "✅ ${name} healthy"`,
+        `4. If healthy: reply with a single line "✅ ${sanitize(name)} healthy"`,
         `Do NOT write files or make changes. Read-only check.`,
       ].join("\n"),
       timeoutSeconds: 120,
@@ -38,16 +50,16 @@ export const HEALTH_CHECK = {
 
   /** OAuth token expiry check */
   tokenExpiry: (provider, intervalHours = 4) => ({
-    name: `${provider} Token Expiry Check`,
-    schedule: { kind: "every", everyMs: intervalHours * 60 * 60 * 1000 },
+    name: `${sanitize(provider)} Token Expiry Check`,
+    schedule: { kind: "every", everyMs: safeInterval(intervalHours) * 60 * 60 * 1000 },
     payload: {
       kind: "agentTurn",
       message: [
-        `Check ${provider} OAuth token expiry.`,
+        `Check ${sanitize(provider)} OAuth token expiry.`,
         `1. Read the relevant auth-profiles.json / credentials file`,
         `2. Parse token expiry timestamps`,
         `3. If any token expires within 24h: WARN with details`,
-        `4. If all tokens valid: reply "✅ ${provider} tokens valid"`,
+        `4. If all tokens valid: reply "✅ ${sanitize(provider)} tokens valid"`,
         `Do NOT refresh tokens — only check and report.`,
       ].join("\n"),
       timeoutSeconds: 120,
@@ -60,7 +72,7 @@ export const HEALTH_CHECK = {
   /** Docker container status */
   dockerHealth: (intervalHours = 2) => ({
     name: "Docker Health Check",
-    schedule: { kind: "every", everyMs: intervalHours * 60 * 60 * 1000 },
+    schedule: { kind: "every", everyMs: safeInterval(intervalHours) * 60 * 60 * 1000 },
     payload: {
       kind: "agentTurn",
       message: [
@@ -126,16 +138,16 @@ export const MAINTENANCE = {
 
   /** Update watch */
   updateWatch: (name, checkCommand, intervalHours = 4) => ({
-    name: `${name} Update Watch`,
-    schedule: { kind: "every", everyMs: intervalHours * 60 * 60 * 1000 },
+    name: `${sanitize(name)} Update Watch`,
+    schedule: { kind: "every", everyMs: safeInterval(intervalHours) * 60 * 60 * 1000 },
     payload: {
       kind: "agentTurn",
       message: [
-        `Check for ${name} updates.`,
-        `Run: ${checkCommand}`,
+        `Check for ${sanitize(name)} updates.`,
+        `Run: ${sanitize(checkCommand, 500)}`,
         `Compare with currently installed version.`,
         `If update available: report version diff and changelog link.`,
-        `If current: reply "✅ ${name} up to date"`,
+        `If current: reply "✅ ${sanitize(name)} up to date"`,
       ].join("\n"),
       timeoutSeconds: 180,
     },
@@ -152,11 +164,11 @@ export const MAINTENANCE = {
 export const INTELLIGENCE = {
   /** Engagement task (social, community) */
   engagement: (name, instructions, cronExpr) => ({
-    name,
-    schedule: { kind: "cron", expr: cronExpr, tz: "UTC" },
+    name: sanitize(name),
+    schedule: { kind: "cron", expr: String(cronExpr || "0 0 * * *"), tz: "UTC" },
     payload: {
       kind: "agentTurn",
-      message: instructions,
+      message: String(instructions || "").slice(0, 2000),
       timeoutSeconds: 600,
     },
     sessionTarget: "isolated",
@@ -166,12 +178,12 @@ export const INTELLIGENCE = {
 
   /** Research task */
   research: (name, topic, cronExpr) => ({
-    name,
-    schedule: { kind: "cron", expr: cronExpr, tz: "UTC" },
+    name: sanitize(name),
+    schedule: { kind: "cron", expr: String(cronExpr || "0 0 * * *"), tz: "UTC" },
     payload: {
       kind: "agentTurn",
       message: [
-        `Research task: ${topic}`,
+        `Research task: ${sanitize(topic, 500)}`,
         "1. Search for recent developments (last 7 days)",
         "2. Summarize key findings",
         "3. Note any actionable items",
@@ -193,36 +205,62 @@ export const INTELLIGENCE = {
  */
 export function validateCronJob(job) {
   const warnings = [];
+  const errors = [];
 
-  if (!job.name) warnings.push("Missing job name");
-  if (!job.schedule) warnings.push("Missing schedule");
-  if (!job.payload) warnings.push("Missing payload");
+  if (!job.name || typeof job.name !== "string" || !job.name.trim()) {
+    errors.push("Missing or empty job name");
+  }
+  if (!job.schedule) {
+    errors.push("Missing schedule");
+  } else {
+    const { kind, expr, everyMs } = job.schedule;
+    if (kind === "cron" && (!expr || typeof expr !== "string")) {
+      errors.push("Cron schedule missing expr");
+    }
+    if (kind === "every" && (!everyMs || everyMs < 1800000)) {
+      warnings.push("Interval < 30min — may cause excessive runs");
+    }
+  }
+  if (!job.payload) {
+    errors.push("Missing payload");
+  }
   if (!job.sessionTarget) warnings.push("Missing sessionTarget");
 
   // Check timeout
-  const timeout = job.payload?.timeoutSeconds || 0;
-  if (timeout === 0) warnings.push("No timeout set — job could run indefinitely");
-  if (timeout > 1800) warnings.push("Timeout > 30min — consider breaking into smaller tasks");
-
-  // Check delivery
-  if (!job.delivery || job.delivery.mode === "none") {
-    warnings.push("No delivery configured — results may be lost");
+  const timeout = job.payload?.timeoutSeconds;
+  if (timeout === undefined || timeout === null) {
+    warnings.push("No timeout set — job could run indefinitely");
+  } else if (timeout === 0) {
+    warnings.push("Timeout is 0 — job will be killed immediately");
+  } else if (timeout > 1800) {
+    warnings.push("Timeout > 30min — consider breaking into smaller tasks");
   }
 
-  // Determine tier
+  // Check delivery
+  const validModes = ["announce", "channel", "dm", "none"];
+  if (!job.delivery || !job.delivery.mode) {
+    warnings.push("No delivery configured — results may be lost");
+  } else if (!validModes.includes(job.delivery.mode)) {
+    warnings.push(`Unknown delivery mode: ${job.delivery.mode}`);
+  }
+
+  // Determine tier (use explicit tier if set, otherwise infer from timeout)
   let tier = "unknown";
-  if (job.tier) {
+  if (job.tier && ["health", "maintenance", "intelligence"].includes(job.tier)) {
     tier = job.tier;
-  } else if (timeout <= 180) {
-    tier = "health";
-  } else if (timeout <= 300) {
-    tier = "maintenance";
-  } else {
-    tier = "intelligence";
+  } else if (typeof timeout === "number") {
+    if (timeout < 180) {
+      tier = "health";
+    } else if (timeout <= 300) {
+      tier = "maintenance";
+    } else {
+      tier = "intelligence";
+    }
   }
 
   return {
-    valid: warnings.length === 0,
+    valid: errors.length === 0,
+    errors,
     warnings,
     tier,
   };
