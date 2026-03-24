@@ -1940,6 +1940,145 @@ async def amnesia_check(req: AmnesiaCheckRequest, request: Request) -> Dict[str,
 
 
 # ---------------------------------------------------------------------------
+# Solved Problem Registry (SPR) — File-based per-workspace
+# ---------------------------------------------------------------------------
+
+@app.get("/v1/solved")
+async def list_solved_problems(
+    request: Request,
+    agent: Optional[str] = None,
+    keyword: Optional[str] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """List solved problems from the workspace SPR file.
+
+    Reads from {workspace}/memory/solved-problems.json.
+    Optional keyword filter searches title, root_cause, fix, and tags.
+    """
+    import json as _json
+
+    workspace = os.environ.get("AGENT_WORKSPACE", "")
+    # If agent specified, try agent-specific workspace
+    if agent:
+        agents_root = os.environ.get("AGENT_MEMORY_SESSIONS_ROOT", "")
+        if agents_root:
+            candidate = os.path.join(agents_root, agent, "workspace")
+            if not os.path.isdir(candidate):
+                candidate = os.path.join(os.path.dirname(agents_root), f"workspace-{agent}")
+            if os.path.isdir(candidate):
+                workspace = candidate
+
+    spr_path = os.path.join(workspace, "memory", "solved-problems.json") if workspace else ""
+
+    if not spr_path or not os.path.isfile(spr_path):
+        return {"problems": [], "total": 0, "workspace": workspace or "(unknown)"}
+
+    try:
+        with open(spr_path, "r") as f:
+            spr = _json.load(f)
+    except Exception:
+        return {"problems": [], "total": 0, "error": "Failed to read SPR file"}
+
+    problems = spr.get("problems", [])
+
+    # Keyword filter
+    if keyword:
+        kw = keyword.lower()
+        problems = [
+            p for p in problems
+            if kw in (p.get("title", "") + p.get("root_cause", "") + p.get("fix", "")).lower()
+            or any(kw in t.lower() for t in p.get("tags", []))
+        ]
+
+    # Sort by created_at desc, limit
+    problems.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    problems = problems[:limit]
+
+    return {
+        "problems": problems,
+        "total": len(problems),
+        "workspace": os.path.basename(workspace),
+    }
+
+
+@app.post("/v1/solved")
+async def add_solved_problem(request: Request) -> Dict[str, Any]:
+    """Add a new solved problem to the workspace SPR file.
+
+    Body: { title, root_cause, fix, files_changed?, tags?, agent? }
+    """
+    import json as _json
+
+    body = await request.json()
+    title = body.get("title", "")
+    root_cause = body.get("root_cause", "")
+    fix = body.get("fix", "")
+    agent = body.get("agent", "")
+
+    if not title or not fix:
+        raise HTTPException(status_code=400, detail="title and fix are required")
+
+    workspace = os.environ.get("AGENT_WORKSPACE", "")
+    if agent:
+        agents_root = os.environ.get("AGENT_MEMORY_SESSIONS_ROOT", "")
+        if agents_root:
+            candidate = os.path.join(agents_root, agent, "workspace")
+            if not os.path.isdir(candidate):
+                candidate = os.path.join(os.path.dirname(agents_root), f"workspace-{agent}")
+            if os.path.isdir(candidate):
+                workspace = candidate
+
+    if not workspace:
+        raise HTTPException(status_code=500, detail="No workspace configured")
+
+    spr_path = os.path.join(workspace, "memory", "solved-problems.json")
+    spr_dir = os.path.dirname(spr_path)
+    os.makedirs(spr_dir, exist_ok=True)
+
+    try:
+        with open(spr_path, "r") as f:
+            spr = _json.load(f)
+    except (FileNotFoundError, _json.JSONDecodeError):
+        spr = {"version": 1, "problems": [], "index": {}}
+
+    import secrets
+    from datetime import datetime
+
+    problem_id = f"spr-{datetime.utcnow().strftime('%Y%m%d')}-{secrets.token_hex(3)}"
+    entry = {
+        "id": problem_id,
+        "title": title[:200],
+        "root_cause": root_cause[:500],
+        "fix": fix[:500],
+        "files_changed": body.get("files_changed", [])[:10],
+        "tags": body.get("tags", [])[:10],
+        "agent": agent,
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+    spr["problems"].append(entry)
+
+    # Cap at 50
+    if len(spr["problems"]) > 50:
+        spr["problems"] = spr["problems"][-50:]
+
+    # Update keyword index
+    keywords = set()
+    for word in (title + " " + root_cause + " " + fix).lower().split():
+        if len(word) > 2:
+            keywords.add(word)
+    for kw in keywords:
+        if kw not in spr.get("index", {}):
+            spr.setdefault("index", {})[kw] = []
+        spr["index"][kw].append(problem_id)
+
+    with open(spr_path, "w") as f:
+        _json.dump(spr, f, indent=2)
+
+    return {"id": problem_id, "status": "created"}
+
+
+# ---------------------------------------------------------------------------
 # Admin: Key Rotation
 # ---------------------------------------------------------------------------
 
