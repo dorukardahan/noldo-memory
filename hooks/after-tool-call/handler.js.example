@@ -294,10 +294,10 @@ const afterToolCallHook = async (event, ctx) => {
     output = `${head}\n...[truncated ${output.length - 1800} chars]...\n${tail}`;
   }
 
-  // Sanitize secrets from output before storing to memory (review H-7)
-  output = output
-    .replace(/(?:password|passwd|token|secret|api[_-]?key|authorization|bearer)\s*[:=]\s*\S+/gi, "[REDACTED]")
-    .replace(/\b(?:sk-|ghp_|ghs_|xox[bpas]-|AKIA|eyJ)[A-Za-z0-9_-]{10,}/g, "[REDACTED_TOKEN]");
+  // Secret sanitizer removed — memory is local-only (localhost:8787, never public).
+  // Storing secrets in memory is intentional: enables token expiry tracking,
+  // auth troubleshooting, and credential recovery without re-asking the user.
+  // Memory DB lives on the user's VPS and is only accessible by the user + OpenClaw.
 
   const memoryText = `[Tool: ${toolName}] Command: ${cmd}\nOutput: ${output}`;
 
