@@ -9,6 +9,30 @@
 import fs from "node:fs";
 import { atomicWrite } from "./util.js";
 
+/** Simple file-based mutex (same pattern as shared-state.js — H-2 fix). */
+function withFileLock(filePath, fn) {
+  const lockPath = `${filePath}.lock`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      fs.closeSync(fd);
+      try { return fn(); } finally { try { fs.unlinkSync(lockPath); } catch {} }
+    } catch (e) {
+      if (e.code === "EEXIST") {
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > 5000) { try { fs.unlinkSync(lockPath); } catch {} continue; }
+        } catch {}
+        const end = Date.now() + 5 * Math.pow(2, attempt);
+        while (Date.now() < end) {}
+        continue;
+      }
+      return fn();
+    }
+  }
+  return fn();
+}
+
 const METRICS_PATH = process.env.MAST_METRICS_PATH || "/tmp/noldo-mast-metrics.json";
 const MAX_HISTORY = 1000; // Keep last N events
 
@@ -39,9 +63,11 @@ function writeMetrics(m) {
  * @param {number} delta - Amount to increment (default 1)
  */
 export function increment(name, delta = 1) {
-  const m = readMetrics();
-  m.counters[name] = (m.counters[name] || 0) + delta;
-  writeMetrics(m);
+  withFileLock(METRICS_PATH, () => {
+    const m = readMetrics();
+    m.counters[name] = (m.counters[name] || 0) + delta;
+    writeMetrics(m);
+  });
 }
 
 /**
@@ -50,17 +76,18 @@ export function increment(name, delta = 1) {
  * @param {object} data - Event data
  */
 export function recordEvent(type, data = {}) {
-  const m = readMetrics();
-  m.events.push({
-    type,
-    ts: Date.now(),
-    ...data,
+  withFileLock(METRICS_PATH, () => {
+    const m = readMetrics();
+    m.events.push({
+      type,
+      ts: Date.now(),
+      ...data,
+    });
+    if (m.events.length > MAX_HISTORY) {
+      m.events = m.events.slice(-MAX_HISTORY);
+    }
+    writeMetrics(m);
   });
-  // Cap events
-  if (m.events.length > MAX_HISTORY) {
-    m.events = m.events.slice(-MAX_HISTORY);
-  }
-  writeMetrics(m);
 }
 
 /**

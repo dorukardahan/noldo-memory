@@ -9,6 +9,50 @@ import fs from "node:fs";
 import path from "node:path";
 import { atomicWrite } from "./util.js";
 
+/**
+ * Simple file-based mutex using lockfile + O_EXCL.
+ * Prevents TOCTOU race conditions on shared state files (review fix H-2).
+ * Uses exponential backoff with max 3 retries.
+ */
+function withFileLock(filePath, fn) {
+  const lockPath = `${filePath}.lock`;
+  const maxRetries = 3;
+  const baseDelay = 5; // ms
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      // O_EXCL fails if file exists — atomic create-or-fail
+      const fd = fs.openSync(lockPath, "wx");
+      fs.closeSync(fd);
+      try {
+        return fn();
+      } finally {
+        try { fs.unlinkSync(lockPath); } catch { /* best effort */ }
+      }
+    } catch (e) {
+      if (e.code === "EEXIST") {
+        // Lock held — check if stale (>5s = likely crashed holder)
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > 5000) {
+            try { fs.unlinkSync(lockPath); } catch { /* race ok */ }
+            continue; // retry immediately
+          }
+        } catch { /* stat failed, retry */ }
+        // Exponential backoff
+        const delay = baseDelay * Math.pow(2, attempt);
+        const end = Date.now() + delay;
+        while (Date.now() < end) { /* busy wait — hooks are short-lived */ }
+        continue;
+      }
+      // Non-lock error — run without lock (graceful degradation)
+      return fn();
+    }
+  }
+  // All retries exhausted — run without lock
+  return fn();
+}
+
 const TOOL_STATE_FILE = "/tmp/noldo-recent-tools.json";
 const TOOL_CALL_TTL_MS = 300_000; // 5 minutes
 
@@ -20,30 +64,32 @@ const TOOL_CALL_TTL_MS = 300_000; // 5 minutes
  */
 export function recordToolCall(sessionKey, toolName, command) {
   try {
-    let state = {};
-    try {
-      state = JSON.parse(fs.readFileSync(TOOL_STATE_FILE, "utf-8"));
-    } catch { /* empty or missing */ }
+    withFileLock(TOOL_STATE_FILE, () => {
+      let state = {};
+      try {
+        state = JSON.parse(fs.readFileSync(TOOL_STATE_FILE, "utf-8"));
+      } catch { /* empty or missing */ }
 
-    if (!state.calls) state.calls = {};
-    if (!state.calls[sessionKey]) state.calls[sessionKey] = [];
+      if (!state.calls) state.calls = {};
+      if (!state.calls[sessionKey]) state.calls[sessionKey] = [];
 
-    state.calls[sessionKey].push({
-      tool: toolName,
-      cmd: (command || "").slice(0, 300),
-      ts: Date.now(),
+      state.calls[sessionKey].push({
+        tool: toolName,
+        cmd: (command || "").slice(0, 300),
+        ts: Date.now(),
+      });
+
+      // Keep only last 20 calls per session, prune old sessions
+      const now = Date.now();
+      for (const key of Object.keys(state.calls)) {
+        state.calls[key] = state.calls[key]
+          .filter((c) => now - c.ts < TOOL_CALL_TTL_MS)
+          .slice(-20);
+        if (state.calls[key].length === 0) delete state.calls[key];
+      }
+
+      atomicWrite(TOOL_STATE_FILE, JSON.stringify(state));
     });
-
-    // Keep only last 20 calls per session, prune old sessions
-    const now = Date.now();
-    for (const key of Object.keys(state.calls)) {
-      state.calls[key] = state.calls[key]
-        .filter((c) => now - c.ts < TOOL_CALL_TTL_MS)
-        .slice(-20);
-      if (state.calls[key].length === 0) delete state.calls[key];
-    }
-
-    atomicWrite(TOOL_STATE_FILE, JSON.stringify(state));
   } catch (err) {
     console.warn("[shared-state] recordToolCall error:", err.message);
   }
@@ -318,20 +364,22 @@ const FAB_SCORE_FILE = "/tmp/noldo-fab-scores.json";
  */
 export function incrementFabricationScore(sessionKey) {
   try {
-    let scores = {};
-    try { scores = JSON.parse(fs.readFileSync(FAB_SCORE_FILE, "utf-8")); } catch { /* empty */ }
-    if (!scores[sessionKey]) scores[sessionKey] = { count: 0, first: Date.now() };
-    scores[sessionKey].count++;
-    scores[sessionKey].last = Date.now();
+    return withFileLock(FAB_SCORE_FILE, () => {
+      let scores = {};
+      try { scores = JSON.parse(fs.readFileSync(FAB_SCORE_FILE, "utf-8")); } catch { /* empty */ }
+      if (!scores[sessionKey]) scores[sessionKey] = { count: 0, first: Date.now() };
+      scores[sessionKey].count++;
+      scores[sessionKey].last = Date.now();
 
-    // Prune sessions older than 24h
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (const key of Object.keys(scores)) {
-      if ((scores[key].last || 0) < cutoff) delete scores[key];
-    }
+      // Prune sessions older than 24h
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      for (const key of Object.keys(scores)) {
+        if ((scores[key].last || 0) < cutoff) delete scores[key];
+      }
 
-    atomicWrite(FAB_SCORE_FILE, JSON.stringify(scores));
-    return scores[sessionKey].count;
+      atomicWrite(FAB_SCORE_FILE, JSON.stringify(scores));
+      return scores[sessionKey].count;
+    });
   } catch (err) {
     console.warn("[shared-state] incrementFabricationScore error:", err.message);
     return 0;

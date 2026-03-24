@@ -10,6 +10,8 @@ import {
 import {
   readFabricationLog,
   readVerifiedFacts,
+  getFabricationScore,
+  getProofRequirement,
 } from "../lib/shared-state.js";
 import { readATS } from "../lib/ats.js";
 import { getRecentProblems } from "../lib/spr.js";
@@ -589,6 +591,30 @@ Before claiming completion/existence/absence:
     }
   } catch (e) {
     console.warn("[bootstrap-context] fabrication log read error:", e.message);
+  }
+
+  // ── Fabrication Enforcement Tier (moved from claim-scanner C-2 fix) ──
+  if (process.env.MAST_CLAIM_ENFORCE !== "0") {
+    try {
+      const sessionKey = String(event?.sessionKey || "");
+      const fabScore = getFabricationScore(sessionKey);
+      if (fabScore >= 5) {
+        sections.push(
+          "\n# 🚫 MANDATORY VERIFICATION MODE",
+          `Score: ${fabScore} unverified claims this session.`,
+          "You MUST use a verification tool BEFORE making any claim.",
+          "DO NOT respond with claims until you have tool output as evidence.\n"
+        );
+      } else if (fabScore >= 3) {
+        sections.push(
+          "\n# 🚨 Fabrication Pattern Warning",
+          `Score: ${fabScore} unverified claims this session.`,
+          "Tool verification is MANDATORY. Do NOT say \"done\" without tool proof.\n"
+        );
+      }
+    } catch (e) {
+      console.warn("[bootstrap-context] enforcement tier error:", e.message);
+    }
   }
 
   // ── Verified Facts Injection ──

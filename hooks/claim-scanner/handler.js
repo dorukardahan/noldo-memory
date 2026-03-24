@@ -25,7 +25,6 @@ import {
   hasRecentVerificationTool,
   appendFabricationIncident,
   incrementFabricationScore,
-  getProofRequirement,
 } from "../lib/shared-state.js";
 import { increment as metricsIncrement, recordEvent as metricsEvent } from "../lib/metrics.js";
 
@@ -157,7 +156,7 @@ const claimScannerHook = async (event) => {
   const claims = detectClaims(content);
   if (claims.length === 0) return;
 
-  const sessionKey = event?.sessionKey || "";
+  const sessionKey = event?.sessionKey || event?.context?.sessionKey || "";
   const workspaceDir = resolveWorkspaceDir(event);
   const agentId = resolveAgentId(event, workspaceDir);
 
@@ -232,39 +231,11 @@ const claimScannerHook = async (event) => {
     });
   }
 
-  // ── MAST P0: Always-on warning injection + fabrication score tracking ──
-  // Kill switch: set MAST_CLAIM_ENFORCE=0 to disable warnings (logging continues)
-  const CLAIM_ENFORCE = process.env.MAST_CLAIM_ENFORCE !== "0";
-  const fabScore = incrementFabricationScore(sessionKey);
-
-  // Always inject warning unless kill switch is set (MAST FM-2.6 enforcement)
-  // Use {role, content} objects — gateway expects message objects, not bare strings.
-  if (CLAIM_ENFORCE && event.messages && Array.isArray(event.messages)) {
-    // Build proof requirement hints for unverified claims
-    const proofHints = unverifiedClaims.slice(0, 2).map((c) => {
-      const req = getProofRequirement(c.type);
-      return req ? `${c.type}: ${req.description}` : c.type;
-    }).join("; ");
-
-    let warningText;
-    if (fabScore >= 5) {
-      // Tier 3: Mandatory verification mode — strong enforcement
-      warningText = `🚫 **MANDATORY VERIFICATION MODE** (${fabScore} unverified claims). ` +
-        `You MUST use a verification tool BEFORE making any claim. ` +
-        `Required proof: ${proofHints}. ` +
-        `DO NOT respond with claims until you have tool output as evidence.`;
-    } else if (fabScore >= 3) {
-      // Tier 2: Fabrication pattern warning
-      warningText = `🚨 **FABRICATION PATTERN** (${fabScore} unverified claims this session). ` +
-        `Tool verification is MANDATORY. Required: ${proofHints}. ` +
-        `Do NOT say "done" without tool proof.`;
-    } else {
-      // Tier 1: Advisory warning
-      warningText = `⚠️ [claim-scanner] ${unverifiedClaims.length} unverified claim(s). ` +
-        `Required proof: ${proofHints}. Verify before claiming.`;
-    }
-    event.messages.push({ role: "system", content: warningText });
-  }
+  // ── Fabrication score tracking (enforcement moved to bootstrap-context — C-2 fix) ──
+  // claim-scanner fires on message:sent (post-delivery), so event.messages.push()
+  // was dead code — warnings never reached the agent. Now enforcement lives in
+  // bootstrap-context which runs pre-response.
+  incrementFabricationScore(sessionKey);
 };
 
 export default claimScannerHook;
