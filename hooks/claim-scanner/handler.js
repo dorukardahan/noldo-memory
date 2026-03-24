@@ -24,6 +24,8 @@ import {
 import {
   hasRecentVerificationTool,
   appendFabricationIncident,
+  incrementFabricationScore,
+  getProofRequirement,
 } from "../lib/shared-state.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
@@ -38,14 +40,19 @@ try {
 
 const SCAN_TIMEOUT_MS = 3000;
 
+// Kill switch: set MAST_CLAIM_SCANNER_ENABLED=0 to disable entire claim-scanner
+const CLAIM_SCANNER_ENABLED = process.env.MAST_CLAIM_SCANNER_ENABLED !== "0";
+
 // ── Claim Detection Patterns ──
+// NOTE: Turkish patterns tightened to reduce false positives on casual speech.
+// Only technical/operational claims are flagged — not general conversation.
 
 const NEGATIVE_CLAIM_PATTERNS = [
-  // Turkish — require technical context around "yok" to avoid FP on casual speech
+  // Turkish — require technical subject before the claim verb
   { pattern: /(?:destekle(?:miyor|nmez|nmedi)|mevcut\s+değil|bulunmuyor)/i, type: "feature_claim" },
   { pattern: /(?:özellik|feature|endpoint|config|service|hook|plugin|api|port|komut)\s+(?:\w+\s+)?yok\b/i, type: "feature_claim" },
-  { pattern: /(?:yapamıyor|kullanılamaz|çalışmıyor|aktif\s+değil)/i, type: "feature_claim" },
-  { pattern: /(?:mümkün\s+değil|imkansız)/i, type: "feature_claim" },
+  // Removed overly broad: "çalışmıyor", "mümkün değil", "yapamıyor" — too many FP in bug discussions
+  { pattern: /(?:aktif\s+değil|devre\s+dışı|kullanılamaz)\b/i, type: "feature_claim" },
   // English
   { pattern: /(?:not\s+support(?:ed)?|doesn'?t\s+(?:have|support|exist|include))/i, type: "feature_claim" },
   { pattern: /(?:not\s+available|not\s+(?:possible|implemented|enabled))/i, type: "feature_claim" },
@@ -54,8 +61,8 @@ const NEGATIVE_CLAIM_PATTERNS = [
 ];
 
 const POSITIVE_CLAIM_PATTERNS = [
-  // Turkish
-  { pattern: /(?:düzelttim|güncelledim|tamamlandı|hallettim|yaptım|ekledim)/i, type: "completion_claim" },
+  // Turkish — removed "yaptım" (too casual), kept specific completion verbs
+  { pattern: /(?:düzelttim|güncelledim|tamamlandı|hallettim|ekledim)/i, type: "completion_claim" },
   { pattern: /(?:fix(?:le)?dim|deploy\s+ettim|push\s+ettim|commit\s+ettim)/i, type: "completion_claim" },
   // English
   { pattern: /(?:I\s+(?:fixed|updated|completed|resolved|patched|deployed|pushed))/i, type: "completion_claim" },
@@ -138,6 +145,7 @@ function detectClaims(text) {
 // ── Main Hook ──
 
 const claimScannerHook = async (event) => {
+  if (!CLAIM_SCANNER_ENABLED) return;
   if (event.type !== "message" || event.action !== "sent") return;
 
   const rawContent = String(event?.context?.content || "");
@@ -161,16 +169,20 @@ const claimScannerHook = async (event) => {
   const uniqueKeywords = [...new Set(claimKeywords)].slice(0, 10);
 
   // Check if there were recent tool calls relevant to these specific claims
-  const hasEvidence = hasRecentVerificationTool(sessionKey, uniqueKeywords);
+  // Use typed proof matching: each claim type requires specific evidence
+  const unverifiedClaims = claims.filter((claim) => {
+    const hasEvidence = hasRecentVerificationTool(sessionKey, uniqueKeywords, claim.type);
+    return !hasEvidence;
+  });
 
-  if (hasEvidence) {
-    console.warn(`[claim-scanner] ${claims.length} claims found but relevant tool evidence exists (agent=${agentId})`);
-    return; // Claims are backed by related tool calls — OK
+  if (unverifiedClaims.length === 0) {
+    console.warn(`[claim-scanner] ${claims.length} claims found but all have matching proof evidence (agent=${agentId})`);
+    return; // All claims are backed by appropriate tool calls — OK
   }
 
-  console.warn(`[claim-scanner] ${claims.length} UNVERIFIED claims detected (agent=${agentId})`);
+  console.warn(`[claim-scanner] ${unverifiedClaims.length} UNVERIFIED claims detected (agent=${agentId})`);
 
-  const claimsToProcess = claims.slice(0, 3);
+  const claimsToProcess = unverifiedClaims.slice(0, 3);
 
   // Fire-and-forget: store all claims in parallel with shared deadline
   const deadline = AbortSignal.timeout(SCAN_TIMEOUT_MS);
@@ -209,12 +221,38 @@ const claimScannerHook = async (event) => {
     });
   }
 
-  // Optionally inject warning (configurable via env)
-  if (process.env.NOLDO_CLAIM_WARNING === "1" && event.messages && Array.isArray(event.messages)) {
-    event.messages.push(
-      `⚠️ [claim-scanner] ${claims.length} unverified claim(s) detected in your response. ` +
-      `No tool call (grep/cat/curl) found for verification. Consider re-checking.`
-    );
+  // ── MAST P0: Always-on warning injection + fabrication score tracking ──
+  // Kill switch: set MAST_CLAIM_ENFORCE=0 to disable warnings (logging continues)
+  const CLAIM_ENFORCE = process.env.MAST_CLAIM_ENFORCE !== "0";
+  const fabScore = incrementFabricationScore(sessionKey);
+
+  // Always inject warning unless kill switch is set (MAST FM-2.6 enforcement)
+  // Use {role, content} objects — gateway expects message objects, not bare strings.
+  if (CLAIM_ENFORCE && event.messages && Array.isArray(event.messages)) {
+    // Build proof requirement hints for unverified claims
+    const proofHints = unverifiedClaims.slice(0, 2).map((c) => {
+      const req = getProofRequirement(c.type);
+      return req ? `${c.type}: ${req.description}` : c.type;
+    }).join("; ");
+
+    let warningText;
+    if (fabScore >= 5) {
+      // Tier 3: Mandatory verification mode — strong enforcement
+      warningText = `🚫 **MANDATORY VERIFICATION MODE** (${fabScore} unverified claims). ` +
+        `You MUST use a verification tool BEFORE making any claim. ` +
+        `Required proof: ${proofHints}. ` +
+        `DO NOT respond with claims until you have tool output as evidence.`;
+    } else if (fabScore >= 3) {
+      // Tier 2: Fabrication pattern warning
+      warningText = `🚨 **FABRICATION PATTERN** (${fabScore} unverified claims this session). ` +
+        `Tool verification is MANDATORY. Required: ${proofHints}. ` +
+        `Do NOT say "done" without tool proof.`;
+    } else {
+      // Tier 1: Advisory warning
+      warningText = `⚠️ [claim-scanner] ${unverifiedClaims.length} unverified claim(s). ` +
+        `Required proof: ${proofHints}. Verify before claiming.`;
+    }
+    event.messages.push({ role: "system", content: warningText });
   }
 };
 

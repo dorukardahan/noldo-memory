@@ -7,21 +7,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
+import { atomicWrite } from "./util.js";
 
 const TOOL_STATE_FILE = "/tmp/noldo-recent-tools.json";
 const TOOL_CALL_TTL_MS = 300_000; // 5 minutes
-
-/**
- * Atomic write — write to temp file then rename to avoid race conditions.
- * @param {string} filePath
- * @param {string} content
- */
-function atomicWrite(filePath, content) {
-  const tmpPath = `${filePath}.${crypto.randomBytes(4).toString("hex")}.tmp`;
-  fs.writeFileSync(tmpPath, content, { mode: 0o600 });
-  fs.renameSync(tmpPath, filePath);
-}
 
 /**
  * Record a tool call for later evidence checking.
@@ -77,18 +66,52 @@ export function getRecentToolCalls(sessionKey, windowMs = 120_000) {
   }
 }
 
+// ── Verification Gate: Proof Type Table (MAST P0-7) ──
+// Maps claim categories to required proof tools/patterns.
+// A claim is "verified" only if the matching proof type was used.
+
+const PROOF_TYPE_TABLE = {
+  completion_claim: {
+    // Completion claims need actual work evidence (edit/write/exec)
+    requiredTools: ["edit", "write", "exec"],
+    requiredPatterns: [/\b(?:edit|write|sed|cp|mv|tee|echo\s+.*>)\b/i],
+    description: "Completion claims require edit/write/exec proof",
+  },
+  feature_claim: {
+    // Feature existence claims need read/search/grep evidence
+    requiredTools: ["read", "exec", "web_search", "web_fetch"],
+    requiredPatterns: [/\b(?:grep|find|cat|ls|which|dpkg|npm\s+list|pip\s+list)\b/i],
+    description: "Feature claims require read/grep/search proof",
+  },
+  config_claim: {
+    // Config claims need file read or status check
+    requiredTools: ["read", "exec"],
+    requiredPatterns: [/\b(?:cat|grep|head|tail|jq|yq)\b/i],
+    description: "Config claims require file read proof",
+  },
+  credential_claim: {
+    // Credential claims need careful handling
+    requiredTools: ["read", "exec"],
+    requiredPatterns: [/\b(?:cat|grep|curl|openssl|test\s+-f)\b/i],
+    description: "Credential claims require read/test proof",
+  },
+};
+
 /**
  * Check if any recent tool calls match verification patterns
  * AND are relevant to the given claim keywords.
  * @param {string} sessionKey
  * @param {string[]} claimKeywords - Keywords extracted from the claim context
+ * @param {string} claimType - Optional: specific claim type for proof-type matching
  * @returns {boolean}
  */
-export function hasRecentVerificationTool(sessionKey, claimKeywords = []) {
-  const calls = getRecentToolCalls(sessionKey, 120_000);
+export function hasRecentVerificationTool(sessionKey, claimKeywords = [], claimType = null) {
+  // Use type-specific windows: completions take longer than lookups (review H-5)
+  const windowMs = claimType === "completion_claim" ? 300_000 : 120_000;
+  const calls = getRecentToolCalls(sessionKey, windowMs);
   if (calls.length === 0) return false;
 
-  // Verification-shaped commands (not just "any exec")
+  // General verification patterns (fallback)
   const verifyPatterns = [
     /\bgrep\b/i,
     /\bfind\b/i,
@@ -106,23 +129,59 @@ export function hasRecentVerificationTool(sessionKey, claimKeywords = []) {
   const isVerificationCall = (c) => {
     // read and web_search/web_fetch are always verification-shaped
     if (c.tool === "read" || c.tool === "web_search" || c.tool === "web_fetch") return true;
+    // edit and write are proof of completion
+    if (c.tool === "edit" || c.tool === "write") return true;
     // exec must match a verification pattern (not just any command)
     if (c.tool === "exec") return verifyPatterns.some((p) => p.test(c.cmd));
     return false;
   };
 
+  // If a specific claim type is provided, use proof-type table for stricter matching
+  if (claimType && PROOF_TYPE_TABLE[claimType]) {
+    const proof = PROOF_TYPE_TABLE[claimType];
+    const matchingCalls = calls.filter((c) => {
+      // Check if tool is in required list
+      if (proof.requiredTools.includes(c.tool)) {
+        // For exec, also check command patterns
+        if (c.tool === "exec") {
+          return proof.requiredPatterns.some((p) => p.test(c.cmd));
+        }
+        return true;
+      }
+      return false;
+    });
+
+    if (matchingCalls.length === 0) return false;
+
+    // If no keywords, just having the right tool type is enough
+    if (!claimKeywords || claimKeywords.length === 0) return true;
+
+    // Check keyword relevance
+    const keywords = claimKeywords.map((k) => k.toLowerCase());
+    return matchingCalls.some((c) => {
+      const cmdLower = (c.cmd || "").toLowerCase();
+      return keywords.some((kw) => cmdLower.includes(kw));
+    });
+  }
+
+  // Fallback: general verification check (backwards compatible)
   const verifyCalls = calls.filter(isVerificationCall);
   if (verifyCalls.length === 0) return false;
 
-  // If no claim keywords provided, just check verification tool existence
   if (!claimKeywords || claimKeywords.length === 0) return true;
 
-  // Check if any verification call is relevant to the claim
   const keywords = claimKeywords.map((k) => k.toLowerCase());
   return verifyCalls.some((c) => {
     const cmdLower = (c.cmd || "").toLowerCase();
     return keywords.some((kw) => cmdLower.includes(kw));
   });
+}
+
+/**
+ * Get the proof type description for a claim type.
+ */
+export function getProofRequirement(claimType) {
+  return PROOF_TYPE_TABLE[claimType] || null;
 }
 
 // ── Fabrication Log ──
@@ -219,19 +278,125 @@ export function writeVerifiedFact(workspaceDir, key, fact) {
       ttl: fact.ttl || 604800, // 7 days default
     };
 
-    // Prune expired facts (mark as stale, don't delete)
+    // Prune expired facts: mark stale after TTL, delete after 30 days
     const now = Date.now();
+    const HARD_DELETE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+    const MAX_FACTS = 200;
     for (const [k, v] of Object.entries(data.facts)) {
       const verifiedAt = new Date(v.verifiedAt || 0).getTime();
       const ttlMs = (v.ttl || 604800) * 1000;
-      if (now - verifiedAt > ttlMs) {
+      if (now - verifiedAt > HARD_DELETE_MS) {
+        delete data.facts[k]; // Hard delete after 30 days
+      } else if (now - verifiedAt > ttlMs) {
         v.stale = true;
       }
+    }
+    // Cap at MAX_FACTS — keep newest
+    const factEntries = Object.entries(data.facts);
+    if (factEntries.length > MAX_FACTS) {
+      const sorted = factEntries.sort((a, b) =>
+        new Date(b[1].verifiedAt || 0).getTime() - new Date(a[1].verifiedAt || 0).getTime()
+      );
+      data.facts = Object.fromEntries(sorted.slice(0, MAX_FACTS));
     }
 
     atomicWrite(factsPath, JSON.stringify(data, null, 2));
     console.warn(`[shared-state] verified fact stored: ${key}`);
   } catch (err) {
     console.warn("[shared-state] writeVerifiedFact error:", err.message);
+  }
+}
+
+// ── Fabrication Score (per-session) ── [MAST P0]
+
+const FAB_SCORE_FILE = "/tmp/noldo-fab-scores.json";
+
+/**
+ * Increment fabrication score for a session.
+ * @param {string} sessionKey
+ * @returns {number} current score after increment
+ */
+export function incrementFabricationScore(sessionKey) {
+  try {
+    let scores = {};
+    try { scores = JSON.parse(fs.readFileSync(FAB_SCORE_FILE, "utf-8")); } catch { /* empty */ }
+    if (!scores[sessionKey]) scores[sessionKey] = { count: 0, first: Date.now() };
+    scores[sessionKey].count++;
+    scores[sessionKey].last = Date.now();
+
+    // Prune sessions older than 24h
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const key of Object.keys(scores)) {
+      if ((scores[key].last || 0) < cutoff) delete scores[key];
+    }
+
+    atomicWrite(FAB_SCORE_FILE, JSON.stringify(scores));
+    return scores[sessionKey].count;
+  } catch (err) {
+    console.warn("[shared-state] incrementFabricationScore error:", err.message);
+    return 0;
+  }
+}
+
+/**
+ * Get current fabrication score for a session.
+ * @param {string} sessionKey
+ * @returns {number}
+ */
+export function getFabricationScore(sessionKey) {
+  try {
+    const scores = JSON.parse(fs.readFileSync(FAB_SCORE_FILE, "utf-8"));
+    return scores[sessionKey]?.count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// ── Verification Required State ── [MAST P0]
+
+/**
+ * Set verification-required flag for a session.
+ */
+export function setVerificationRequired(sessionKey, data) {
+  try {
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(TOOL_STATE_FILE, "utf-8")); } catch { /* empty */ }
+    if (!state.verificationRequired) state.verificationRequired = {};
+    state.verificationRequired[sessionKey] = {
+      pending: true,
+      ...data,
+      setAt: Date.now(),
+    };
+    atomicWrite(TOOL_STATE_FILE, JSON.stringify(state));
+  } catch (err) {
+    console.warn("[shared-state] setVerificationRequired error:", err.message);
+  }
+}
+
+/**
+ * Clear verification flag when proof is provided.
+ */
+export function clearVerificationIfProved(sessionKey) {
+  try {
+    let state = {};
+    try { state = JSON.parse(fs.readFileSync(TOOL_STATE_FILE, "utf-8")); } catch { /* empty */ }
+    if (state.verificationRequired?.[sessionKey]) {
+      delete state.verificationRequired[sessionKey];
+      atomicWrite(TOOL_STATE_FILE, JSON.stringify(state));
+    }
+  } catch (err) {
+    console.warn("[shared-state] clearVerificationIfProved error:", err.message);
+  }
+}
+
+/**
+ * Get verification state for a session.
+ */
+export function getVerificationState(sessionKey) {
+  try {
+    const state = JSON.parse(fs.readFileSync(TOOL_STATE_FILE, "utf-8"));
+    return state.verificationRequired?.[sessionKey] || null;
+  } catch {
+    return null;
   }
 }

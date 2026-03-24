@@ -18,3 +18,4 @@ env/
 .ruff_cache/
 BUILD-PLAN.md
 logs/
+hooks.bak.*/

@@ -11,6 +11,8 @@ import {
   readFabricationLog,
   readVerifiedFacts,
 } from "../lib/shared-state.js";
+import { readATS } from "../lib/ats.js";
+import { getRecentProblems } from "../lib/spr.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -432,6 +434,140 @@ const bootstrapContextHook = async (event) => {
     sections.push(lastSession);
   }
 
+  // ── MAST P0 Features (each with independent kill switch) ──
+  const MAST_ATS_ENABLED = process.env.MAST_ATS_ENABLED !== "0";
+  const MAST_SPR_ENABLED = process.env.MAST_SPR_ENABLED !== "0";
+  const MAST_HANDOFF_ENABLED = process.env.MAST_HANDOFF_ENABLED !== "0";
+  const MAST_BULLETIN_ENABLED = process.env.MAST_BULLETIN_ENABLED !== "0";
+  const MAST_GOVERNANCE_ENABLED = process.env.MAST_GOVERNANCE_ENABLED !== "0";
+
+  // ── MAST P0-8: Clarification Protocol (Safe/Ask/Block tiers) ──
+  if (MAST_GOVERNANCE_ENABLED) {
+    sections.push(`
+# Governance Protocol (MAST)
+
+## Clarification Tiers — Before Acting, Check the Tier
+
+**SAFE (do freely):** Read files, search web, check status, explore workspace, organize memory, git status/log/diff
+**ASK (confirm first):** Change passwords/credentials, modify production config, send external messages (email/tweet/DM), delete files, restart services, modify cron jobs, push to git, deploy
+**BLOCK (never without explicit request):** Change user passwords, revoke tokens, send messages as the user, modify auth profiles, delete workspaces, run destructive commands on production data
+
+## Verification Protocol
+
+Before claiming completion/existence/absence:
+- **completion_claim** → Must have edit/write/exec evidence
+- **feature_claim** → Must have read/grep/search evidence
+- **config_claim** → Must have file read evidence
+- If unsure: "Emin değilim, kontrol ediyorum" → then verify with tool
+
+## Self-Check Before Responding
+
+1. Am I claiming something I haven't verified with a tool? → STOP, verify first
+2. Am I about to do an ASK/BLOCK action without user request? → STOP, ask first
+3. Did I already solve this problem before? → Check SPR/memory before re-solving
+`);
+  }
+
+  // ── MAST P0: Active Task State ──
+  if (MAST_ATS_ENABLED) try {
+    const ats = readATS(workspaceDir);
+    const activeTasks = (ats.tasks || []).filter((t) => t.status === "in_progress");
+    if (activeTasks.length > 0) {
+      const atsLines = ["\n# Active Tasks (resume these)\n"];
+      let atsChars = 0;
+      for (const task of activeTasks.slice(0, 5)) {
+        const line = `- **${task.title}** [${task.priority}] — ${task.context?.goal?.slice(0, 200) || "no goal set"}` +
+          (task.context?.current_step ? `\n  Current step: ${task.context.current_step.slice(0, 150)}` : "") +
+          (task.context?.findings_so_far ? `\n  Findings: ${task.context.findings_so_far.slice(0, 150)}` : "");
+        atsChars += line.length;
+        if (atsChars > 2000) break;
+        atsLines.push(line);
+      }
+      sections.push(...atsLines);
+      console.warn(`[bootstrap-context] injected ${activeTasks.length} active tasks`);
+    }
+  } catch (e) {
+    if (e?.code !== "ENOENT") console.warn("[bootstrap-context] ATS read error:", e.message);
+  }
+
+  // ── MAST P0: Session Handoff ──
+  if (MAST_HANDOFF_ENABLED) try {
+    const handoffPath = path.join(workspaceDir, "memory", "session-handoff.json");
+    const handoff = JSON.parse(await fs.readFile(handoffPath, "utf-8"));
+    if (handoff && handoff.summary) {
+      const handoffLines = ["\n# Session Handoff (from last session)\n"];
+      handoffLines.push(`> ${handoff.summary.slice(0, 300)}`);
+      if (handoff.unfinished_work?.length > 0) {
+        handoffLines.push("\n**Unfinished:**");
+        for (const item of handoff.unfinished_work.slice(0, 5)) {
+          handoffLines.push(`- ${item.slice(0, 150)}`);
+        }
+      }
+      if (handoff.next_steps?.length > 0) {
+        handoffLines.push("\n**Next steps:**");
+        for (const item of handoff.next_steps.slice(0, 5)) {
+          handoffLines.push(`- ${item.slice(0, 150)}`);
+        }
+      }
+      if (handoff.user_mood && handoff.user_mood !== "unknown") {
+        handoffLines.push(`\n**User mood:** ${handoff.user_mood}`);
+      }
+      const handoffText = handoffLines.join("\n");
+      if (handoffText.length <= 2000) {
+        sections.push(handoffText);
+      } else {
+        sections.push(handoffText.slice(0, 2000) + "\n... [truncated]");
+      }
+      console.warn(`[bootstrap-context] injected session handoff (${handoff.summary.length} chars)`);
+    }
+  } catch (e) {
+    if (e?.code !== "ENOENT") console.warn("[bootstrap-context] handoff read error:", e.message);
+  }
+
+  // ── MAST P1: Recently Solved Problems ──
+  if (MAST_SPR_ENABLED) try {
+    const recentProblems = getRecentProblems(workspaceDir, 5);
+    if (recentProblems.length > 0) {
+      const sprLines = ["\n# Recently Solved Problems (don't re-solve these)\n"];
+      let sprChars = 0;
+      for (const p of recentProblems) {
+        const line = `- **${p.title}** → Root cause: ${(p.root_cause || "").slice(0, 100)}. Fix: ${(p.fix || "").slice(0, 100)}` +
+          (p.tags?.length > 0 ? ` [${p.tags.join(", ")}]` : "");
+        sprChars += line.length;
+        if (sprChars > 1500) break;
+        sprLines.push(line);
+      }
+      sections.push(...sprLines);
+      console.warn(`[bootstrap-context] injected ${recentProblems.length} solved problems`);
+    }
+  } catch (e) {
+    if (e?.code !== "ENOENT") console.warn("[bootstrap-context] SPR read error:", e.message);
+  }
+
+  // ── MAST P1: Cross-Agent Bulletin Board ──
+  if (MAST_BULLETIN_ENABLED) try {
+    const bulletinDirs = ["/opt/openclaw/shared/bulletin/high", "/opt/openclaw/shared/bulletin/normal"];
+    const bulletinLines = [];
+    for (const dir of bulletinDirs) {
+      try {
+        const files = await fs.readdir(dir);
+        for (const file of files.filter((f) => f.endsWith(".yaml") || f.endsWith(".yml") || f.endsWith(".md"))) {
+          const content = await fs.readFile(path.join(dir, file), "utf-8");
+          if (content.length > 0 && content.length < 500) {
+            bulletinLines.push(`- [${path.basename(dir)}] ${content.trim().slice(0, 300)}`);
+          }
+        }
+      } catch { /* dir doesn't exist yet, skip */ }
+    }
+    if (bulletinLines.length > 0) {
+      sections.push("\n# Cross-Agent Bulletins\n");
+      sections.push(...bulletinLines.slice(0, 10));
+      console.warn(`[bootstrap-context] injected ${bulletinLines.length} bulletins`);
+    }
+  } catch (e) {
+    console.warn("[bootstrap-context] bulletin board error:", e.message);
+  }
+
   // ── Fabrication Stats Injection ──
   try {
     const fabLog = readFabricationLog(workspaceDir);
@@ -493,7 +629,14 @@ const bootstrapContextHook = async (event) => {
     return;
   }
 
-  const content = sections.join("\n");
+  // Total size cap to prevent context budget blowout (target: ~20K chars max)
+  const MAX_TOTAL_CHARS = 20000;
+  let content = sections.join("\n");
+  if (content.length > MAX_TOTAL_CHARS) {
+    console.warn(`[bootstrap-context] total context ${content.length} chars exceeds ${MAX_TOTAL_CHARS}, truncating`);
+    content = content.slice(0, MAX_TOTAL_CHARS) + "\n... [truncated to fit context budget]";
+  }
+
   context.bootstrapFiles.push({
     name: "SESSION_CONTEXT",
     path: "SESSION_CONTEXT",
