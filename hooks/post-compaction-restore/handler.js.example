@@ -12,6 +12,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readATS } from "../lib/ats.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
@@ -239,10 +240,31 @@ async function handleBootstrap(event) {
       lines.push("");
     }
 
+    // ── MAST P1-6: Pin ATS tasks into compaction recovery ──
+    if (process.env.MAST_ATS_ENABLED !== "0") {
+      try {
+        const ats = readATS(workspaceDir);
+        const activeTasks = (ats.tasks || []).filter((t) => t.status === "in_progress");
+        if (activeTasks.length > 0) {
+          lines.push("## Active Tasks (pinned through compaction)");
+          lines.push("");
+          for (const task of activeTasks.slice(0, 5)) {
+            lines.push(`- **${task.title}** [${task.priority}] — ${(task.context?.goal || "").slice(0, 200)}`);
+          }
+          lines.push("");
+          console.warn(`[post-compaction-restore] pinned ${activeTasks.length} ATS tasks through compaction`);
+        }
+      } catch (e) {
+        if (e?.code !== "ENOENT") console.warn("[post-compaction-restore] ATS pin error:", e.message);
+      }
+    }
+
+    const MAX_RECOVERY_CHARS = 3000;
+    const recoveryContent = lines.join("\n");
     context.bootstrapFiles.push({
       name: "COMPACTION_RECOVERY",
       path: "COMPACTION_RECOVERY",
-      content: lines.join("\n"),
+      content: recoveryContent.slice(0, MAX_RECOVERY_CHARS),
     });
     console.warn(
       `[post-compaction-restore] injected COMPACTION_RECOVERY (${snapshot.recentMessages.length} msgs)`

@@ -3,9 +3,11 @@
  */
 
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
+import { atomicWrite } from "../lib/util.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -319,6 +321,52 @@ async function checkPatternEscalation(agent, tag, apiKey) {
   }
 }
 
+// ── MAST P0: Session Handoff & ATS helpers ──
+
+const MOOD_FRUSTRATED = [
+  /sinirlendim/i, /kızdığım/i, /aptal/i, /neden yapmadın/i, /neden yapmıyorsun/i,
+  /tekrar mı/i, /yine mi/i, /frustrated/i, /annoyed/i, /useless/i,
+];
+const MOOD_POSITIVE = [
+  /tamam güzel/i, /harika/i, /süper/i, /mükemmel/i, /great/i, /perfect/i, /awesome/i, /güzel olmuş/i,
+];
+
+function detectUserMood(messages) {
+  const userMsgs = messages.filter((m) => m.role === "user");
+  const last3 = userMsgs.slice(-3);
+  const combined = last3.map((m) => m.text).join(" ");
+
+  if (MOOD_FRUSTRATED.some((p) => p.test(combined))) return "frustrated";
+  if (MOOD_POSITIVE.some((p) => p.test(combined))) return "positive";
+  return "neutral";
+}
+
+function extractUnfinishedWork(messages) {
+  const items = [];
+  // Look for TODO-like patterns in assistant messages
+  const assistantMsgs = messages.filter((m) => m.role === "assistant");
+  for (const msg of assistantMsgs.slice(-5)) {
+    const todoMatches = msg.text.match(/(?:- \[ \]|TODO|bekliyor|kalan|unfinished|remaining)[^\n]{5,80}/gi);
+    if (todoMatches) items.push(...todoMatches.map((m) => m.trim().slice(0, 150)));
+  }
+  return items.slice(0, 5);
+}
+
+function extractFilesModified(messages) {
+  // NOTE: This extracts files *mentioned* in conversation, not necessarily modified.
+  // Heuristic only — used for handoff context, not for verification.
+  const files = new Set();
+  for (const msg of messages) {
+    const matches = msg.text.match(/(?:\/(?:opt|root|home|etc|var|tmp)\/[^\s\])"',]{5,80})/g);
+    if (matches) {
+      for (const m of matches) {
+        if (m.match(/\.\w{1,5}$/)) files.add(m); // only files with extensions
+      }
+    }
+  }
+  return [...files].slice(0, 10);
+}
+
 const sessionEndCaptureHook = async (event) => {
   if (event?.type !== "command" || (event?.action !== "new" && event?.action !== "reset")) {
     return;
@@ -428,11 +476,54 @@ const sessionEndCaptureHook = async (event) => {
       sessionKey: String(event?.sessionKey || sessionRef),
       recentMessages: messages.slice(-8).map((m) => ({ role: m.role, text: m.text.slice(0, 500) })),
     };
-    await fs.writeFile(
+    atomicWrite(
       path.join(memoryDir, "critical-context-snapshot.json"),
-      JSON.stringify(snapshot, null, 2),
-      "utf-8"
+      JSON.stringify(snapshot, null, 2)
     );
+
+    // ── MAST P0: Session Handoff ──
+    try {
+      const last3 = messages.slice(-3).map((m) => `${m.role}: ${m.text.slice(0, 150)}`).join(" | ");
+      const handoff = {
+        timestamp: new Date().toISOString(),
+        session_key: String(event?.sessionKey || sessionRef),
+        agent: agentId,
+        summary: last3.slice(0, 500),
+        unfinished_work: extractUnfinishedWork(messages),
+        next_steps: [], // populated by active task context if available
+        files_modified: extractFilesModified(messages),
+        user_mood: detectUserMood(messages),
+      };
+      atomicWrite(
+        path.join(memoryDir, "session-handoff.json"),
+        JSON.stringify(handoff, null, 2)
+      );
+      console.warn(`[session-end-capture] handoff written (mood=${handoff.user_mood}, files=${handoff.files_modified.length})`);
+    } catch (e) {
+      console.warn(`[session-end-capture] handoff write error: ${e.message}`);
+    }
+
+    // ── MAST P0: Update Active Tasks with session context ──
+    try {
+      // Use readATS/writeATS for atomic operations (Fix: race condition from review)
+      const { readATS: readATSSync, writeATS: writeATSSync } = await import("../lib/ats.js");
+      const ats = readATSSync(workspaceDir);
+      let modified = false;
+      for (const task of ats.tasks) {
+        if (task.status === "in_progress") {
+          task.context.last_session_summary = messages.slice(-3).map((m) => m.text.slice(0, 200)).join(" | ").slice(0, 600);
+          task.updated_at = new Date().toISOString();
+          modified = true;
+        }
+      }
+      if (modified) {
+        writeATSSync(workspaceDir, ats);
+        console.warn(`[session-end-capture] ATS tasks updated with session context`);
+      }
+    } catch (e) {
+      if (e?.code !== "ENOENT") console.warn(`[session-end-capture] ATS update error: ${e.message}`);
+    }
+
   } catch (err) {
     console.warn(`[session-end-capture] write failed: ${err.message}`);
   }

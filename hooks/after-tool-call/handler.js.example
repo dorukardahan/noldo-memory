@@ -13,6 +13,7 @@ import path from "node:path";
 const MEMORY_API = "http://localhost:8787/v1";
 import { readFileSync } from "node:fs";
 import { recordToolCall, writeVerifiedFact } from "../lib/shared-state.js";
+import { addTask, getActiveTasks } from "../lib/ats.js";
 const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
 try { _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim(); } catch (e) { console.warn("[after-tool-call] error:", e.message || e); }
@@ -231,6 +232,27 @@ const afterToolCallHook = async (event, ctx) => {
     }
   }
 
+  // ── MAST P0: Auto-create ATS task for significant operations ──
+  if (process.env.MAST_ATS_ENABLED !== "0" && shouldCapture(toolName, toolInput)) {
+    try {
+      const activeTasks = getActiveTasks(workspaceDir);
+      // Only auto-create if no tasks exist yet (avoid flooding)
+      if (activeTasks.length === 0) {
+        const cmd = (toolInput?.command || toolInput?.file_path || toolName).slice(0, 80);
+        addTask(workspaceDir, {
+          title: `Auto: ${cmd}`,
+          agent: agentId,
+          goal: `Triggered by ${toolName}: ${cmd}`,
+          session_key: sessionKey,
+          priority: "medium",
+        });
+      }
+    } catch (e) {
+      // Non-critical — don't block tool capture
+      console.warn("[after-tool-call] ATS auto-create error:", e.message);
+    }
+  }
+
   if (!shouldCapture(toolName, toolInput)) return;
 
   // Structured config change capture for edit/write tools
@@ -270,6 +292,11 @@ const afterToolCallHook = async (event, ctx) => {
     const tail = output.slice(-600);
     output = `${head}\n...[truncated ${output.length - 1800} chars]...\n${tail}`;
   }
+
+  // Sanitize secrets from output before storing to memory (review H-7)
+  output = output
+    .replace(/(?:password|passwd|token|secret|api[_-]?key|authorization|bearer)\s*[:=]\s*\S+/gi, "[REDACTED]")
+    .replace(/\b(?:sk-|ghp_|ghs_|xox[bpas]-|AKIA|eyJ)[A-Za-z0-9_-]{10,}/g, "[REDACTED_TOKEN]");
 
   const memoryText = `[Tool: ${toolName}] Command: ${cmd}\nOutput: ${output}`;
 
