@@ -27,6 +27,7 @@ import {
   incrementFabricationScore,
   getProofRequirement,
 } from "../lib/shared-state.js";
+import { increment as metricsIncrement, recordEvent as metricsEvent } from "../lib/metrics.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -175,10 +176,20 @@ const claimScannerHook = async (event) => {
     return !hasEvidence;
   });
 
+  // Metrics: track total scanned claims
+  try { metricsIncrement("claim_scanner.total", claims.length); } catch {}
+
   if (unverifiedClaims.length === 0) {
     console.warn(`[claim-scanner] ${claims.length} claims found but all have matching proof evidence (agent=${agentId})`);
+    try { metricsIncrement("claim_scanner.verified", claims.length); } catch {}
     return; // All claims are backed by appropriate tool calls — OK
   }
+
+  // Metrics: track unverified claims
+  try {
+    metricsIncrement("claim_scanner.unverified", unverifiedClaims.length);
+    metricsEvent("unverified_claims", { agent: agentId, count: unverifiedClaims.length, types: unverifiedClaims.map(c => c.type) });
+  } catch {}
 
   console.warn(`[claim-scanner] ${unverifiedClaims.length} UNVERIFIED claims detected (agent=${agentId})`);
 

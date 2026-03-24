@@ -1,6 +1,7 @@
 import path from "node:path";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
+import { resolveAgentId as _resolveAgentId } from "../lib/runtime.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -197,15 +198,8 @@ function scoreImportance(text = "") {
 }
 
 function resolveAgentId(event) {
-  const fromContext = String(event?.context?.agentId || "")
-    .trim()
-    .toLowerCase();
-  if (fromContext) return fromContext;
-  const fromSessionKey = parseAgentIdFromSessionKey(event?.sessionKey);
-  if (fromSessionKey) return fromSessionKey;
-  const fromWorkspace = parseAgentIdFromWorkspaceDir(event?.context?.workspaceDir || "");
-  if (fromWorkspace) return fromWorkspace;
-  return "main";
+  // Delegate to shared runtime.js implementation (dedup H-3)
+  return _resolveAgentId(event, event?.context?.workspaceDir || "");
 }
 
 function resolveMessage(event) {
