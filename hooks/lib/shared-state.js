@@ -7,51 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { atomicWrite } from "./util.js";
-
-/**
- * Simple file-based mutex using lockfile + O_EXCL.
- * Prevents TOCTOU race conditions on shared state files (review fix H-2).
- * Uses exponential backoff with max 3 retries.
- */
-function withFileLock(filePath, fn) {
-  const lockPath = `${filePath}.lock`;
-  const maxRetries = 3;
-  const baseDelay = 5; // ms
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      // O_EXCL fails if file exists — atomic create-or-fail
-      const fd = fs.openSync(lockPath, "wx");
-      fs.closeSync(fd);
-      try {
-        return fn();
-      } finally {
-        try { fs.unlinkSync(lockPath); } catch { /* best effort */ }
-      }
-    } catch (e) {
-      if (e.code === "EEXIST") {
-        // Lock held — check if stale (>5s = likely crashed holder)
-        try {
-          const stat = fs.statSync(lockPath);
-          if (Date.now() - stat.mtimeMs > 5000) {
-            try { fs.unlinkSync(lockPath); } catch { /* race ok */ }
-            continue; // retry immediately
-          }
-        } catch { /* stat failed, retry */ }
-        // Exponential backoff
-        const delay = baseDelay * Math.pow(2, attempt);
-        const end = Date.now() + delay;
-        while (Date.now() < end) { /* busy wait — hooks are short-lived */ }
-        continue;
-      }
-      // Non-lock error — run without lock (graceful degradation)
-      return fn();
-    }
-  }
-  // All retries exhausted — run without lock
-  return fn();
-}
+import { atomicWrite, withFileLock } from "./util.js";
 
 const TOOL_STATE_FILE = "/tmp/noldo-recent-tools.json";
 const TOOL_CALL_TTL_MS = 300_000; // 5 minutes
@@ -363,6 +319,7 @@ const FAB_SCORE_FILE = "/tmp/noldo-fab-scores.json";
  * @returns {number} current score after increment
  */
 export function incrementFabricationScore(sessionKey) {
+  if (!sessionKey) return 0; // Skip empty keys to avoid "" pollution
   try {
     return withFileLock(FAB_SCORE_FILE, () => {
       let scores = {};

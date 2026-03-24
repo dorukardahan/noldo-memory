@@ -7,31 +7,7 @@
  */
 
 import fs from "node:fs";
-import { atomicWrite } from "./util.js";
-
-/** Simple file-based mutex (same pattern as shared-state.js — H-2 fix). */
-function withFileLock(filePath, fn) {
-  const lockPath = `${filePath}.lock`;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const fd = fs.openSync(lockPath, "wx");
-      fs.closeSync(fd);
-      try { return fn(); } finally { try { fs.unlinkSync(lockPath); } catch {} }
-    } catch (e) {
-      if (e.code === "EEXIST") {
-        try {
-          const stat = fs.statSync(lockPath);
-          if (Date.now() - stat.mtimeMs > 5000) { try { fs.unlinkSync(lockPath); } catch {} continue; }
-        } catch {}
-        const end = Date.now() + 5 * Math.pow(2, attempt);
-        while (Date.now() < end) {}
-        continue;
-      }
-      return fn();
-    }
-  }
-  return fn();
-}
+import { atomicWrite, withFileLock } from "./util.js";
 
 const METRICS_PATH = process.env.MAST_METRICS_PATH || "/tmp/noldo-mast-metrics.json";
 const MAX_HISTORY = 1000; // Keep last N events

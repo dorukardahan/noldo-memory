@@ -6,6 +6,7 @@ import {
   readWorkspacePolicy,
   resolveAgentId,
   resolveWorkspaceDir,
+  resolveSessionKey,
 } from "../lib/runtime.js";
 import {
   readFabricationLog,
@@ -596,7 +597,8 @@ Before claiming completion/existence/absence:
   // ── Fabrication Enforcement Tier (moved from claim-scanner C-2 fix) ──
   if (process.env.MAST_CLAIM_ENFORCE !== "0") {
     try {
-      const sessionKey = String(event?.sessionKey || "");
+      const sessionKey = resolveSessionKey(event);
+      if (!sessionKey) throw new Error("no sessionKey");
       const fabScore = getFabricationScore(sessionKey);
       if (fabScore >= 5) {
         sections.push(

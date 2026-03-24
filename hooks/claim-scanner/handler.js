@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import {
   resolveAgentId,
   resolveWorkspaceDir,
+  resolveSessionKey,
   stripChannelEnvelope,
 } from "../lib/runtime.js";
 import {
@@ -156,7 +157,7 @@ const claimScannerHook = async (event) => {
   const claims = detectClaims(content);
   if (claims.length === 0) return;
 
-  const sessionKey = event?.sessionKey || event?.context?.sessionKey || "";
+  const sessionKey = resolveSessionKey(event);
   const workspaceDir = resolveWorkspaceDir(event);
   const agentId = resolveAgentId(event, workspaceDir);
 

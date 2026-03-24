@@ -8,6 +8,17 @@ const DEFAULT_POLICY = Object.freeze({
   dailyNotesEnabled: true,
 });
 
+/**
+ * Resolve sessionKey from event — unified across all hooks (H-9 fix).
+ * Checks event.sessionKey, event.context.sessionKey, and ctx.sessionKey.
+ */
+export function resolveSessionKey(event = {}, ctx = {}) {
+  const key = String(
+    event?.sessionKey || event?.context?.sessionKey || ctx?.sessionKey || ""
+  ).trim();
+  return key || "";
+}
+
 export function resolveWorkspaceDir(event = {}) {
   const context = event?.context || {};
   return (

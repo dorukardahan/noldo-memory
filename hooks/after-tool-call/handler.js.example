@@ -14,6 +14,7 @@ const MEMORY_API = "http://localhost:8787/v1";
 import { readFileSync } from "node:fs";
 import { recordToolCall, writeVerifiedFact } from "../lib/shared-state.js";
 import { addTask, getActiveTasks } from "../lib/ats.js";
+import { resolveSessionKey } from "../lib/runtime.js";
 const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
 try { _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim(); } catch (e) { console.warn("[after-tool-call] error:", e.message || e); }
@@ -191,7 +192,7 @@ const afterToolCallHook = async (event, ctx) => {
 
   const workspaceDir = ctx?.workspaceDir || process.env.OPENCLAW_WORKSPACE || `${process.env.HOME}/.openclaw/workspace`;
   const agentId = getAgentId(workspaceDir);
-  const sessionKey = event?.sessionKey || ctx?.sessionKey || "";
+  const sessionKey = resolveSessionKey(event, ctx);
 
   // Always record tool calls for claim-scanner cross-reference
   recordToolCall(sessionKey, toolName, toolInput?.command || toolInput?.file_path || toolInput?.path || toolName);
