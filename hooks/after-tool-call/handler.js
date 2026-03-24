@@ -329,4 +329,5 @@ const afterToolCallHook = async (event, ctx) => {
   }
 };
 
-export default afterToolCallHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(afterToolCallHook, "after-tool-call");

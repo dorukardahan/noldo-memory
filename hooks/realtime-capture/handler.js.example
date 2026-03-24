@@ -318,4 +318,5 @@ const realtimeCaptureHook = async (event) => {
   console.log(`[realtime-capture] stored assistant msg (${content.length}ch, imp=${importance.toFixed(2)}, agent=${agentId})`);
 };
 
-export default realtimeCaptureHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(realtimeCaptureHook, "realtime-capture");

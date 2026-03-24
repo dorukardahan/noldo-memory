@@ -244,4 +244,5 @@ const messageRecallHook = async (event) => {
   }
 };
 
-export default messageRecallHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(messageRecallHook, "message-recall");

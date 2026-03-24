@@ -239,4 +239,5 @@ const claimScannerHook = async (event) => {
   incrementFabricationScore(sessionKey);
 };
 
-export default claimScannerHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(claimScannerHook, "claim-scanner");

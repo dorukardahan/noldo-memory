@@ -299,4 +299,5 @@ const postCompactionRestoreHook = async (event) => {
   }
 };
 
-export default postCompactionRestoreHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(postCompactionRestoreHook, "post-compaction-restore");

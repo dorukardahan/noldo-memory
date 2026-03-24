@@ -194,4 +194,5 @@ const preSessionSaveHook = async (event) => {
   }
 };
 
-export default preSessionSaveHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(preSessionSaveHook, "pre-session-save");

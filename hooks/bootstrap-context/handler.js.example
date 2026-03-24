@@ -673,4 +673,5 @@ Before claiming completion/existence/absence:
   console.warn(`[bootstrap-context] injected SESSION_CONTEXT (${content.length} chars, agent=${agentId})`);
 };
 
-export default bootstrapContextHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(bootstrapContextHook, "bootstrap-context");

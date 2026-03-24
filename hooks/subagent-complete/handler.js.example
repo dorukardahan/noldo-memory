@@ -89,4 +89,5 @@ const subagentCompleteHook = async (event) => {
   }
 };
 
-export default subagentCompleteHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(subagentCompleteHook, "subagent-complete");

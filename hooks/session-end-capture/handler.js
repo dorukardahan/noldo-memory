@@ -490,10 +490,19 @@ const sessionEndCaptureHook = async (event) => {
       const { readATS: readATSSync, writeATS: writeATSSync } = await import("../lib/ats.js");
       const ats = readATSSync(workspaceDir);
       let modified = false;
+      const currentSessionKey = event?.sessionKey || event?.context?.sessionKey || "";
       for (const task of ats.tasks) {
         if (task.status === "in_progress") {
           task.context.last_session_summary = messages.slice(-3).map((m) => m.text.slice(0, 200)).join(" | ").slice(0, 600);
           task.updated_at = new Date().toISOString();
+          // Auto-complete: session ending normally = task done.
+          // Match by session_key if set, otherwise complete all in-progress tasks
+          // (they were auto-created in this workspace's session).
+          if (!task.session_key || task.session_key === currentSessionKey) {
+            task.status = "completed";
+            task.completed_at = new Date().toISOString();
+            console.warn(`[session-end-capture] ATS task auto-completed: ${task.id} "${task.title?.slice(0, 60)}"`);
+          }
           modified = true;
         }
       }
@@ -510,4 +519,5 @@ const sessionEndCaptureHook = async (event) => {
   }
 };
 
-export default sessionEndCaptureHook;
+import { resilientHandler } from "../lib/resilient-import.js";
+export default resilientHandler(sessionEndCaptureHook, "session-end-capture");
