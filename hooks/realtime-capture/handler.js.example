@@ -139,21 +139,8 @@ function cleanMessage(raw = "") {
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-function parseAgentIdFromSessionKey(sessionKey = "") {
-  const raw = String(sessionKey || "").trim().toLowerCase();
-  const parts = raw.split(":").filter(Boolean);
-  if (parts.length >= 3 && parts[0] === "agent" && parts[1]) {
-    return parts[1];
-  }
-  return null;
-}
-
-function parseAgentIdFromWorkspaceDir(workspaceDir = "") {
-  const base = path.basename(workspaceDir || "");
-  if (base === "workspace") return "main";
-  if (base.startsWith("workspace-")) return base.replace("workspace-", "");
-  return null;
-}
+// parseAgentIdFromSessionKey and parseAgentIdFromWorkspaceDir removed —
+// consolidated into lib/runtime.js (review fix H-3)
 
 function deriveSessionNamespace(sessionKey = "") {
   const raw = String(sessionKey || "").trim().toLowerCase();

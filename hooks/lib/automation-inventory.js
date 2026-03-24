@@ -19,6 +19,12 @@ import path from "node:path";
 
 const TIMEOUT = 5000;
 
+/** Sanitize a string for safe shell interpolation — allow only safe chars. */
+function sanitizeShellArg(arg) {
+  if (typeof arg !== "string") return "";
+  return arg.replace(/[^a-zA-Z0-9._\/ -]/g, "");
+}
+
 function tryExec(cmd) {
   try {
     return execSync(cmd, { timeout: TIMEOUT, encoding: "utf8" }).trim();
@@ -122,7 +128,8 @@ function discoverSystemd(keywords = []) {
   }
   // System services matching keywords
   if (keywords.length > 0) {
-    const pattern = keywords.join("\\|");
+    const pattern = keywords.map(k => sanitizeShellArg(k)).filter(Boolean).join("\\|");
+    if (!pattern) return results;
     const sysUnits = tryExec(`systemctl list-units --type=service --no-pager --no-legend 2>/dev/null | grep -i "${pattern}"`);
     if (sysUnits) {
       for (const line of sysUnits.split("\n")) {
@@ -172,12 +179,19 @@ function discoverCustomQueues(workspaceDir) {
   const results = [];
   if (!workspaceDir || !fs.existsSync(workspaceDir)) return results;
 
+  // Sanitize workspaceDir for shell interpolation
+  const safeDir = sanitizeShellArg(workspaceDir);
+  if (!safeDir) return results;
+
   // Look for SQLite databases
-  const sqliteFiles = tryExec(`find "${workspaceDir}" -maxdepth 3 -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" 2>/dev/null`);
+  const sqliteFiles = tryExec(`find "${safeDir}" -maxdepth 3 -name "*.db" -o -name "*.sqlite" -o -name "*.sqlite3" 2>/dev/null`);
   if (sqliteFiles) {
     for (const f of sqliteFiles.split("\n").filter(Boolean)) {
+      // Sanitize each DB path before shell interpolation
+      const safeF = sanitizeShellArg(f);
+      if (!safeF) continue;
       // Check if it has job/queue tables
-      const tables = tryExec(`sqlite3 "${f}" ".tables" 2>/dev/null`);
+      const tables = tryExec(`sqlite3 "${safeF}" ".tables" 2>/dev/null`);
       const hasQueue = tables && /job|queue|task|schedule/i.test(tables);
       results.push({
         layer: "custom-queue",
@@ -190,7 +204,7 @@ function discoverCustomQueues(workspaceDir) {
   }
 
   // Look for scheduler/coordinator scripts
-  const schedulerFiles = tryExec(`find "${workspaceDir}" -maxdepth 3 -name "*scheduler*" -o -name "*coordinator*" -o -name "*orchestrator*" 2>/dev/null`);
+  const schedulerFiles = tryExec(`find "${safeDir}" -maxdepth 3 -name "*scheduler*" -o -name "*coordinator*" -o -name "*orchestrator*" 2>/dev/null`);
   if (schedulerFiles) {
     for (const f of schedulerFiles.split("\n").filter(Boolean)) {
       results.push({
@@ -212,6 +226,9 @@ function discoverCustomQueues(workspaceDir) {
  * @returns {object} Full inventory report
  */
 export function runInventory(opts = {}) {
+  if (process.env.MAST_INVENTORY_ENABLED === "0") {
+    return { timestamp: new Date().toISOString(), layers: {}, summary: {}, totalItems: 0, disabled: true };
+  }
   const { workspaceDir, systemdKeywords = [] } = opts;
 
   const inventory = {

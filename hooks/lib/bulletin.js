@@ -33,15 +33,16 @@ export function postNotice({ title, body, priority = "normal", agent = "unknown"
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeAgent = (agent || "unknown").replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 30);
   const safeTitle = (title || "notice").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 40);
-  const filename = `${ts}_${agent}_${safeTitle}.md`;
+  const filename = `${ts}_${safeAgent}_${safeTitle}.md`;
   const filepath = path.join(dir, filename);
 
   const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000).toISOString();
 
   const content = [
-    `<!-- bulletin: agent=${agent} expires=${expiresAt} -->`,
-    `**${title}** (${agent}, ${new Date().toISOString().slice(0, 16)})`,
+    `<!-- bulletin: version=1 agent=${safeAgent} expires=${expiresAt} -->`,
+    `**${title}** (${safeAgent}, ${new Date().toISOString().slice(0, 16)})`,
     "",
     body.slice(0, 1000),
   ].join("\n");
@@ -71,11 +72,11 @@ export function listNotices(priority = "all") {
       try {
         const content = fs.readFileSync(path.join(dir, file), "utf-8");
         // Parse metadata from HTML comment
-        const meta = content.match(/<!-- bulletin: agent=(\S+) expires=(\S+) -->/);
+        const meta = content.match(/<!-- bulletin:.*?agent=(\S+) expires=(\S+) -->/);
         results.push({
           file,
           priority: tier,
-          content: content.replace(/<!-- bulletin:.*-->/, "").trim(),
+          content: content.replace(/<!-- bulletin:.*?-->/, "").trim(),
           agent: meta?.[1] || "unknown",
           expiresAt: meta?.[2] || null,
         });
@@ -108,7 +109,14 @@ export function archiveExpired() {
         const meta = content.match(/expires=(\S+)/);
         if (meta?.[1]) {
           const expires = new Date(meta[1]);
-          if (expires < new Date()) {
+          if (isNaN(expires.getTime())) {
+            // Malformed date — fall back to file age check
+            const stat = fs.statSync(filepath);
+            if (Date.now() - stat.mtimeMs > MAX_AGE_MS) {
+              fs.renameSync(filepath, path.join(archiveDir, file));
+              archived++;
+            }
+          } else if (expires < new Date()) {
             fs.renameSync(filepath, path.join(archiveDir, file));
             archived++;
           }

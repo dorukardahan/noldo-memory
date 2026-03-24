@@ -177,11 +177,11 @@ const claimScannerHook = async (event) => {
   });
 
   // Metrics: track total scanned claims
-  try { metricsIncrement("claim_scanner.total", claims.length); } catch {}
+  try { metricsIncrement("claim_scanner.total", claims.length); } catch (e) { console.warn("[claim-scanner] metrics error:", e.message); }
 
   if (unverifiedClaims.length === 0) {
     console.warn(`[claim-scanner] ${claims.length} claims found but all have matching proof evidence (agent=${agentId})`);
-    try { metricsIncrement("claim_scanner.verified", claims.length); } catch {}
+    try { metricsIncrement("claim_scanner.verified", claims.length); } catch (e) { console.warn("[claim-scanner] metrics error:", e.message); }
     return; // All claims are backed by appropriate tool calls — OK
   }
 
@@ -189,7 +189,7 @@ const claimScannerHook = async (event) => {
   try {
     metricsIncrement("claim_scanner.unverified", unverifiedClaims.length);
     metricsEvent("unverified_claims", { agent: agentId, count: unverifiedClaims.length, types: unverifiedClaims.map(c => c.type) });
-  } catch {}
+  } catch (e) { console.warn("[claim-scanner] metrics error:", e.message); }
 
   console.warn(`[claim-scanner] ${unverifiedClaims.length} UNVERIFIED claims detected (agent=${agentId})`);
 

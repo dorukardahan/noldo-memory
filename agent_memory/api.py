@@ -1943,6 +1943,34 @@ async def amnesia_check(req: AmnesiaCheckRequest, request: Request) -> Dict[str,
 # Solved Problem Registry (SPR) — File-based per-workspace
 # ---------------------------------------------------------------------------
 
+def _validate_agent_name(agent: Optional[str]) -> Optional[str]:
+    """Validate agent name — alphanumeric, dash, underscore only."""
+    import re
+    if not agent:
+        return None
+    if not re.match(r'^[a-zA-Z0-9_-]+$', agent):
+        raise HTTPException(status_code=400, detail="Invalid agent name")
+    return agent
+
+
+def _resolve_spr_workspace(agent: Optional[str]) -> str:
+    """Resolve workspace directory for SPR, with path traversal protection."""
+    workspace = os.environ.get("AGENT_WORKSPACE", "")
+    if agent:
+        agents_root = os.environ.get("AGENT_MEMORY_SESSIONS_ROOT", "")
+        if agents_root:
+            candidate = os.path.join(agents_root, agent, "workspace")
+            if not os.path.isdir(candidate):
+                candidate = os.path.join(os.path.dirname(agents_root), f"workspace-{agent}")
+            if os.path.isdir(candidate):
+                resolved = os.path.realpath(candidate)
+                root_resolved = os.path.realpath(os.path.dirname(agents_root))
+                if not resolved.startswith(root_resolved):
+                    raise HTTPException(status_code=400, detail="Path traversal detected")
+                workspace = candidate
+    return workspace
+
+
 @app.get("/v1/solved")
 async def list_solved_problems(
     request: Request,
@@ -1957,16 +1985,9 @@ async def list_solved_problems(
     """
     import json as _json
 
-    workspace = os.environ.get("AGENT_WORKSPACE", "")
-    # If agent specified, try agent-specific workspace
-    if agent:
-        agents_root = os.environ.get("AGENT_MEMORY_SESSIONS_ROOT", "")
-        if agents_root:
-            candidate = os.path.join(agents_root, agent, "workspace")
-            if not os.path.isdir(candidate):
-                candidate = os.path.join(os.path.dirname(agents_root), f"workspace-{agent}")
-            if os.path.isdir(candidate):
-                workspace = candidate
+    agent = _validate_agent_name(agent)
+    limit = max(1, min(limit, 100))
+    workspace = _resolve_spr_workspace(agent)
 
     spr_path = os.path.join(workspace, "memory", "solved-problems.json") if workspace else ""
 
@@ -2018,18 +2039,11 @@ async def add_solved_problem(request: Request) -> Dict[str, Any]:
     if not title or not fix:
         raise HTTPException(status_code=400, detail="title and fix are required")
 
-    workspace = os.environ.get("AGENT_WORKSPACE", "")
-    if agent:
-        agents_root = os.environ.get("AGENT_MEMORY_SESSIONS_ROOT", "")
-        if agents_root:
-            candidate = os.path.join(agents_root, agent, "workspace")
-            if not os.path.isdir(candidate):
-                candidate = os.path.join(os.path.dirname(agents_root), f"workspace-{agent}")
-            if os.path.isdir(candidate):
-                workspace = candidate
+    agent = _validate_agent_name(agent)
+    workspace = _resolve_spr_workspace(agent)
 
-    if not workspace:
-        raise HTTPException(status_code=500, detail="No workspace configured")
+    if not workspace or not os.path.isdir(workspace):
+        raise HTTPException(status_code=400, detail="No valid workspace found")
 
     spr_path = os.path.join(workspace, "memory", "solved-problems.json")
     spr_dir = os.path.dirname(spr_path)
