@@ -175,9 +175,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "0.0.0.0"
         now = time.time()
 
-        # Prune old entries
+        # Prune old entries and clean up empty keys to prevent memory leak
         hits = self._hits[client_ip]
         self._hits[client_ip] = [t for t in hits if now - t < self.window]
+
+        if not self._hits[client_ip]:
+            del self._hits[client_ip]
+            # Re-add for the current request below
+            self._hits[client_ip] = []
 
         if len(self._hits[client_ip]) >= self.max_requests:
             audit_logger.warning(

@@ -259,6 +259,8 @@ class MemoryStorage:
         _add_col("memories", "source TEXT DEFAULT 'api'", "source")
         # Trust level: system, user, import
         _add_col("memories", "trust_level TEXT DEFAULT 'user'", "trust_level")
+        # Compression: preserve original text before summarization
+        _add_col("memories", "original_text TEXT", "original_text")
 
         # Backfill last_accessed_at for existing rows (keep idempotent)
         try:
@@ -1053,29 +1055,44 @@ class MemoryStorage:
             (blob, limit),
         ).fetchall()
 
-        results: List[Dict[str, Any]] = []
+        # Pre-filter by min_score and collect vec_rowid → similarity mapping
+        candidates: List[tuple[int, float]] = []
         for r in rows:
             # sqlite-vec returns cosine *distance* (0 = identical, 2 = opposite)
             similarity = 1.0 - (r["distance"] / 2.0)
-            if similarity < min_score:
-                continue
-            where = ["vector_rowid = ?", "deleted_at IS NULL", "importance >= 0.05"]
-            params: List[Any] = [r["vec_rowid"]]
-            if namespace is not None:
-                where.append("namespace = ?")
-                params.append(namespace)
-            if memory_type is not None:
-                where.append("COALESCE(memory_type, 'other') = ?")
-                params.append(memory_type)
-                if memory_type == "lesson":
-                    where.append("COALESCE(lesson_status, 'active') = 'active'")
-            sql, safe_params = self._safe_where_query("memories", "*", where, params)
-            mem = conn.execute(sql, safe_params).fetchone()
-            if mem:
-                d = dict(mem)
-                d["score"] = round(similarity, 4)
-                results.append(d)
+            if similarity >= min_score:
+                candidates.append((r["vec_rowid"], round(similarity, 4)))
 
+        if not candidates:
+            return []
+
+        # Batch fetch: single query instead of N+1 per-row lookups
+        vec_rowids = [c[0] for c in candidates]
+        sim_map = {c[0]: c[1] for c in candidates}
+        placeholders = ",".join("?" for _ in vec_rowids)
+
+        where_parts = [f"vector_rowid IN ({placeholders})", "deleted_at IS NULL", "importance >= 0.05"]
+        params: List[Any] = list(vec_rowids)
+        if namespace is not None:
+            where_parts.append("namespace = ?")
+            params.append(namespace)
+        if memory_type is not None:
+            where_parts.append("COALESCE(memory_type, 'other') = ?")
+            params.append(memory_type)
+            if memory_type == "lesson":
+                where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
+
+        sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
+        mem_rows = conn.execute(sql, tuple(params)).fetchall()
+
+        results: List[Dict[str, Any]] = []
+        for mem in mem_rows:
+            d = dict(mem)
+            d["score"] = sim_map.get(mem["vector_rowid"], 0.0)
+            results.append(d)
+
+        # Preserve original similarity ordering (highest first)
+        results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
     # ------------------------------------------------------------------
@@ -1106,25 +1123,36 @@ class MemoryStorage:
             (safe_query, limit),
         ).fetchall()
 
-        results: List[Dict[str, Any]] = []
-        for r in rows:
-            where = ["id = ?", "deleted_at IS NULL", "importance >= 0.05"]
-            params: List[Any] = [r["id"]]
-            if namespace is not None:
-                where.append("namespace = ?")
-                params.append(namespace)
-            if memory_type is not None:
-                where.append("COALESCE(memory_type, 'other') = ?")
-                params.append(memory_type)
-                if memory_type == "lesson":
-                    where.append("COALESCE(lesson_status, 'active') = 'active'")
-            sql, safe_params = self._safe_where_query("memories", "*", where, params)
-            mem = conn.execute(sql, safe_params).fetchone()
-            if mem:
-                d = dict(mem)
-                d["bm25_rank"] = r["rank"]
-                results.append(d)
+        if not rows:
+            return []
 
+        # Batch fetch: single query instead of N+1 per-row lookups
+        fts_ids = [r["id"] for r in rows]
+        rank_map = {r["id"]: r["rank"] for r in rows}
+        placeholders = ",".join("?" for _ in fts_ids)
+
+        where_parts = [f"id IN ({placeholders})", "deleted_at IS NULL", "importance >= 0.05"]
+        params: List[Any] = list(fts_ids)
+        if namespace is not None:
+            where_parts.append("namespace = ?")
+            params.append(namespace)
+        if memory_type is not None:
+            where_parts.append("COALESCE(memory_type, 'other') = ?")
+            params.append(memory_type)
+            if memory_type == "lesson":
+                where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
+
+        sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
+        mem_rows = conn.execute(sql, tuple(params)).fetchall()
+
+        results: List[Dict[str, Any]] = []
+        for mem in mem_rows:
+            d = dict(mem)
+            d["bm25_rank"] = rank_map.get(mem["id"], 0.0)
+            results.append(d)
+
+        # Preserve original BM25 ranking order (lower rank = better)
+        results.sort(key=lambda x: x["bm25_rank"])
         return results
 
     # ------------------------------------------------------------------

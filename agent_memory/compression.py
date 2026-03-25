@@ -53,8 +53,8 @@ def compress_old_memories(
 ) -> Dict[str, Any]:
     """Compress old, long memories by replacing text with summary.
 
-    Original text is preserved in a new 'original_text' field (if schema supports)
-    or simply truncated with a [compressed] marker.
+    Original text is preserved in the 'original_text' column before overwriting.
+    Pinned memories and high-importance (>=0.8) memories are skipped.
 
     Returns stats about what was compressed.
     """
@@ -101,8 +101,9 @@ def compress_old_memories(
             continue
 
         try:
+            # Preserve original text before overwriting with summary.
             conn.execute(
-                "UPDATE memories SET text = ?, updated_at = ? WHERE id = ?",
+                "UPDATE memories SET original_text = text, text = ?, updated_at = ? WHERE id = ?",
                 (compressed_text, now, mid),
             )
             # Update FTS5

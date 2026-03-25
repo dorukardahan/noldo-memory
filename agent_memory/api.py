@@ -1049,11 +1049,16 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
     ).fetchone()["c"]
 
     # Build candidate list
+    # Exclude pinned memories (they must survive consolidation) and lessons
+    # (behavioral corrections must not be merged with conversations).
     rows = conn.execute(
         """
         SELECT id, text, category, importance, vector_rowid, strength, last_accessed_at, created_at
           FROM memories
-         WHERE deleted_at IS NULL AND vector_rowid IS NOT NULL
+         WHERE deleted_at IS NULL
+           AND vector_rowid IS NOT NULL
+           AND COALESCE(pinned, 0) = 0
+           AND COALESCE(memory_type, 'other') NOT IN ('lesson', 'rule')
         """
     ).fetchall()
 
@@ -1200,6 +1205,7 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
                 merged += 1
 
         # Archive weak, stale memories
+        # Exclude pinned, lessons, and rules from archival.
         cutoff = now - (30 * 86400.0)
         cur = conn.execute(
             """
@@ -1208,6 +1214,8 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
              WHERE deleted_at IS NULL
                AND COALESCE(strength, 1.0) < 0.3
                AND COALESCE(last_accessed_at, created_at) < ?
+               AND COALESCE(pinned, 0) = 0
+               AND COALESCE(memory_type, 'other') NOT IN ('lesson', 'rule')
             """,
             (now, cutoff),
         )
