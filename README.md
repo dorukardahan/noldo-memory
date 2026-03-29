@@ -235,6 +235,21 @@ NoldoMem connects to OpenClaw through 7 lifecycle hooks:
 
 Each hook has a `HOOK.md` in [`hooks/`](./hooks/) explaining its behavior and configuration.
 
+## Data Classification
+
+NoldoMem uses two complementary classification fields:
+
+| Field | Purpose | Values | Set by |
+|-------|---------|--------|--------|
+| `category` | **Who wrote it** (source role) | `user`, `assistant`, `qa_pair`, `decision`, `lesson`, `rule`, `other` | Hook at capture time |
+| `memory_type` | **What kind of information** | `fact`, `conversation`, `incident`, `operational_event`, `config_change`, `lesson`, `decision`, `rule`, `preference`, `verification`, `deployment`, `other` | API auto-classifier |
+
+**`category`** reflects the message origin — a user message, an assistant response, or a paired Q&A exchange.
+
+**`memory_type`** reflects the semantic content — whether the memory describes a fact, an incident, a configuration change, etc.
+
+Both fields are used independently in search ranking. `memory_type` drives type-specific bonuses in hybrid search (e.g., lessons get +0.35/60 RRF boost). `category` is available for filtering but does not affect ranking weights.
+
 ## Architecture
 
 ```mermaid
