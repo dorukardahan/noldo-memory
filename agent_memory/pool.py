@@ -66,15 +66,24 @@ class StoragePool:
         return self._storages[key]
 
     def get_all_agents(self) -> List[str]:
-        """Discover all agent IDs from existing database files."""
+        """Discover all agent IDs from existing database files.
+
+        Skips zero-byte and very small (<4KB) databases that are empty
+        placeholders or failed creations, reducing unnecessary mmap and
+        connection overhead during bulk operations like decay/gc.
+        """
         agents: List[str] = []
         if (self.base_dir / "memory.sqlite").exists():
-            agents.append("main")
+            if (self.base_dir / "memory.sqlite").stat().st_size >= 4096:
+                agents.append("main")
         for f in sorted(self.base_dir.glob("memory-*.sqlite")):
             # Skip WAL/SHM and backup files
             if f.suffix != ".sqlite":
                 continue
             if ".bak" in f.name:
+                continue
+            # Skip empty/placeholder databases (< 4KB = no tables)
+            if f.stat().st_size < 4096:
                 continue
             agent_id = f.stem.replace("memory-", "", 1)
             if agent_id:

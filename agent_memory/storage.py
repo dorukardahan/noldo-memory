@@ -186,9 +186,27 @@ class MemoryStorage:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout = 5000")  # 5s wait on write contention
             self._conn.execute("PRAGMA foreign_keys=ON")
-            self._conn.execute("PRAGMA cache_size = -64000")  # 64MB page cache
-            self._conn.execute("PRAGMA mmap_size = 300000000")  # 300MB mmap
+
+            # Adaptive PRAGMA based on DB size — avoids over-allocating
+            # mmap and page cache for small per-agent databases.
+            try:
+                db_size_mb = Path(self.db_path).stat().st_size / (1024 * 1024)
+            except OSError:
+                db_size_mb = 0
+            if db_size_mb > 100:        # large DBs (main ~214MB)
+                mmap_size = 300_000_000  # 300MB
+                cache_kb = 64000         # 64MB
+            elif db_size_mb > 30:        # medium DBs (agent-asuman ~76MB)
+                mmap_size = 100_000_000  # 100MB
+                cache_kb = 32000         # 32MB
+            else:                        # small DBs (most agents 10-20MB)
+                mmap_size = 30_000_000   # 30MB
+                cache_kb = 8000          # 8MB
+            self._conn.execute(f"PRAGMA cache_size = -{cache_kb}")
+            self._conn.execute(f"PRAGMA mmap_size = {mmap_size}")
+
             self._conn.execute("PRAGMA temp_store = MEMORY")
+            self._conn.execute("PRAGMA wal_autocheckpoint = 500")  # checkpoint every ~2MB
             _load_vec_extension(self._conn)
             self._harden_db_permissions()
         return self._conn
@@ -252,7 +270,7 @@ class MemoryStorage:
         _add_col("memories", "pinned INTEGER DEFAULT 0", "pinned")
         _add_col("memories", "namespace TEXT DEFAULT 'default'", "namespace")
         _add_col("memories", "memory_type TEXT DEFAULT 'other'", "memory_type")
-        _add_col("memories", "lesson_status TEXT DEFAULT 'active'", "lesson_status")
+        _add_col("memories", "lesson_status TEXT DEFAULT NULL", "lesson_status")
         _add_col("memories", "lesson_scope TEXT", "lesson_scope")
         _add_col("memories", "resolved_at REAL", "resolved_at")
         # Provenance tracking
