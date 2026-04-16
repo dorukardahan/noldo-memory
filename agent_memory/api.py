@@ -571,6 +571,8 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
         time_range = (temporal[0].timestamp(), temporal[1].timestamp())
 
     all_results: List[Dict[str, Any]] = []
+    search_modes: Dict[str, str] = {}
+    degraded_agents: List[str] = []
     for agent_id in _storage_pool.get_all_agents():
         try:
             search = _get_search(agent_id, request=request)
@@ -582,6 +584,9 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 memory_type=req.memory_type,
                 agent=agent_id,
             )
+            search_modes[agent_id] = search.last_search_mode
+            if search.last_search_degraded:
+                degraded_agents.append(agent_id)
             for r in results:
                 d = r.to_dict()
                 d["agent"] = agent_id
@@ -597,14 +602,29 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
     all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
     all_results = all_results[: req.limit]
 
+    if any(mode == "full" for mode in search_modes.values()):
+        aggregate_search_mode = "full"
+    elif any(mode == "cache_hit" for mode in search_modes.values()):
+        aggregate_search_mode = "cache_hit"
+    elif search_modes:
+        aggregate_search_mode = "keyword_only"
+    else:
+        aggregate_search_mode = "full"
+
     response = {
         "query": req.query,
         "agent": "all",
         "count": len(all_results),
         "triggered": should_trigger(req.query),
+        "search_mode": aggregate_search_mode,
         "results": all_results,
         "cross_agent": True,
     }
+    if search_modes:
+        response["per_agent_search_mode"] = search_modes
+    if degraded_agents:
+        response["degraded"] = True
+        response["degraded_agents"] = degraded_agents
     if time_range is not None:
         response["time_range"] = {
             "start": time_range[0],

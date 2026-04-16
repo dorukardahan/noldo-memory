@@ -269,6 +269,19 @@ class TestRecall:
             assert "score" in result
             assert "confidence_tier" in result
 
+    async def test_recall_all_reports_search_mode(self, client):
+        await client.post("/v1/store", json={"text": "Ana agent kaydı"})
+        await client.post("/v1/store", json={"text": "İkinci agent kaydı", "agent": "worker"})
+
+        resp = await client.post("/v1/recall", json={"query": "kayıt", "agent": "all", "limit": 5})
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert data["cross_agent"] is True
+        assert data["search_mode"] in {"full", "cache_hit", "keyword_only"}
+        assert isinstance(data["per_agent_search_mode"], dict)
+        assert data["per_agent_search_mode"]
+
 
 # ---------------------------------------------------------------------------
 # /v1/capture

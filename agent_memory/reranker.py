@@ -20,15 +20,36 @@ import threading
 import time
 from typing import Dict, List, Optional, Tuple
 
-try:  # optional dependency
-    from sentence_transformers import CrossEncoder  # type: ignore
-except Exception:  # pragma: no cover - dependency may be missing in some envs
-    CrossEncoder = None  # type: ignore
+CrossEncoder = None  # type: ignore[assignment]
+torch = None  # type: ignore[assignment]
+_DEPS_LOADED = False
+_DEPS_LOCK = threading.Lock()
 
-try:  # optional dependency
-    import torch  # type: ignore
-except Exception:  # pragma: no cover
-    torch = None  # type: ignore
+
+def _load_optional_deps() -> None:
+    """Import heavy reranker deps only when local cross-encoder scoring is used."""
+    global CrossEncoder, torch, _DEPS_LOADED
+
+    if _DEPS_LOADED:
+        return
+
+    with _DEPS_LOCK:
+        if _DEPS_LOADED:
+            return
+
+        try:  # optional dependency
+            from sentence_transformers import CrossEncoder as _CrossEncoder  # type: ignore
+        except Exception:  # pragma: no cover - dependency may be missing in some envs
+            _CrossEncoder = None  # type: ignore[assignment]
+
+        try:  # optional dependency
+            import torch as _torch  # type: ignore
+        except Exception:  # pragma: no cover
+            _torch = None  # type: ignore[assignment]
+
+        CrossEncoder = _CrossEncoder
+        torch = _torch
+        _DEPS_LOADED = True
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +100,9 @@ class CrossEncoderReranker:
 
     @property
     def available(self) -> bool:
+        if not self.enabled:
+            return False
+        _load_optional_deps()
         return bool(self.enabled and CrossEncoder is not None)
 
     def warmup(self) -> bool:
