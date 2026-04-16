@@ -2,6 +2,7 @@
   "name": "@dorukardahan/noldo-memory-hooks",
   "version": "1.4.0",
   "private": true,
+  "type": "module",
   "openclaw": {
     "hooks": [
       "./after-tool-call",
