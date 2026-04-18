@@ -86,6 +86,20 @@ llama-server --model models/Qwen3-Embedding-4B-Q8_0.gguf \
 # AGENT_MEMORY_DIMENSIONS=2560
 ```
 
+Optional hosted reranker for better top-k ordering without loading a local
+cross-encoder model:
+
+```bash
+# In .env:
+AGENT_MEMORY_RERANKER_API_ENABLED=true
+AGENT_MEMORY_RERANKER_API_MODEL=cohere/rerank-4-pro
+AGENT_MEMORY_RERANKER_API_KEY_FILE=$HOME/.openrouter_key
+```
+
+When the hosted reranker is available, NoldoMem skips local reranker prewarm and
+two-pass background reranking. If the key or endpoint is missing, it falls back
+to the local cross-encoder path.
+
 ### Step 3: Start NoldoMem
 
 ```bash

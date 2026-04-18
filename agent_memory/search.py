@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import Config, load_config
 from .metrics import collector
-from .reranker import CrossEncoderReranker
+from .reranker import BaseReranker
 from .storage import MemoryStorage
 from .triggers import get_confidence_tier
 
@@ -300,9 +300,9 @@ class HybridSearch:
         storage: MemoryStorage,
         embedder: Optional[Any] = None,  # OpenRouterEmbeddings
         weights: Optional[SearchWeights] = None,
-        reranker: Optional[CrossEncoderReranker] = None,
+        reranker: Optional[BaseReranker] = None,
         rerank_weight: float = 0.20,
-        bg_reranker: Optional[CrossEncoderReranker] = None,
+        bg_reranker: Optional[BaseReranker] = None,
         bg_two_pass_enabled: bool = False,
         bg_rerank_weight: float = 0.35,
     ) -> None:

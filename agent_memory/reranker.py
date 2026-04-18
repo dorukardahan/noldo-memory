@@ -1,4 +1,4 @@
-"""Cross-encoder reranker for high-precision top-K ordering.
+"""Reranker backends for high-precision top-K ordering.
 
 Optional-by-design:
 - If sentence-transformers is unavailable or model load fails,
@@ -9,16 +9,20 @@ Includes:
 - lazy model load + startup prewarm support
 - thread-safe inference lock
 - TTL score cache
+- optional API reranker backend for operators who prefer hosted rerank
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import math
+import os
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+import urllib.request
+from typing import Dict, List, Optional, Protocol, Tuple
 
 try:  # optional dependency
     from sentence_transformers import CrossEncoder  # type: ignore
@@ -31,6 +35,19 @@ except Exception:  # pragma: no cover
     torch = None  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+
+class BaseReranker(Protocol):
+    """Common interface shared by local and API rerankers."""
+
+    top_k: int
+
+    @property
+    def available(self) -> bool: ...
+
+    def warmup(self) -> bool: ...
+
+    def score(self, query: str, docs: List[str], doc_ids: Optional[List[str]] = None) -> List[float]: ...
 
 
 class CrossEncoderReranker:
@@ -196,3 +213,150 @@ class CrossEncoderReranker:
 
         # Fill any None defensively
         return [float(s or 0.0) for s in scores]
+
+
+class APIReranker:
+    """Hosted reranker via an OpenAI-compatible rerank endpoint.
+
+    Scores are expected to arrive in ``[0, 1]`` and are clamped defensively.
+    Empty list means the caller should fall back to lexical/no rerank.
+    """
+
+    def __init__(
+        self,
+        enabled: bool = True,
+        api_key: str = "",
+        api_key_file: str = "",
+        api_url: str = "https://openrouter.ai/api/v1/rerank",
+        model: str = "cohere/rerank-4-pro",
+        top_k: int = 20,
+        cache_ttl_sec: int = 600,
+        cache_max: int = 5000,
+        max_doc_chars: int = 1000,
+        timeout_sec: int = 10,
+    ) -> None:
+        self.enabled = enabled
+        self.model = model
+        self.api_url = (api_url or "").strip()
+        self.top_k = max(1, int(top_k))
+        self.cache_ttl_sec = max(30, int(cache_ttl_sec))
+        self.cache_max = max(100, int(cache_max))
+        self.max_doc_chars = max(200, int(max_doc_chars))
+        self.timeout_sec = max(3, int(timeout_sec))
+        self._cache: Dict[str, Tuple[float, float]] = {}
+
+        self.api_key = (api_key or "").strip()
+        if not self.api_key:
+            self.api_key = os.environ.get("AGENT_MEMORY_RERANKER_API_KEY", "").strip()
+        if not self.api_key:
+            key_path = (api_key_file or "").strip() or os.path.expanduser("~/.openrouter_key")
+            try:
+                expanded_key_path = os.path.expanduser(os.path.expandvars(key_path))
+                with open(expanded_key_path, "r", encoding="utf-8") as fh:
+                    self.api_key = fh.read().strip()
+            except OSError:
+                self.api_key = ""
+
+        if self.enabled and self.api_key:
+            logger.info("API reranker configured: model=%s url=%s", self.model, self.api_url)
+        elif self.enabled:
+            logger.warning("API reranker enabled but no API key was found")
+
+    @property
+    def available(self) -> bool:
+        return bool(self.enabled and self.api_key and self.api_url)
+
+    def warmup(self) -> bool:
+        """Hosted rerankers do not need model prewarm."""
+        return self.available
+
+    def _cache_key(self, query: str, doc_id: Optional[str], text: str) -> str:
+        h = hashlib.sha1()
+        h.update(query.encode("utf-8", errors="ignore"))
+        h.update(b"\n")
+        if doc_id:
+            h.update(str(doc_id).encode("utf-8", errors="ignore"))
+        else:
+            h.update(text.encode("utf-8", errors="ignore"))
+        return h.hexdigest()
+
+    def _cache_get(self, key: str) -> Optional[float]:
+        item = self._cache.get(key)
+        if item is None:
+            return None
+        score, ts = item
+        if time.time() - ts > self.cache_ttl_sec:
+            self._cache.pop(key, None)
+            return None
+        return score
+
+    def _cache_put(self, key: str, score: float) -> None:
+        self._cache[key] = (score, time.time())
+        if len(self._cache) > self.cache_max:
+            n_drop = max(1, int(self.cache_max * 0.2))
+            oldest = sorted(self._cache.items(), key=lambda kv: kv[1][1])[:n_drop]
+            for k, _ in oldest:
+                self._cache.pop(k, None)
+
+    def score(self, query: str, docs: List[str], doc_ids: Optional[List[str]] = None) -> List[float]:
+        if not docs or not self.available:
+            return []
+
+        docs_cut = docs[: self.top_k]
+        ids_cut = (doc_ids or [])[: len(docs_cut)]
+        to_score_idx: List[int] = []
+        docs_to_score: List[str] = []
+        scores: List[Optional[float]] = [None] * len(docs_cut)
+
+        for i, txt in enumerate(docs_cut):
+            txt_norm = (txt or "")[: self.max_doc_chars]
+            doc_id = ids_cut[i] if i < len(ids_cut) else None
+            key = self._cache_key(query, doc_id=doc_id, text=txt_norm)
+            cached = self._cache_get(key)
+            if cached is not None:
+                scores[i] = cached
+            else:
+                to_score_idx.append(i)
+                docs_to_score.append(txt_norm)
+
+        if docs_to_score:
+            try:
+                payload = json.dumps({
+                    "model": self.model,
+                    "query": query,
+                    "documents": docs_to_score,
+                }).encode("utf-8")
+                request = urllib.request.Request(
+                    self.api_url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(request, timeout=self.timeout_sec) as response:
+                    body = json.loads(response.read().decode("utf-8"))
+            except Exception as exc:
+                logger.warning("API reranker call failed: %s", exc)
+                return []
+
+            if "error" in body:
+                logger.warning("API reranker error: %s", body["error"])
+                return []
+
+            api_scores: Dict[int, float] = {}
+            for item in body.get("results", []):
+                idx = item.get("index")
+                score = item.get("relevance_score")
+                if idx is not None and score is not None:
+                    api_scores[int(idx)] = max(0.0, min(1.0, float(score)))
+
+            for local_pos, original_idx in enumerate(to_score_idx):
+                normalized = api_scores.get(local_pos, 0.0)
+                scores[original_idx] = normalized
+                doc_id = ids_cut[original_idx] if original_idx < len(ids_cut) else None
+                doc_text = (docs_cut[original_idx] or "")[: self.max_doc_chars]
+                self._cache_put(self._cache_key(query, doc_id=doc_id, text=doc_text), normalized)
+
+        return [float(score or 0.0) for score in scores]
