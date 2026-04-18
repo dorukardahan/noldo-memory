@@ -52,7 +52,7 @@ from .embed_worker import EmbedWorker
 from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
 from .pool import StoragePool
-from .reranker import CrossEncoderReranker
+from .reranker import APIReranker, BaseReranker, CrossEncoderReranker
 from .search import HybridSearch, SearchWeights
 from .storage import MemoryStorage
 from .rules import RuleDetector
@@ -75,8 +75,8 @@ _start_time: float = 0.0
 _search_cache: Dict[str, HybridSearch] = {}
 _kg_cache: Dict[str, KnowledgeGraph] = {}
 _search_weights: Optional[SearchWeights] = None
-_reranker: Optional[CrossEncoderReranker] = None
-_bg_reranker: Optional[CrossEncoderReranker] = None
+_reranker: Optional[BaseReranker] = None
+_bg_reranker: Optional[BaseReranker] = None
 _rule_detector = RuleDetector()
 
 # Audit logging handler (file-based, graceful fallback for CI/test)
@@ -223,43 +223,62 @@ async def lifespan(app: FastAPI):
         importance=_config.weight_importance,
     )
 
-    _reranker = CrossEncoderReranker(
-        enabled=_config.reranker_enabled,
-        model_name=_config.reranker_model,
-        top_k=_config.reranker_top_k,
-        torch_threads=_config.reranker_threads,
-        max_doc_chars=_config.reranker_max_doc_chars,
-    )
-
-    if _config.reranker_enabled and _config.reranker_prewarm:
-        t0 = time.time()
-        ok = _reranker.warmup()
-        dt = round(time.time() - t0, 2)
-        if ok:
-            logger.info("Primary reranker prewarmed in %ss", dt)
-        else:
-            logger.warning("Primary reranker prewarm failed in %ss (will fallback)", dt)
-
+    _reranker = None
     _bg_reranker = None
-    if _config.reranker_two_pass_enabled:
-        primary_model = CrossEncoderReranker._resolve_model_name(_config.reranker_model)
-        bg_model = CrossEncoderReranker._resolve_model_name(_config.reranker_two_pass_model)
-        if bg_model != primary_model:
-            _bg_reranker = CrossEncoderReranker(
-                enabled=True,
-                model_name=_config.reranker_two_pass_model,
-                top_k=_config.reranker_two_pass_top_k,
-                torch_threads=_config.reranker_two_pass_threads,
-                max_doc_chars=_config.reranker_two_pass_max_doc_chars,
-            )
-            if _config.reranker_two_pass_prewarm:
-                t0 = time.time()
-                ok = _bg_reranker.warmup()
-                dt = round(time.time() - t0, 2)
-                if ok:
-                    logger.info("Two-pass background reranker prewarmed in %ss", dt)
-                else:
-                    logger.warning("Two-pass background prewarm failed in %ss", dt)
+    if _config.reranker_enabled and _config.reranker_api_enabled:
+        api_reranker = APIReranker(
+            enabled=True,
+            api_key=_config.reranker_api_key,
+            api_key_file=_config.reranker_api_key_file,
+            api_url=_config.reranker_api_url,
+            model=_config.reranker_api_model,
+            top_k=_config.reranker_top_k,
+            max_doc_chars=_config.reranker_max_doc_chars,
+            timeout_sec=_config.reranker_api_timeout,
+        )
+        if api_reranker.available:
+            _reranker = api_reranker
+            logger.info("API reranker ready: %s", _config.reranker_api_model)
+        else:
+            logger.warning("API reranker unavailable, falling back to local cross-encoder")
+
+    if _reranker is None:
+        _reranker = CrossEncoderReranker(
+            enabled=_config.reranker_enabled,
+            model_name=_config.reranker_model,
+            top_k=_config.reranker_top_k,
+            torch_threads=_config.reranker_threads,
+            max_doc_chars=_config.reranker_max_doc_chars,
+        )
+
+        if _config.reranker_enabled and _config.reranker_prewarm:
+            t0 = time.time()
+            ok = _reranker.warmup()
+            dt = round(time.time() - t0, 2)
+            if ok:
+                logger.info("Primary reranker prewarmed in %ss", dt)
+            else:
+                logger.warning("Primary reranker prewarm failed in %ss (will fallback)", dt)
+
+        if _config.reranker_two_pass_enabled:
+            primary_model = CrossEncoderReranker._resolve_model_name(_config.reranker_model)
+            bg_model = CrossEncoderReranker._resolve_model_name(_config.reranker_two_pass_model)
+            if bg_model != primary_model:
+                _bg_reranker = CrossEncoderReranker(
+                    enabled=True,
+                    model_name=_config.reranker_two_pass_model,
+                    top_k=_config.reranker_two_pass_top_k,
+                    torch_threads=_config.reranker_two_pass_threads,
+                    max_doc_chars=_config.reranker_two_pass_max_doc_chars,
+                )
+                if _config.reranker_two_pass_prewarm:
+                    t0 = time.time()
+                    ok = _bg_reranker.warmup()
+                    dt = round(time.time() - t0, 2)
+                    if ok:
+                        logger.info("Two-pass background reranker prewarmed in %ss", dt)
+                    else:
+                        logger.warning("Two-pass background prewarm failed in %ss", dt)
 
     _start_time = time.time()
 
@@ -285,20 +304,30 @@ async def lifespan(app: FastAPI):
         logger.info("Embed worker disabled via AGENT_MEMORY_EMBED_WORKER_ENABLED")
 
     agents = _storage_pool.get_all_agents()
+    reranker_mode = "off"
+    reranker_name = "-"
+    if _reranker is not None and _config.reranker_enabled:
+        if isinstance(_reranker, APIReranker):
+            reranker_mode = "api"
+            reranker_name = _config.reranker_api_model
+        else:
+            reranker_mode = "local"
+            reranker_name = _config.reranker_model
+
     logger.info(
         "Memory API ready -- base_dir=%s agents=%s emb_model=%s reranker=%s/%s top_k=%s threads=%s max_chars=%s prewarm=%s two_pass=%s bg_model=%s bg_top_k=%s",
         base_dir,
         agents,
         _config.embedding_model,
-        "on" if _config.reranker_enabled else "off",
-        _config.reranker_model,
+        reranker_mode,
+        reranker_name,
         _config.reranker_top_k,
         _config.reranker_threads,
         _config.reranker_max_doc_chars,
         _config.reranker_prewarm,
-        _config.reranker_two_pass_enabled,
-        _config.reranker_two_pass_model,
-        _config.reranker_two_pass_top_k,
+        _bg_reranker is not None,
+        _config.reranker_two_pass_model if _bg_reranker is not None else "-",
+        _config.reranker_two_pass_top_k if _bg_reranker is not None else 0,
     )
 
     # Start warmup background task
