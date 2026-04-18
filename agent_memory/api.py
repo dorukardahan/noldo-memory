@@ -237,8 +237,15 @@ async def lifespan(app: FastAPI):
             timeout_sec=_config.reranker_api_timeout,
         )
         if api_reranker.available:
+            api_reranker.fallback_reranker = CrossEncoderReranker(
+                enabled=True,
+                model_name=_config.reranker_model,
+                top_k=_config.reranker_top_k,
+                torch_threads=_config.reranker_threads,
+                max_doc_chars=_config.reranker_max_doc_chars,
+            )
             _reranker = api_reranker
-            logger.info("API reranker ready: %s", _config.reranker_api_model)
+            logger.info("API reranker ready: %s (runtime local fallback enabled)", _config.reranker_api_model)
         else:
             logger.warning("API reranker unavailable, falling back to local cross-encoder")
 

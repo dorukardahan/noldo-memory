@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+import urllib.error
+import urllib.request
 
 import agent_memory.api as api_module
 from agent_memory.config import Config, load_config
@@ -62,6 +64,37 @@ def test_api_reranker_requires_non_empty_endpoint():
     assert reranker.available is False
 
 
+def test_api_reranker_runtime_failure_uses_local_fallback(monkeypatch):
+    class StubFallback:
+        top_k = 20
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        def warmup(self) -> bool:
+            return True
+
+        def score(self, query, docs, doc_ids=None):
+            return [0.41 for _ in docs]
+
+    def failing_urlopen(*args, **kwargs):
+        raise urllib.error.URLError("boom")
+
+    monkeypatch.setattr(urllib.request, "urlopen", failing_urlopen)
+
+    reranker = APIReranker(
+        enabled=True,
+        api_key="test-secret-key",
+        api_url="https://example.invalid/rerank",
+        fallback_reranker=StubFallback(),
+    )
+
+    scores = reranker.score("hello", ["doc a", "doc b"], ["1", "2"])
+
+    assert scores == [0.41, 0.41]
+
+
 @pytest.mark.asyncio
 async def test_lifespan_prefers_api_reranker_when_available(tmp_path, monkeypatch):
     api_instances = []
@@ -71,6 +104,7 @@ async def test_lifespan_prefers_api_reranker_when_available(tmp_path, monkeypatc
         def __init__(self, **kwargs):
             self.available = True
             self.top_k = kwargs["top_k"]
+            self.fallback_reranker = kwargs.get("fallback_reranker")
             api_instances.append(kwargs)
 
         def warmup(self) -> bool:
@@ -123,7 +157,8 @@ async def test_lifespan_prefers_api_reranker_when_available(tmp_path, monkeypatc
         assert isinstance(api_module._reranker, StubApiReranker)
         assert api_module._bg_reranker is None
         assert len(api_instances) == 1
-        assert cross_instances == []
+        assert len(cross_instances) == 1
+        assert isinstance(api_module._reranker.fallback_reranker, StubCrossReranker)
 
 
 @pytest.mark.asyncio

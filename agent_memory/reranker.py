@@ -234,6 +234,7 @@ class APIReranker:
         cache_max: int = 5000,
         max_doc_chars: int = 1000,
         timeout_sec: int = 10,
+        fallback_reranker: Optional[BaseReranker] = None,
     ) -> None:
         self.enabled = enabled
         self.model = model
@@ -244,6 +245,7 @@ class APIReranker:
         self.max_doc_chars = max(200, int(max_doc_chars))
         self.timeout_sec = max(3, int(timeout_sec))
         self._cache: Dict[str, Tuple[float, float]] = {}
+        self.fallback_reranker = fallback_reranker
 
         self.api_key = (api_key or "").strip()
         if not self.api_key:
@@ -269,6 +271,18 @@ class APIReranker:
     def warmup(self) -> bool:
         """Hosted rerankers do not need model prewarm."""
         return self.available
+
+    def _score_with_fallback(
+        self, query: str, docs: List[str], doc_ids: Optional[List[str]] = None
+    ) -> List[float]:
+        if self.fallback_reranker is None:
+            return []
+        logger.warning("API reranker runtime fallback engaged; using local cross-encoder")
+        try:
+            return self.fallback_reranker.score(query, docs, doc_ids)
+        except Exception as exc:
+            logger.warning("Fallback reranker failed: %s", exc)
+            return []
 
     def _cache_key(self, query: str, doc_id: Optional[str], text: str) -> str:
         h = hashlib.sha1()
@@ -299,8 +313,10 @@ class APIReranker:
                 self._cache.pop(k, None)
 
     def score(self, query: str, docs: List[str], doc_ids: Optional[List[str]] = None) -> List[float]:
-        if not docs or not self.available:
+        if not docs:
             return []
+        if not self.available:
+            return self._score_with_fallback(query, docs, doc_ids)
 
         docs_cut = docs[: self.top_k]
         ids_cut = (doc_ids or [])[: len(docs_cut)]
@@ -339,11 +355,11 @@ class APIReranker:
                     body = json.loads(response.read().decode("utf-8"))
             except Exception as exc:
                 logger.warning("API reranker call failed: %s", exc)
-                return []
+                return self._score_with_fallback(query, docs_cut, ids_cut)
 
             if "error" in body:
                 logger.warning("API reranker error: %s", body["error"])
-                return []
+                return self._score_with_fallback(query, docs_cut, ids_cut)
 
             api_scores: Dict[int, float] = {}
             for item in body.get("results", []):
