@@ -237,7 +237,7 @@ class APIReranker:
     ) -> None:
         self.enabled = enabled
         self.model = model
-        self.api_url = api_url
+        self.api_url = (api_url or "").strip()
         self.top_k = max(1, int(top_k))
         self.cache_ttl_sec = max(30, int(cache_ttl_sec))
         self.cache_max = max(100, int(cache_max))
@@ -251,7 +251,8 @@ class APIReranker:
         if not self.api_key:
             key_path = (api_key_file or "").strip() or os.path.expanduser("~/.openrouter_key")
             try:
-                with open(os.path.expanduser(key_path), "r", encoding="utf-8") as fh:
+                expanded_key_path = os.path.expanduser(os.path.expandvars(key_path))
+                with open(expanded_key_path, "r", encoding="utf-8") as fh:
                     self.api_key = fh.read().strip()
             except OSError:
                 self.api_key = ""
@@ -263,7 +264,7 @@ class APIReranker:
 
     @property
     def available(self) -> bool:
-        return bool(self.enabled and self.api_key)
+        return bool(self.enabled and self.api_key and self.api_url)
 
     def warmup(self) -> bool:
         """Hosted rerankers do not need model prewarm."""

@@ -37,6 +37,31 @@ def test_api_reranker_reads_key_file(tmp_path):
     assert reranker.api_key == "test-secret-key"
 
 
+def test_api_reranker_expands_env_vars_in_key_file_path(tmp_path, monkeypatch):
+    key_file = tmp_path / "rerank-env.key"
+    key_file.write_text("env-secret-key\n", encoding="utf-8")
+    monkeypatch.setenv("RERANK_KEY_PATH", str(key_file))
+
+    reranker = APIReranker(
+        enabled=True,
+        api_key="",
+        api_key_file="$RERANK_KEY_PATH",
+    )
+
+    assert reranker.available is True
+    assert reranker.api_key == "env-secret-key"
+
+
+def test_api_reranker_requires_non_empty_endpoint():
+    reranker = APIReranker(
+        enabled=True,
+        api_key="test-secret-key",
+        api_url="",
+    )
+
+    assert reranker.available is False
+
+
 @pytest.mark.asyncio
 async def test_lifespan_prefers_api_reranker_when_available(tmp_path, monkeypatch):
     api_instances = []
