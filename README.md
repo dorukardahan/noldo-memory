@@ -1,7 +1,7 @@
 # NoldoMem — Long-Term Memory for OpenClaw AI Agents
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-187%20passing-brightgreen.svg)](.github/workflows/ci.yml)
+[![CI](https://github.com/dorukardahan/noldo-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/dorukardahan/noldo-memory/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://python.org)
 
 > Long-term memory for [OpenClaw](https://github.com/openclaw/openclaw) AI agents. Named after the Noldor — Tolkien's elves renowned for deep knowledge and craft.
@@ -374,8 +374,8 @@ All config via environment variables. See [`.env.example`](./.env.example) for f
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest tests/ -v   # 187 tests
-ruff check agent_memory/     # lint
+python -m pytest tests/ -v
+ruff check agent_memory/
 ```
 
 ## FAQ
@@ -390,7 +390,7 @@ Roughly 1-2 KB per memory (text + metadata + embedding vector). 10,000 memories 
 NoldoMem continues to work in degraded mode — keyword search (BM25) still works, but semantic search returns no results. The `/v1/health` endpoint reports `"embedding": false`. Memories stored without embeddings get auto-embedded when the server comes back (via the backfill worker).
 
 **Can multiple agents share memories?**
-Each agent has its own isolated SQLite database by design. Use `?agent=<id>` to route requests. Cross-agent search is not supported — this is intentional for safety and privacy.
+Each agent has its own isolated SQLite database by design. Use `?agent=<id>` to route requests. Shared reads are explicit opt-in: `agent=all` enables cross-agent recall/search style operations, while writes still stay scoped to one agent or namespace for safety.
 
 **How do I force a memory type?**
 Pass `"memory_type": "rule"` (or fact/preference/lesson/conversation) in your `/v1/store` request to override auto-classification.
