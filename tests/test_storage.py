@@ -47,6 +47,20 @@ class TestMemoryCRUD:
         assert mem is not None
         assert mem["vector_rowid"] is None
 
+    def test_store_normalizes_unknown_memory_type(self, storage):
+        mid = storage.store_memory(text="deploy failed", memory_type="incident")
+        mem = storage.get_memory(mid)
+        assert mem is not None
+        assert mem["memory_type"] == "other"
+
+    def test_batch_normalizes_unknown_memory_type(self, storage):
+        [mid] = storage.store_memories_batch([
+            {"text": "config changed", "memory_type": "config_change"},
+        ])
+        mem = storage.get_memory(mid)
+        assert mem is not None
+        assert mem["memory_type"] == "other"
+
 
 class TestVectorSearch:
     def test_basic_search(self, storage):

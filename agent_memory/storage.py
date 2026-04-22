@@ -22,6 +22,26 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+VALID_MEMORY_TYPES = frozenset({
+    "fact",
+    "preference",
+    "rule",
+    "conversation",
+    "lesson",
+    "other",
+})
+
+
+def normalize_memory_type(value: Any) -> str:
+    """Return the canonical public memory_type value.
+
+    Operational labels such as "incident" or "deployment" belong in category,
+    source, namespace, or the memory text itself. The memory_type column stays
+    intentionally small so API filters, search bonuses, and DB hygiene agree.
+    """
+    memory_type = str(value or "other").strip().lower()
+    return memory_type if memory_type in VALID_MEMORY_TYPES else "other"
+
 # ---------------------------------------------------------------------------
 # sqlite-vec extension loading
 # ---------------------------------------------------------------------------
@@ -349,6 +369,7 @@ class MemoryStorage:
         created_at = now if created_at is None else float(created_at)
         updated_at = created_at if updated_at is None else float(updated_at)
         last_accessed_at = created_at if last_accessed_at is None else float(last_accessed_at)
+        memory_type = normalize_memory_type(memory_type)
 
         vector_rowid: Optional[int] = None
         if vector is not None:
@@ -975,7 +996,7 @@ class MemoryStorage:
                 text = item["text"]
                 vector = item.get("vector")
                 category = item.get("category", "other")
-                memory_type = item.get("memory_type", "other")
+                memory_type = normalize_memory_type(item.get("memory_type", "other"))
                 importance = item.get("importance", 0.5)
                 source = item.get("source_session")
                 namespace = item.get("namespace", "default")

@@ -115,8 +115,6 @@ def _lexical_overlap(query: str, text: str) -> float:
 _MEMORY_TYPE_KEYWORDS: Dict[str, Tuple[str, ...]] = {
     # "hata" removed — too common in non-lesson contexts (API errors, bug reports)
     "lesson": ("lesson", "lessons", "ders", "dersler", "öğren", "mistake", "learning", "hatadan öğren"),
-    "decision": ("karar", "decision", "decided", "onaylandı"),
-    "config_change": ("config", "ayar", "setting", "değişiklik"),
     "preference": ("tercih", "preference", "prefer"),
     "rule": ("kural", "rule", "policy"),
 }
@@ -149,10 +147,6 @@ def _detect_memory_type_intent(query: str) -> Optional[str]:
         return "lesson"
     if _query_mentions_memory_type(query, "rule"):
         return "rule"
-    if _query_mentions_memory_type(query, "decision"):
-        return "decision"
-    if _query_mentions_memory_type(query, "config_change"):
-        return "config_change"
     if _query_mentions_memory_type(query, "preference"):
         return "preference"
     return None
@@ -813,14 +807,8 @@ class HybridSearch:
         memory_type_bonus_weights = {
             # Keep bonus on the same order of magnitude as fused RRF scores.
             "lesson": 0.35 / 60.0,
-            "incident": 0.004,
-            "operational_event": 0.003,
-            "deployment": 0.003,
-            "config_change": 0.25 / 60.0,
-            "verification": 0.003,
             "fact": 0.002,
             "rule": 0.30 / 60.0,
-            "decision": 0.25 / 60.0,
             "preference": 0.20 / 60.0,
         }
         # Inferred intent boost: when intent detection found a type but we're not

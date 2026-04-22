@@ -6,6 +6,9 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Keep `memory_type` canonical across API, ingest, storage, search, and docs. Unknown or operational labels are normalized to `other` instead of persisting drift such as `incident`, `deployment`, or `config_change`.
+
 ### Changed
 - Project rebranded from "asuman-memory" to "NoldoMem" (`noldo-memory`)
 - GitHub repo: dorukardahan/noldo-memory

@@ -257,14 +257,14 @@ NoldoMem uses two complementary classification fields:
 
 | Field | Purpose | Values | Set by |
 |-------|---------|--------|--------|
-| `category` | **Who wrote it** (source role) | `user`, `assistant`, `qa_pair`, `decision`, `lesson`, `rule`, `other` | Hook at capture time |
-| `memory_type` | **What kind of information** | `fact`, `conversation`, `incident`, `operational_event`, `config_change`, `lesson`, `decision`, `rule`, `preference`, `verification`, `deployment`, `other` | API auto-classifier |
+| `category` | **Who wrote it / where it came from** | `user`, `assistant`, `qa_pair`, `decision`, `lesson`, `rule`, `other` | Hook at capture time |
+| `memory_type` | **Canonical semantic type** | `fact`, `preference`, `rule`, `conversation`, `lesson`, `other` | API auto-classifier |
 
-**`category`** reflects the message origin — a user message, an assistant response, or a paired Q&A exchange.
+**`category`** reflects the message origin or operational label — a user message, an assistant response, a paired Q&A exchange, or a hook-provided label such as `decision`.
 
-**`memory_type`** reflects the semantic content — whether the memory describes a fact, an incident, a configuration change, etc.
+**`memory_type`** stays intentionally small so API validation, DB filters, and search ranking never drift apart. Operational concepts such as incidents, deployments, config changes, and decisions should remain in `category`, `source`, `namespace`, or the memory text itself, not in `memory_type`.
 
-Both fields are used independently in search ranking. `memory_type` drives type-specific bonuses in hybrid search (e.g., lessons get +0.35/60 RRF boost). `category` is available for filtering but does not affect ranking weights.
+Both fields are used independently. `memory_type` drives type-specific bonuses in hybrid search (e.g., lessons get +0.35/60 RRF boost). `category` is available for reporting and operational labeling but does not expand the public `memory_type` enum.
 
 ## Architecture
 

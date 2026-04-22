@@ -66,16 +66,14 @@ score = Σ weight_i * (1 / (k + rank_i))   where k = 60
 |------|-------------|----------------------|
 | lesson | 0.0058 | 0.0117 (2x, min 0.012) |
 | rule | 0.0050 | 0.0100 |
-| config_change | 0.0042 | 0.0083 |
-| decision | 0.0042 | 0.0083 |
 | preference | 0.0033 | 0.0067 |
-| incident | 0.004 | 0.004 |
 | fact | 0.002 | 0.002 |
 
 ### Intent Detection
 - Explicit `memory_type` param → hard filter at DB level
 - Inferred intent (keyword detection) → soft boost only, cross-type preserved
 - Keywords use word boundary matching (regex)
+- `memory_type` is limited to `fact`, `preference`, `rule`, `conversation`, `lesson`, and `other`. Operational labels such as incidents or deployments should stay in `category`, `source`, `namespace`, or text.
 
 ### Typical Score Ranges
 | Scenario | Expected Score |

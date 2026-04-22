@@ -364,47 +364,33 @@ def normalize_memory_text(text: str) -> str:
 
 
 def classify_memory_type(text: str) -> str:
-    """Classify memory text into operational types.
+    """Classify memory text into the canonical public memory_type set.
 
-    Decision order (first match wins):
-    0. decision — explicit decisions (KARAR, [Decision], decided, onaylandı)
-    1. lesson — behavioral corrections, feedback
-    2. incident — failures, crashes, OOM, timeouts
-    3. config_change — credential/config/env updates
-    4. operational_event — service restarts, migrations
-    5. deployment — releases, merges, CI, prod pushes
-    6. verification — health checks, confirmations
-    7. fact — entity names, factual statements
-    8. preference — user preferences
-    9. rule — instructions, directives
-    10. conversation — fallback
+    The public API intentionally keeps memory_type small:
+    fact, preference, rule, conversation, lesson, other.
+    Operational labels such as incidents, deployments, config changes, and
+    decisions are not memory_type values; they remain category/source/text
+    signals so DB filters and API validation do not drift apart.
     """
     content = (text or "").strip()
     if not content:
         return "conversation"
 
-    # Decision detection first — explicit decision markers
-    if re.search(r'\[Decision\]|\bKARAR\b|\bdecided\b|\bonaylandı\b|\bkarar(?:laştır|veril)', content, re.IGNORECASE):
-        return "decision"
-
-    # Lesson detection (highest priority after decision — behavioral corrections)
+    # Lesson detection has priority among canonical types.
     if _LESSON_KEYWORDS_RE.search(content):
         return "lesson"
-    # Incident — failures, crashes (before config to catch "config failed")
-    if _is_incident(content):
-        return "incident"
-    # Config/credential changes
-    if _is_config_change(content):
-        return "config_change"
-    # Operational events — service ops, restarts, migrations
-    if _is_operational_event(content):
-        return "operational_event"
-    # Deployments — releases, merges, CI
-    if _is_deployment(content):
-        return "deployment"
-    # Verification — health checks, confirmations
-    if _is_verification(content):
-        return "verification"
+
+    # Non-canonical operational signals are useful, but not memory_type values.
+    if (
+        re.search(r'\[Decision\]|\bKARAR\b|\bdecided\b|\bonaylandı\b|\bkarar(?:laştır|veril)', content, re.IGNORECASE)
+        or _is_incident(content)
+        or _is_config_change(content)
+        or _is_operational_event(content)
+        or _is_deployment(content)
+        or _is_verification(content)
+    ):
+        return "other"
+
     # Rule/instruction content should outrank factual patterns in direct stores
     if rule_detector.detect(content) or rule_detector.check_safeword(content):
         return "rule"

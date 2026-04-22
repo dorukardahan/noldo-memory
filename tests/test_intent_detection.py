@@ -18,14 +18,14 @@ class TestQueryMentionsMemoryType:
     def test_lesson_ogren_matches(self):
         assert _query_mentions_memory_type("hatadan öğren", "lesson") is True
 
-    def test_config_keyword_matches(self):
-        assert _query_mentions_memory_type("config", "config_change") is True
+    def test_config_keyword_is_not_public_memory_type(self):
+        assert _query_mentions_memory_type("config", "config_change") is False
 
-    def test_ayar_keyword_matches(self):
-        assert _query_mentions_memory_type("ayar", "config_change") is True
+    def test_ayar_keyword_is_not_public_memory_type(self):
+        assert _query_mentions_memory_type("ayar", "config_change") is False
 
-    def test_decision_keyword_matches(self):
-        assert _query_mentions_memory_type("karar", "decision") is True
+    def test_decision_keyword_is_not_public_memory_type(self):
+        assert _query_mentions_memory_type("karar", "decision") is False
 
     def test_preference_keyword_matches(self):
         assert _query_mentions_memory_type("tercih", "preference") is True
@@ -48,11 +48,11 @@ class TestDetectMemoryTypeIntent:
     def test_detects_lesson(self):
         assert _detect_memory_type_intent("behavioral lessons") == "lesson"
 
-    def test_detects_config_change(self):
-        assert _detect_memory_type_intent("config değişikliği") == "config_change"
+    def test_does_not_detect_config_change_type(self):
+        assert _detect_memory_type_intent("config değişikliği") is None
 
-    def test_detects_decision(self):
-        assert _detect_memory_type_intent("karar alındı") == "decision"
+    def test_does_not_detect_decision_type(self):
+        assert _detect_memory_type_intent("karar alındı") is None
 
     def test_detects_rule(self):
         assert _detect_memory_type_intent("kural nedir") == "rule"
@@ -72,10 +72,10 @@ class TestDetectMemoryTypeIntent:
 
 class TestClassifyMemoryTypeDecision:
     def test_decision_bracket_marker(self):
-        assert classify_memory_type("[Decision] tamam yapalım") == "decision"
+        assert classify_memory_type("[Decision] tamam yapalım") == "other"
 
     def test_decision_turkish_marker(self):
-        assert classify_memory_type("KARAR: bunu yapacağız") == "decision"
+        assert classify_memory_type("KARAR: bunu yapacağız") == "other"
 
     def test_non_decision_text_is_not_decision(self):
         assert classify_memory_type("Bunu sonra konuşuruz") != "decision"

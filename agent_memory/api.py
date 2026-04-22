@@ -443,7 +443,6 @@ async def general_exception_handler(request, exc):
 
 VALID_MEMORY_TYPES = Literal[
     "fact", "preference", "rule", "conversation", "lesson", "other",
-    "config_change", "operational_event", "incident", "deployment", "verification",
 ]
 NAMESPACE_PATTERN = re.compile(r'^[a-z0-9._-]{1,64}$')
 AGENT_PATTERN = re.compile(r'^[a-z0-9_-]{1,64}$')
@@ -1351,7 +1350,7 @@ def _get_dashboard_data(request: Request) -> Dict[str, Any]:
         )
         decision_total = _count_scalar(
             conn,
-            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND memory_type = 'decision'",
+            "SELECT COUNT(*) FROM memories WHERE deleted_at IS NULL AND category = 'decision'",
         )
 
         per_agent.append({

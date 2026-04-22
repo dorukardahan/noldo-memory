@@ -355,7 +355,7 @@ class TestRuleClassificationOrdering:
 
     def test_deployment_pr_merged(self):
         """PR merged should be deployment."""
-        assert classify_memory_type("PR merged to main") == "deployment"
+        assert classify_memory_type("PR merged to main") == "other"
 
     def test_pr_merged_into(self):
-        assert classify_memory_type("PR merged into production branch") == "deployment"
+        assert classify_memory_type("PR merged into production branch") == "other"

@@ -156,7 +156,8 @@ class TestDashboard:
         main_storage.store_memory(
             text="api decision memory",
             vector=None,
-            memory_type="decision",
+            category="decision",
+            memory_type="other",
             source="api",
         )
 
@@ -178,7 +179,7 @@ class TestDashboard:
         assert data["capture_health"]["api_rate_7d"] == 1
         assert data["capture_health"]["hook_pct"] == pytest.approx(66.7, rel=0, abs=0.1)
         assert data["memory_types"]["lesson"] == 1
-        assert data["memory_types"]["decision"] == 1
+        assert data["memory_types"]["other"] == 1
         assert data["quality"]["fts_gap"] == 0
         assert data["quality"]["vectorless"] == 3
         assert data["quality"]["envelope_noise"] == 1
