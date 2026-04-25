@@ -13,7 +13,6 @@
  * This plugin does NOT take over memory-core's exclusive slots.
  * It coexists with existing NoldoMem hooks and native memory-core.
  *
- * @version 1.25.0
  * @author dorukardahan
  */
 

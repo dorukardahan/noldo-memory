@@ -91,10 +91,11 @@ function shouldCapture(toolName, toolInput) {
          IMPORTANT_CMD_PATTERNS.some((p) => p.test(cmd));
 }
 
-// Classify exec command type for memory_type preassignment
+// Classify exec command category for API-safe operational capture.
 // Order matches Python classifier: incident > config > ops > deploy
-// Only preassign for high-confidence cases; null = let server classifier decide
-function classifyExecType(cmd) {
+// Public memory_type values are intentionally small; operational detail lives
+// in category while memory_type remains valid for the API.
+function classifyExecCategory(cmd) {
   // Config file mutations — high confidence
   if (/(?:sed\s+-i|cp|mv|rm|edit|write)\s.*(?:\.env|\.conf|\.service|config)/i.test(cmd)) return "config_change";
   // Service lifecycle — high confidence
@@ -105,6 +106,11 @@ function classifyExecType(cmd) {
   // Security ops — high confidence
   if (/ufw\s+(?:allow|deny|enable|disable)|iptables|certbot/i.test(cmd)) return "operational_event";
   return null; // let server-side classifier decide for ambiguous commands
+}
+
+function memoryTypeForCategory(category) {
+  if (!category) return undefined;
+  return "other";
 }
 
 function scoreToolOutput(toolInput, toolOutput) {
@@ -272,7 +278,7 @@ const afterToolCallHook = async (event, ctx) => {
           importance: 0.85,
           agent: agentId,
           source: "after-tool-call-hook",
-          memory_type: "config_change",
+          memory_type: "other",
         }),
         signal: AbortSignal.timeout(5000),
       });
@@ -285,6 +291,7 @@ const afterToolCallHook = async (event, ctx) => {
 
   const importance = scoreToolOutput(toolInput, toolOutput);
   const cmd = (toolInput.command || toolName).slice(0, 200);
+  const operationalCategory = classifyExecCategory(toolInput?.command || "");
 
   // Truncate output intelligently — keep first and last portions
   let output = toolOutput;
@@ -307,10 +314,10 @@ const afterToolCallHook = async (event, ctx) => {
       headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
       body: JSON.stringify({
         text: memoryText.slice(0, 3000),
-        category: "tool_output",
+        category: operationalCategory || "tool_output",
         importance,
         agent: agentId,
-        memory_type: classifyExecType(toolInput?.command || "") || undefined,
+        memory_type: memoryTypeForCategory(operationalCategory),
       }),
       signal: AbortSignal.timeout(5000),
     });

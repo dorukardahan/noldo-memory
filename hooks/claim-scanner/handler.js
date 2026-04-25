@@ -210,7 +210,7 @@ const claimScannerHook = async (event) => {
           importance: 0.80,
           agent: agentId,
           source: "claim-scanner-hook",
-          memory_type: "fabrication_incident",
+          memory_type: "lesson",
         }),
         signal: deadline,
       }).catch((e) => console.warn("[claim-scanner] store failed:", e.message))

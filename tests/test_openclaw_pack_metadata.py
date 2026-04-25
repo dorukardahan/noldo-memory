@@ -16,7 +16,6 @@ def test_plugin_package_version_tracks_project_version() -> None:
 
     assert plugin_package["version"] == project_version
     assert f'NOLDOMEM_PLUGIN_VERSION = "{project_version}"' in plugin_index
-    assert f"@version {project_version}" in plugin_index
 
 
 def test_openclaw_pack_versions_track_project_version() -> None:

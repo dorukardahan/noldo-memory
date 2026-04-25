@@ -415,9 +415,9 @@ const bootstrapContextHook = async (event) => {
   // Recent operational events — typed recall first, text recall fallback
   if (_memoryApiKey) {
     const opsTypedQueries = [
-      { memoryType: "config_change", query: "config credential update", title: "Config/Credential Changes", limit: 5 },
-      { memoryType: "incident", query: "incident failure crash", title: "Recent Incidents", limit: 3 },
-      { memoryType: "deployment", query: "deploy release", title: "Recent Deployments", limit: 3 },
+      { memoryType: "other", query: "config credential update config_change", title: "Config/Credential Changes", limit: 5 },
+      { memoryType: "other", query: "incident failure crash operational_event", title: "Recent Incidents", limit: 3 },
+      { memoryType: "other", query: "deploy release deployment", title: "Recent Deployments", limit: 3 },
     ];
     for (const oq of opsTypedQueries) {
       try {
