@@ -44,8 +44,26 @@ def has_table(conn: sqlite3.Connection, table: str) -> bool:
         conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'virtual table') AND name = ?",
             (table,),
-        ).fetchone()
+    ).fetchone()
     )
+
+
+def try_load_sqlite_vec(conn: sqlite3.Connection) -> bool:
+    try:
+        import sqlite_vec
+
+        conn.enable_load_extension(True)
+        try:
+            sqlite_vec.load(conn)
+        finally:
+            conn.enable_load_extension(False)
+        return True
+    except Exception:
+        try:
+            conn.enable_load_extension(False)
+        except Exception:
+            pass
+        return False
 
 
 def active_where(columns: set[str], include_deleted: bool) -> str:
@@ -154,6 +172,7 @@ def redact_db(
             "fts_refreshed": 0,
             "vectors_invalidated": len(vectors_to_delete),
             "vectors_deleted": 0,
+            "vector_delete_skipped": 0,
             "pattern_counts": dict(pattern_counts),
             "sample_id_hashes": sample_hashes,
             "backup_path": None,
@@ -166,6 +185,9 @@ def redact_db(
         report["backup_path"] = str(backup_path)
 
         has_vectors = has_table(conn, "memory_vectors")
+        if has_vectors and vectors_to_delete and not try_load_sqlite_vec(conn):
+            has_vectors = False
+            report["vector_delete_skipped"] = len(vectors_to_delete)
         has_fts = has_table(conn, "memory_fts")
         now = time.time()
         with conn:
@@ -218,6 +240,7 @@ def print_text_report(report: dict[str, Any]) -> None:
         "fts_refreshed",
         "vectors_invalidated",
         "vectors_deleted",
+        "vector_delete_skipped",
     ):
         print(f"{key}={report[key]}")
     print("pattern_counts:")
