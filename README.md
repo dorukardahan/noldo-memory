@@ -408,6 +408,31 @@ duplicate text groups, very long/short rows, namespace distribution, and
 secret-like patterns. It prints hashed row identifiers only, never memory
 content.
 
+## Secret Value Policy
+
+NoldoMem should remember where credentials live and what they are used for, not
+the raw credential value. This keeps recall useful while reducing the chance of
+a token leaking into chat, logs, exports, or backups.
+
+Audit first:
+
+```bash
+python scripts/audit_memory_quality.py --json
+python scripts/redact_memory_secrets.py --db ~/.agent-memory/memory.sqlite --json
+```
+
+Apply redaction only after reviewing the aggregate dry-run counts:
+
+```bash
+python scripts/redact_memory_secrets.py --db ~/.agent-memory/memory.sqlite --apply
+python scripts/backfill_vectors.py --agent all --batch-size 2 --max-sub-batch 1
+```
+
+The redaction script creates a SQLite backup before applying changes. It
+replaces secret-like values with placeholders, redacts `original_text` when
+present, invalidates vectors for changed searchable text, and never prints
+memory content or secret values.
+
 ## FAQ
 
 **Can I use NoldoMem without OpenClaw?**

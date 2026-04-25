@@ -12,7 +12,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import sqlite3
 import sys
 from collections import Counter
@@ -20,17 +19,8 @@ from pathlib import Path
 from typing import Any
 
 VALID_MEMORY_TYPES = {"fact", "preference", "rule", "conversation", "lesson", "other"}
-
-SECRET_PATTERNS = {
-    "api_key_assignment": re.compile(
-        r"\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*[^\s,;]+",
-        re.IGNORECASE,
-    ),
-    "bearer_token": re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}", re.IGNORECASE),
-    "openai_like_key": re.compile(r"\bsk-[A-Za-z0-9_-]{12,}"),
-    "slack_token": re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{12,}|\bxapp-[A-Za-z0-9-]{12,}"),
-    "private_key_block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-}
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from agent_memory.secret_redaction import count_secret_like  # noqa: E402
 
 
 def default_db_path() -> Path:
@@ -44,7 +34,6 @@ def default_db_path() -> Path:
         return Path(load_config().db_path).expanduser()
     except Exception:
         return Path.home() / ".agent-memory" / "memory.sqlite"
-
 
 def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
@@ -179,13 +168,9 @@ def audit_db(db_path: Path, include_deleted: bool = False, top_limit: int = 20) 
             )
             for row in rows:
                 haystack = "\n".join(str(row[col] or "") for col in text_columns)
-                matched = False
-                for name, pattern in SECRET_PATTERNS.items():
-                    matches = pattern.findall(haystack)
-                    if matches:
-                        match_counts[name] += len(matches)
-                        matched = True
-                if matched:
+                row_counts = count_secret_like(haystack)
+                if row_counts:
+                    match_counts.update(row_counts)
                     secret_rows += 1
                     if len(sample_hashes) < top_limit:
                         sample_hashes.append(hash_text(str(row["id"])))

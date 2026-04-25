@@ -5,6 +5,9 @@ import sys
 from pathlib import Path
 
 
+DUMMY_VALUE = "abc" + "1234567890"
+
+
 def make_db(path: Path) -> None:
     conn = sqlite3.connect(path)
     conn.executescript(
@@ -25,8 +28,8 @@ def make_db(path: Path) -> None:
         ("2", "dup", "other", "default", 2, None, None),
         ("3", "dup", "other", "default", 3, None, None),
         ("4", "tiny", "bad_type", "", None, None, None),
-        ("5", "api_key=abc1234567890", "other", "ops", 5, None, None),
-        ("6", "deleted secret=abc1234567890", "other", "ops", None, 123.0, None),
+        ("5", f"api_key={DUMMY_VALUE}", "other", "ops", 5, None, None),
+        ("6", f"deleted secret={DUMMY_VALUE}", "other", "ops", None, 123.0, None),
     ]
     conn.executemany(
         """
@@ -66,7 +69,7 @@ def test_audit_memory_quality_reports_aggregate_counts_without_text(tmp_path: Pa
     assert data["counts"]["null_namespace"] == 1
     assert data["secret_like"]["rows"] == 1
     assert data["secret_like"]["matches"]["api_key_assignment"] == 1
-    assert "abc1234567890" not in result.stdout
+    assert DUMMY_VALUE not in result.stdout
     assert "api_key=" not in result.stdout
 
 
