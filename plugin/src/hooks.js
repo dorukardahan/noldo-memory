@@ -12,6 +12,9 @@ import {
 } from "./sanitize.js";
 
 function resolveAgentId(ctx) {
+  if (typeof ctx?.agentId === "string" && ctx.agentId.trim()) {
+    return ctx.agentId.trim();
+  }
   const sk = ctx?.sessionKey || "";
   const match = sk.match(/^agent:([^:]+)/);
   return match ? match[1] : "main";
@@ -99,6 +102,85 @@ function shouldTriggerRecall(text) {
   return RECALL_TRIGGER_PATTERNS.some((p) => p.test(text));
 }
 
+const SECRET_PATTERNS = [
+  /\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*[^\\s,;]+/gi,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+  /\bsk-[A-Za-z0-9_-]{12,}/g,
+];
+
+const OPERATIONAL_TOOL_PATTERNS = [
+  /\bsystemctl\b/i,
+  /\bdocker(?:\\s+compose)?\b/i,
+  /\bgit\\s+(?:commit|merge|push|pull|tag|checkout|switch)\b/i,
+  /\b(openclaw|clawhub)\\s+(?:update|plugins|hooks|install|publish)\b/i,
+  /\b(?:npm|pnpm|yarn|pip|uv|apt)\\s+(?:install|add|update|upgrade)\b/i,
+  /\\b(error|failed|traceback|exception|timeout|oom|sigkill)\\b/i,
+];
+
+function redactOperationalText(text) {
+  let out = String(text || "");
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, (match) => {
+      const prefix = match.split(/[:=]/, 1)[0] || "secret";
+      return `${prefix}=<redacted>`;
+    });
+  }
+  return out;
+}
+
+function toCompactText(value, maxChars = 1200) {
+  if (value == null) return "";
+  let text = "";
+  if (typeof value === "string") {
+    text = value;
+  } else {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  text = redactOperationalText(text).replace(/\\s+/g, " ").trim();
+  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
+}
+
+function shouldCaptureOperationalTool(event) {
+  const haystack = [
+    event?.toolName,
+    toCompactText(event?.params, 500),
+    toCompactText(event?.error, 500),
+    toCompactText(event?.result, 800),
+  ].join(" ");
+  return OPERATIONAL_TOOL_PATTERNS.some((pattern) => pattern.test(haystack));
+}
+
+function extractMessageText(message) {
+  if (!message || typeof message !== "object") return "";
+  const content = message.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
+      .filter(Boolean)
+      .join("\\n");
+  }
+  return "";
+}
+
+function selectCompactionMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  const picked = [];
+  for (const message of messages.slice(-60)) {
+    const role = message?.role;
+    if (role !== "user" && role !== "assistant") continue;
+    const text = redactOperationalText(extractMessageText(message)).trim();
+    if (!shouldCapture(text)) continue;
+    picked.push({ role, text: text.slice(0, 2000) });
+    if (picked.length >= 20) break;
+  }
+  return picked;
+}
+
 export function registerAutoRecall(api, client, cfg) {
   api.on("before_prompt_build", async (event, ctx) => {
     const userQuery = extractUserText(event.prompt);
@@ -171,4 +253,81 @@ export function registerAutoCapture(api, client, cfg) {
       }
     }
   });
+}
+
+export function registerNativeLifecycleCapture(api, client, cfg) {
+  if (cfg.enableOperationalCapture) {
+    api.on("after_tool_call", async (event, ctx) => {
+      if (!shouldCaptureOperationalTool(event)) return;
+      const agent = resolveAgentId(ctx);
+      const params = toCompactText(event?.params, 700);
+      const result = event?.error ? toCompactText(event.error, 1000) : toCompactText(event?.result, 1000);
+      const text = [
+        `Tool call: ${event?.toolName || "unknown"}`,
+        event?.durationMs ? `Duration: ${event.durationMs}ms` : "",
+        params ? `Params: ${params}` : "",
+        result ? `Result: ${result}` : "",
+      ]
+        .filter(Boolean)
+        .join("\\n");
+
+      try {
+        await client.store({
+          text: text.slice(0, 2400),
+          agent,
+          source: "plugin-after-tool-call",
+          namespace: cfg.defaultNamespace,
+          category: event?.error ? "error" : "tool",
+          importance: event?.error ? 0.85 : 0.65,
+        });
+      } catch (err) {
+        console.warn(`[noldomem-plugin] after_tool_call capture failed: ${err.message || err}`);
+      }
+    });
+  }
+
+  if (cfg.enableCompactionCapture) {
+    api.on("before_compaction", async (event, ctx) => {
+      const messages = selectCompactionMessages(event?.messages);
+      if (messages.length === 0) return;
+      const agent = resolveAgentId(ctx);
+      try {
+        await client.capture({
+          messages,
+          agent,
+          source: "plugin-before-compaction",
+          namespace: cfg.defaultNamespace,
+        });
+      } catch (err) {
+        console.warn(`[noldomem-plugin] before_compaction capture failed: ${err.message || err}`);
+      }
+    });
+  }
+
+  if (cfg.enableSubagentCapture) {
+    api.on("subagent_ended", async (event, ctx) => {
+      if (!event?.outcome || event.outcome === "ok") return;
+      const agent = resolveAgentId(ctx);
+      const text = [
+        `Subagent ended with outcome: ${event.outcome}`,
+        event.targetSessionKey ? `Target session: ${event.targetSessionKey}` : "",
+        event.reason ? `Reason: ${event.reason}` : "",
+        event.error ? `Error: ${redactOperationalText(event.error)}` : "",
+      ]
+        .filter(Boolean)
+        .join("\\n");
+      try {
+        await client.store({
+          text: text.slice(0, 2000),
+          agent,
+          source: "plugin-subagent-ended",
+          namespace: cfg.defaultNamespace,
+          category: "subagent",
+          importance: 0.75,
+        });
+      } catch (err) {
+        console.warn(`[noldomem-plugin] subagent_ended capture failed: ${err.message || err}`);
+      }
+    });
+  }
 }

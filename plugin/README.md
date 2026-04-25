@@ -5,6 +5,8 @@ This native OpenClaw plugin exposes NoldoMem as agent tools:
 - `noldomem_recall` - search long-term memory
 - `noldomem_store` - store important facts, preferences, decisions, and lessons
 - `noldomem_pin` - protect critical memories from decay and cleanup
+- native typed hooks for operational tool capture, compaction capture, and
+  subagent failure capture
 
 It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
@@ -34,7 +36,10 @@ Then enable it in `openclaw.json`:
           "baseUrl": "http://127.0.0.1:8787",
           "apiKeyFile": "~/.noldomem/memory-api-key",
           "enableAutoRecall": false,
-          "enableAutoCapture": false
+          "enableAutoCapture": false,
+          "enableOperationalCapture": true,
+          "enableCompactionCapture": true,
+          "enableSubagentCapture": true
         }
       }
     }

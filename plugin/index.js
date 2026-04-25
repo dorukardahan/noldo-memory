@@ -20,7 +20,11 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { buildClient } from "./src/client.js";
 import { registerTools } from "./src/tools.js";
-import { registerAutoRecall, registerAutoCapture } from "./src/hooks.js";
+import {
+  registerAutoRecall,
+  registerAutoCapture,
+  registerNativeLifecycleCapture,
+} from "./src/hooks.js";
 
 export default definePluginEntry({
   id: "noldomem",
@@ -40,6 +44,9 @@ export default definePluginEntry({
       defaultNamespace: rawCfg.defaultNamespace || "default",
       enableAutoRecall: rawCfg.enableAutoRecall ?? false,
       enableAutoCapture: rawCfg.enableAutoCapture ?? false,
+      enableOperationalCapture: rawCfg.enableOperationalCapture ?? true,
+      enableCompactionCapture: rawCfg.enableCompactionCapture ?? true,
+      enableSubagentCapture: rawCfg.enableSubagentCapture ?? true,
       recallLimit: rawCfg.recallLimit ?? 5,
       recallMaxTokens: rawCfg.recallMaxTokens ?? 2000,
       captureMaxItems: rawCfg.captureMaxItems ?? 3,
@@ -65,6 +72,8 @@ export default definePluginEntry({
       registerAutoCapture(api, client, cfg);
       api.logger.info("noldomem: auto-capture enabled (agent_end)");
     }
+
+    registerNativeLifecycleCapture(api, client, cfg);
 
     // Health check service
     api.registerService({

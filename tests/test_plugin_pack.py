@@ -17,6 +17,9 @@ def test_openclaw_plugin_pack_is_installable():
     schema = manifest["configSchema"]["properties"]
     assert schema["apiKeyFile"]["default"] == "~/.noldomem/memory-api-key"
     assert schema["enableAutoRecall"]["default"] is False
+    assert schema["enableOperationalCapture"]["default"] is True
+    assert schema["enableCompactionCapture"]["default"] is True
+    assert schema["enableSubagentCapture"]["default"] is True
 
 
 def test_plugin_recall_omits_default_namespace_for_cross_namespace_search():
@@ -27,3 +30,12 @@ def test_plugin_recall_omits_default_namespace_for_cross_namespace_search():
     assert "namespace: params.namespace || cfg.defaultNamespace" not in recall_source
     assert "if (namespace) body.namespace = namespace;" in recall_source
     assert 'if (normalized === "all") return "all";' in recall_source
+
+
+def test_native_plugin_registers_current_openclaw_typed_hooks():
+    repo_root = Path(__file__).resolve().parent.parent
+    hooks_source = (repo_root / "plugin" / "src" / "hooks.js").read_text()
+
+    assert 'api.on("after_tool_call"' in hooks_source
+    assert 'api.on("before_compaction"' in hooks_source
+    assert 'api.on("subagent_ended"' in hooks_source
