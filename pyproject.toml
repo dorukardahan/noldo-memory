@@ -41,7 +41,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.semantic_release]
-version_variables = ["agent_memory/__init__.py:__version__"]
+version_variables = [
+    "agent_memory/__init__.py:__version__",
+    "plugin/package.json:version",
+    "hooks/package.json:version",
+    "plugin/index.js:NOLDOMEM_PLUGIN_VERSION",
+]
 version_toml = ["pyproject.toml:project.version"]
 branch = "main"
 commit_message = "chore(release): {version}"

@@ -13,7 +13,7 @@
  * This plugin does NOT take over memory-core's exclusive slots.
  * It coexists with existing NoldoMem hooks and native memory-core.
  *
- * @version 1.23.3
+ * @version 1.25.0
  * @author dorukardahan
  */
 
@@ -25,6 +25,8 @@ import {
   registerAutoCapture,
   registerNativeLifecycleCapture,
 } from "./src/hooks.js";
+
+export const NOLDOMEM_PLUGIN_VERSION = "1.25.0";
 
 export default definePluginEntry({
   id: "noldomem",
