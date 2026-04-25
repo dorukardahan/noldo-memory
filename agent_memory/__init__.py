@@ -1,4 +1,4 @@
 """Agent Memory — conversational memory system for AI agents with Turkish+English NLP."""
 
-__version__ = "1.25.2"
+__version__ = "1.25.3"
 __author__ = "dorukardahan"

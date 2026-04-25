@@ -25,7 +25,7 @@ import {
   registerNativeLifecycleCapture,
 } from "./src/hooks.js";
 
-export const NOLDOMEM_PLUGIN_VERSION = "1.25.2";
+export const NOLDOMEM_PLUGIN_VERSION = "1.25.3";
 
 export default definePluginEntry({
   id: "noldomem",
