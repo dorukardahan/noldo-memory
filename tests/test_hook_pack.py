@@ -40,3 +40,14 @@ def test_hook_pack_only_sends_public_memory_types():
             assert match.group(1) in VALID_MEMORY_TYPES, (
                 f"{source} sends invalid memory_type={match.group(1)!r}"
             )
+
+
+def test_after_tool_call_redacts_secrets_before_memory_capture():
+    repo_root = Path(__file__).resolve().parent.parent
+    source = (repo_root / "hooks" / "after-tool-call" / "handler.js").read_text()
+
+    assert "function redactSecrets" in source
+    assert "redactSecrets(toolOutput)" in source
+    assert "redactSecrets(toolInput.command || toolName)" in source
+    assert "Secret sanitizer removed" not in source
+    assert "Storing secrets in memory is intentional" not in source

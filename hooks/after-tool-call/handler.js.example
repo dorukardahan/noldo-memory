@@ -51,6 +51,27 @@ const CAPTURE_COMMANDS = [
   /^(?:ruff|black|mypy)\s/,
 ];
 
+const SECRET_PATTERNS = [
+  /\b(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*[^\s,;]+/gi,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+  /\bsk-[A-Za-z0-9_-]{12,}/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{12,}/g,
+  /\bxapp-[A-Za-z0-9-]{12,}/g,
+];
+
+function redactSecrets(text = "") {
+  let out = String(text || "");
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, (match) => {
+      if (/^Bearer\s/i.test(match)) return "Bearer <redacted>";
+      if (/^(sk-|xox|xapp-)/i.test(match)) return "<redacted-secret>";
+      const prefix = match.split(/[:=]/, 1)[0] || "secret";
+      return `${prefix}=<redacted>`;
+    });
+  }
+  return out;
+}
+
 function getAgentId(workspaceDir) {
   const base = path.basename(workspaceDir || "");
   if (base === "workspace") return "main";
@@ -201,7 +222,11 @@ const afterToolCallHook = async (event, ctx) => {
   const sessionKey = resolveSessionKey(event, ctx);
 
   // Always record tool calls for claim-scanner cross-reference
-  recordToolCall(sessionKey, toolName, toolInput?.command || toolInput?.file_path || toolInput?.path || toolName);
+  recordToolCall(
+    sessionKey,
+    toolName,
+    redactSecrets(toolInput?.command || toolInput?.file_path || toolInput?.path || toolName)
+  );
 
   // Check for verified facts from exec commands
   if (toolName === "exec" && toolInput?.command && toolOutput) {
@@ -245,7 +270,7 @@ const afterToolCallHook = async (event, ctx) => {
       const activeTasks = getActiveTasks(workspaceDir);
       // Only auto-create if no tasks exist yet (avoid flooding)
       if (activeTasks.length === 0) {
-        const cmd = (toolInput?.command || toolInput?.file_path || toolName).slice(0, 80);
+        const cmd = redactSecrets(toolInput?.command || toolInput?.file_path || toolName).slice(0, 80);
         addTask(workspaceDir, {
           title: `Auto: ${cmd}`,
           agent: agentId,
@@ -290,21 +315,16 @@ const afterToolCallHook = async (event, ctx) => {
   }
 
   const importance = scoreToolOutput(toolInput, toolOutput);
-  const cmd = (toolInput.command || toolName).slice(0, 200);
+  const cmd = redactSecrets(toolInput.command || toolName).slice(0, 200);
   const operationalCategory = classifyExecCategory(toolInput?.command || "");
 
   // Truncate output intelligently — keep first and last portions
-  let output = toolOutput;
+  let output = redactSecrets(toolOutput);
   if (output.length > 2000) {
     const head = output.slice(0, 1200);
     const tail = output.slice(-600);
     output = `${head}\n...[truncated ${output.length - 1800} chars]...\n${tail}`;
   }
-
-  // Secret sanitizer removed — memory is local-only (localhost:8787, never public).
-  // Storing secrets in memory is intentional: enables token expiry tracking,
-  // auth troubleshooting, and credential recovery without re-asking the user.
-  // Memory DB lives on the user's VPS and is only accessible by the user + OpenClaw.
 
   const memoryText = `[Tool: ${toolName}] Command: ${cmd}\nOutput: ${output}`;
 
