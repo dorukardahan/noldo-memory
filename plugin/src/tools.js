@@ -5,8 +5,6 @@
  * without relying on hook-based passive injection.
  */
 
-import { Type } from "@sinclair/typebox";
-
 const VALID_RECALL_MEMORY_TYPES = new Set([
   "fact",
   "preference",
@@ -52,6 +50,23 @@ function normalizeRequestedMemoryType(value) {
   return VALID_RECALL_MEMORY_TYPES.has(normalized) ? normalized : undefined;
 }
 
+function objectSchema(properties, required = []) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties,
+    ...(required.length ? { required } : {}),
+  };
+}
+
+function stringSchema(description) {
+  return { type: "string", description };
+}
+
+function numberSchema(description) {
+  return { type: "number", description };
+}
+
 export function registerTools(api, client, cfg) {
   // ── noldomem_recall ──
   api.registerTool(
@@ -63,27 +78,20 @@ export function registerTools(api, client, cfg) {
         "about prior work, decisions, dates, people, preferences, todos, or anything discussed " +
         "in previous sessions. Returns top matching memories with relevance scores. " +
         "Use this proactively — do NOT wait for the user to say 'remember'.",
-      parameters: Type.Object({
-        query: Type.String({ description: "Natural language search query" }),
-        limit: Type.Optional(
-          Type.Number({ description: "Max results (default: 5)" })
-        ),
-        memory_type: Type.Optional(
-          Type.String({
-            description:
-              "Filter by type: fact, preference, rule, conversation, lesson, other",
-          })
-        ),
-        namespace: Type.Optional(
-          Type.String({ description: "Memory namespace (default: default)" })
-        ),
-        agent: Type.Optional(
-          Type.String({
-            description:
-              "Agent scope to search. Defaults to current agent. Use all for cross-agent recall.",
-          })
-        ),
-      }),
+      parameters: objectSchema(
+        {
+          query: stringSchema("Natural language search query"),
+          limit: numberSchema("Max results (default: 5)"),
+          memory_type: stringSchema(
+            "Filter by type: fact, preference, rule, conversation, lesson, other"
+          ),
+          namespace: stringSchema("Memory namespace. Omit to search all namespaces."),
+          agent: stringSchema(
+            "Agent scope to search. Defaults to current agent. Use all for cross-agent recall."
+          ),
+        },
+        ["query"]
+      ),
       async execute(_toolCallId, params, ctx) {
         const agent = resolveRequestedAgent(params.agent, ctx);
         try {
@@ -142,19 +150,14 @@ export function registerTools(api, client, cfg) {
         "Store important information in long-term memory. Use for decisions, " +
         "preferences, lessons learned, configuration changes, or any fact that " +
         "should persist across sessions. The system auto-classifies the memory type.",
-      parameters: Type.Object({
-        content: Type.String({
-          description: "The information to remember (be specific and concise)",
-        }),
-        namespace: Type.Optional(
-          Type.String({ description: "Memory namespace (default: default)" })
-        ),
-        source: Type.Optional(
-          Type.String({
-            description: "Source label (default: agent-tool)",
-          })
-        ),
-      }),
+      parameters: objectSchema(
+        {
+          content: stringSchema("The information to remember (be specific and concise)"),
+          namespace: stringSchema("Memory namespace (default: default)"),
+          source: stringSchema("Source label (default: agent-tool)"),
+        },
+        ["content"]
+      ),
       async execute(_toolCallId, params, ctx) {
         const agent = resolveAgentId(ctx);
         try {
@@ -197,9 +200,12 @@ export function registerTools(api, client, cfg) {
       description:
         "Pin a critical memory so it survives decay, garbage collection, and consolidation. " +
         "Use for non-negotiable rules, key credentials info, or architectural decisions.",
-      parameters: Type.Object({
-        memory_id: Type.String({ description: "The memory ID to pin" }),
-      }),
+      parameters: objectSchema(
+        {
+          memory_id: stringSchema("The memory ID to pin"),
+        },
+        ["memory_id"]
+      ),
       async execute(_toolCallId, params, ctx) {
         const agent = resolveAgentId(ctx);
         try {

@@ -11,6 +11,7 @@ def test_openclaw_plugin_pack_is_installable():
 
     assert manifest["id"] == "noldomem"
     assert package["openclaw"]["plugin"] is True
+    assert "dependencies" not in package
     assert (plugin_root / package["main"]).is_file()
 
     schema = manifest["configSchema"]["properties"]

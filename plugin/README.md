@@ -10,6 +10,9 @@ It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
 tool access to that service.
 
+The plugin is dependency-free; a local `openclaw plugins install -l ./plugin`
+does not require an extra npm install step.
+
 ## Install
 
 From the repo root:
@@ -53,4 +56,3 @@ Use both pieces for the full custom-memory workflow:
 Keep `enableAutoRecall=false` unless you explicitly want the native plugin to
 run a recall check before prompt build. The hook pack already handles bootstrap
 recall and is cheaper for normal operation.
-
