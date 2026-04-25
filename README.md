@@ -394,6 +394,20 @@ python -m pytest tests/ -v
 ruff check agent_memory/
 ```
 
+## Memory Quality Audit
+
+Run a read-only SQLite audit without printing memory text:
+
+```bash
+python scripts/audit_memory_quality.py --db ~/.agent-memory/memory.sqlite
+python scripts/audit_memory_quality.py --json
+```
+
+The audit reports aggregate counts for vectorless rows, invalid memory types,
+duplicate text groups, very long/short rows, namespace distribution, and
+secret-like patterns. It prints hashed row identifiers only, never memory
+content.
+
 ## FAQ
 
 **Can I use NoldoMem without OpenClaw?**

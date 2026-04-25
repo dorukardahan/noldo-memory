@@ -28,8 +28,10 @@ import {
   incrementFabricationScore,
 } from "../lib/shared-state.js";
 import { increment as metricsIncrement, recordEvent as metricsEvent } from "../lib/metrics.js";
+import { createMemoryPoster } from "../lib/memory-api.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
+const SCAN_TIMEOUT_MS = 3000;
 const API_KEY_PATH =
   process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
@@ -38,8 +40,12 @@ try {
 } catch (e) {
   console.warn("[claim-scanner] error:", e.message || e);
 }
-
-const SCAN_TIMEOUT_MS = 3000;
+const memoryPoster = createMemoryPoster({
+  baseUrl: MEMORY_API,
+  apiKey: _memoryApiKey,
+  defaultTimeoutMs: SCAN_TIMEOUT_MS,
+  label: "claim-scanner",
+});
 
 // Kill switch: set MAST_CLAIM_SCANNER_ENABLED=0 to disable entire claim-scanner
 const CLAIM_SCANNER_ENABLED = process.env.MAST_CLAIM_SCANNER_ENABLED !== "0";
@@ -195,28 +201,16 @@ const claimScannerHook = async (event) => {
 
   const claimsToProcess = unverifiedClaims.slice(0, 3);
 
-  // Fire-and-forget: store all claims in parallel with shared deadline
-  const deadline = AbortSignal.timeout(SCAN_TIMEOUT_MS);
-
-  // NoldoMem stores — parallel, not sequential
-  if (_memoryApiKey) {
-    const storePromises = claimsToProcess.map((claim) =>
-      fetch(`${MEMORY_API}/store`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-        body: JSON.stringify({
-          text: `[Unverified Claim] ${claim.direction}: "${claim.context}" — No tool verification found in session. Agent should verify with grep/cat/curl before making such claims.`,
-          category: "unverified_claim",
-          importance: 0.80,
-          agent: agentId,
-          source: "claim-scanner-hook",
-          memory_type: "lesson",
-        }),
-        signal: deadline,
-      }).catch((e) => console.warn("[claim-scanner] store failed:", e.message))
-    );
-    // Don't await individually — allSettled with shared deadline
-    await Promise.allSettled(storePromises);
+  // Queue NoldoMem stores without making the post-response hook wait on I/O.
+  for (const claim of claimsToProcess) {
+    memoryPoster.postBackground("/store", {
+      text: `[Unverified Claim] ${claim.direction}: "${claim.context}" — No tool verification found in session. Agent should verify with grep/cat/curl before making such claims.`,
+      category: "unverified_claim",
+      importance: 0.80,
+      agent: agentId,
+      source: "claim-scanner-hook",
+      memory_type: "lesson",
+    }, { label: "claim-scanner store" });
   }
 
   // Log to fabrication-log.json (sync file I/O, fast)

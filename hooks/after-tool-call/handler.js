@@ -15,9 +15,15 @@ import { readFileSync } from "node:fs";
 import { recordToolCall, writeVerifiedFact } from "../lib/shared-state.js";
 import { addTask, getActiveTasks } from "../lib/ats.js";
 import { resolveSessionKey } from "../lib/runtime.js";
+import { createMemoryPoster } from "../lib/memory-api.js";
 const API_KEY_PATH = process.env.AGENT_MEMORY_API_KEY_FILE || `${process.env.HOME}/.noldomem/memory-api-key`;
 let _memoryApiKey = "";
 try { _memoryApiKey = readFileSync(API_KEY_PATH, "utf-8").trim(); } catch (e) { console.warn("[after-tool-call] error:", e.message || e); }
+const memoryPoster = createMemoryPoster({
+  baseUrl: MEMORY_API,
+  apiKey: _memoryApiKey,
+  label: "after-tool-call",
+});
 
 
 // Command patterns that indicate important operations
@@ -240,26 +246,16 @@ const afterToolCallHook = async (event, ctx) => {
         found: fact.found,
       });
 
-      // Also store to NoldoMem as verified_fact
-      if (_memoryApiKey) {
-        try {
-          await fetch(`${MEMORY_API}/store`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-            body: JSON.stringify({
-              text: `[Verified Fact] ${fact.claim}. Source: ${fact.source.slice(0, 200)}`,
-              category: "verified_fact",
-              importance: 0.75,
-              agent: agentId,
-              source: "after-tool-call-hook",
-              memory_type: "fact",
-            }),
-            signal: AbortSignal.timeout(5000),
-          });
-          console.warn(`[after-tool-call] verified fact stored: ${fact.key} (agent=${agentId})`);
-        } catch (err) {
-          console.warn(`[after-tool-call] verified fact store failed: ${err.message}`);
-        }
+      // Also store to NoldoMem as verified_fact without blocking the tool path.
+      if (memoryPoster.postBackground("/store", {
+        text: `[Verified Fact] ${fact.claim}. Source: ${fact.source.slice(0, 200)}`,
+        category: "verified_fact",
+        importance: 0.75,
+        agent: agentId,
+        source: "after-tool-call-hook",
+        memory_type: "fact",
+      }, { label: "after-tool-call verified fact" })) {
+        console.warn(`[after-tool-call] verified fact queued: ${fact.key} (agent=${agentId})`);
       }
     }
   }
@@ -293,23 +289,15 @@ const afterToolCallHook = async (event, ctx) => {
     const fileName = path.basename(filePath);
     // Store ONLY the fact that a config file changed — NEVER store content/secrets
     const configMemory = `[Config Change] File: ${filePath} modified via ${toolName}. Agent: ${agentId}. Check propagation: were all related config files updated?`;
-    try {
-      await fetch(`${MEMORY_API}/store`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-        body: JSON.stringify({
-          text: configMemory,
-          category: "config_change",
-          importance: 0.85,
-          agent: agentId,
-          source: "after-tool-call-hook",
-          memory_type: "other",
-        }),
-        signal: AbortSignal.timeout(5000),
-      });
-      console.warn(`[after-tool-call] config change captured: ${fileName} (agent=${agentId})`);
-    } catch (err) {
-      console.warn(`[after-tool-call] config capture failed: ${err.message}`);
+    if (memoryPoster.postBackground("/store", {
+      text: configMemory,
+      category: "config_change",
+      importance: 0.85,
+      agent: agentId,
+      source: "after-tool-call-hook",
+      memory_type: "other",
+    }, { label: "after-tool-call config capture" })) {
+      console.warn(`[after-tool-call] config change queued: ${fileName} (agent=${agentId})`);
     }
     return;
   }
@@ -328,31 +316,16 @@ const afterToolCallHook = async (event, ctx) => {
 
   const memoryText = `[Tool: ${toolName}] Command: ${cmd}\nOutput: ${output}`;
 
-  try {
-    const res = await fetch(`${MEMORY_API}/store`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-      body: JSON.stringify({
-        text: memoryText.slice(0, 3000),
-        category: operationalCategory || "tool_output",
-        importance,
-        agent: agentId,
-        memory_type: memoryTypeForCategory(operationalCategory),
-      }),
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (res.ok) {
-      console.warn(
-        `[after-tool-call] captured: ${cmd.slice(0, 80)} (imp=${importance}, agent=${agentId})`
-      );
-    } else {
-      console.warn(
-        `[after-tool-call] API error ${res.status}: ${cmd.slice(0, 60)}`
-      );
-    }
-  } catch (err) {
-    console.warn(`[after-tool-call] capture failed: ${err.message}`);
+  if (memoryPoster.postBackground("/store", {
+    text: memoryText.slice(0, 3000),
+    category: operationalCategory || "tool_output",
+    importance,
+    agent: agentId,
+    memory_type: memoryTypeForCategory(operationalCategory),
+  }, { label: "after-tool-call capture" })) {
+    console.warn(
+      `[after-tool-call] capture queued: ${cmd.slice(0, 80)} (imp=${importance}, agent=${agentId})`
+    );
   }
 };
 

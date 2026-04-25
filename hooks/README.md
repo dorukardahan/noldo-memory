@@ -54,6 +54,9 @@ Notes:
 - Handlers default to `http://localhost:8787/v1` for Memory API.
 - Keep credentials in environment/files, not in `handler.js`.
 - The committed `handler.js` files are sanitized and safe to publish. Keep local overrides secret-free.
+- Post-response store hooks use a bounded background writer so slow memory API
+  calls do not block the agent response path. Queue overflows are logged and
+  dropped instead of stalling OpenClaw.
 
 ## Installation
 

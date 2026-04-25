@@ -51,3 +51,22 @@ def test_after_tool_call_redacts_secrets_before_memory_capture():
     assert "redactSecrets(toolInput.command || toolName)" in source
     assert "Secret sanitizer removed" not in source
     assert "Storing secrets in memory is intentional" not in source
+
+
+def test_post_response_memory_writes_use_bounded_background_queue():
+    repo_root = Path(__file__).resolve().parent.parent
+    helper = (repo_root / "hooks" / "lib" / "memory-api.js").read_text()
+    hook_sources = {
+        path.name: (path / "handler.js").read_text()
+        for path in (repo_root / "hooks").iterdir()
+        if path.is_dir() and (path / "handler.js").is_file()
+    }
+
+    assert "maxInFlight = 8" in helper
+    assert "postBackground" in helper
+    assert "memory write queue full" in helper
+    for name in ("after-tool-call", "claim-scanner", "realtime-capture", "session-end-capture"):
+        assert "createMemoryPoster" in hook_sources[name]
+    for source in hook_sources.values():
+        assert "await fetch(`${MEMORY_API}/store`" not in source
+    assert "Promise.allSettled(storePromises)" not in hook_sources["claim-scanner"]

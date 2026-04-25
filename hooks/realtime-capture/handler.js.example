@@ -2,6 +2,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolveAgentId as _resolveAgentId } from "../lib/runtime.js";
+import { createMemoryPoster } from "../lib/memory-api.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -12,6 +13,12 @@ try {
 } catch (e) {
   console.warn("[realtime-capture] error:", e.message || e);
 }
+const memoryPoster = createMemoryPoster({
+  baseUrl: MEMORY_API,
+  apiKey: _memoryApiKey,
+  defaultTimeoutMs: 30000,
+  label: "realtime-capture",
+});
 
 const DECISION_MARKERS = [
   /\bkarar\b/i,
@@ -211,30 +218,15 @@ function shouldStoreAssistant(content = "") {
   return content.length >= 80 || /\b(plan|next steps?|todo|aksiyon|yapılacak|fix|result|sonuç|tamamlandı|done|verified)\b/i.test(content);
 }
 
-async function store(text, category, importance, agent = "main", namespace = "default") {
-  if (!_memoryApiKey) return;
-  try {
-    const res = await fetch(`${MEMORY_API}/store`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-      body: JSON.stringify({
-        text: text.slice(0, 3000),
-        category,
-        importance,
-        agent,
-        namespace,
-        source: "hook",
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!res.ok) {
-      console.warn(
-        `[realtime-capture] store failed: status=${res.status} category=${category} agent=${agent}`
-      );
-    }
-  } catch (e) {
-    console.warn("[realtime-capture] error:", e.message || e);
-  }
+function store(text, category, importance, agent = "main", namespace = "default") {
+  return memoryPoster.postBackground("/store", {
+    text: text.slice(0, 3000),
+    category,
+    importance,
+    agent,
+    namespace,
+    source: "hook",
+  }, { label: "realtime-capture store", timeoutMs: 30000 });
 }
 
 const realtimeCaptureHook = async (event) => {

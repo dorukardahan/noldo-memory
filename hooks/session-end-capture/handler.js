@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { atomicWrite } from "../lib/util.js";
 import { resolveAgentId as _resolveAgentId } from "../lib/runtime.js";
+import { createMemoryPoster } from "../lib/memory-api.js";
 
 const MEMORY_API = "http://localhost:8787/v1";
 const API_KEY_PATH =
@@ -19,6 +20,12 @@ try {
 } catch (e) {
   console.warn("[session-end-capture] error:", e.message || e);
 }
+const memoryPoster = createMemoryPoster({
+  baseUrl: MEMORY_API,
+  apiKey: _memoryApiKey,
+  defaultTimeoutMs: 30000,
+  label: "session-end-capture",
+});
 
 const OPENCLAW_DIR = process.env.OPENCLAW_DIR || `${process.env.HOME}/.openclaw`;
 
@@ -283,18 +290,13 @@ async function checkPatternEscalation(agent, tag, apiKey) {
           .map((r) => (r.text || "").substring(0, 80))
           .join(" | ")}`;
 
-      await fetch(`${MEMORY_API}/store`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
-        body: JSON.stringify({
-          text: ruleText,
-          category: "rule",
-          importance: 0.98,
-          agent,
-          source: "auto_escalation",
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
+      memoryPoster.postBackground("/store", {
+        text: ruleText,
+        category: "rule",
+        importance: 0.98,
+        agent,
+        source: "auto_escalation",
+      }, { label: "session-end-capture auto escalation", timeoutMs: 10000 });
       console.warn(`[session-end-capture] auto-escalated pattern "${tag}" (${sameTag.length} lessons)`);
     }
   } catch (e) {
@@ -378,52 +380,31 @@ const sessionEndCaptureHook = async (event) => {
 
   const pairs = buildQAPairs(messages);
 
-  if (_memoryApiKey) {
-    try {
-      const captureRes = await fetch(`${MEMORY_API}/capture`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-        body: JSON.stringify({
-          messages: pairs.map((p) => ({ role: p.role || "assistant", text: p.text })),
-          agent: agentId,
-          namespace: sessionNamespace,
-        }),
-        signal: AbortSignal.timeout(30000),
-      });
-
-      if (!captureRes.ok) {
-        console.warn(`[session-end-capture] capture failed: status=${captureRes.status}`);
-      } else {
-        const payload = await captureRes.json().catch(() => ({}));
-        console.warn(
-          `[session-end-capture] capture ok: stored=${payload?.stored ?? "?"} merged=${payload?.merged ?? "?"} total=${payload?.total ?? "?"} namespace=${payload?.namespace ?? sessionNamespace}`
-        );
-      }
-    } catch (err) {
-      console.warn(`[session-end-capture] capture failed: ${err.message}`);
-    }
+  if (memoryPoster.postBackground("/capture", {
+    messages: pairs.map((p) => ({ role: p.role || "assistant", text: p.text })),
+    agent: agentId,
+    namespace: sessionNamespace,
+  }, { label: "session-end-capture capture", timeoutMs: 30000 })) {
+    console.warn(`[session-end-capture] capture queued: total=${pairs.length} namespace=${sessionNamespace}`);
   }
 
   if (_memoryApiKey) {
     try {
       const shouldStoreAutoLesson = await detectUnverifiedSuggestion(sessionFile);
       if (shouldStoreAutoLesson) {
-        const res = await fetch(`${MEMORY_API}/store`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-API-Key": _memoryApiKey },
-          body: JSON.stringify({
-            text: "[Auto-Lesson][tag=verification] Suggested without verifiable check before recommendation.",
-            category: "lesson",
-            importance: 0.9,
-            agent: agentId,
-            source: "session_capture",
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!res.ok) {
-          console.warn(`[session-end-capture] auto-lesson store failed: status=${res.status}`);
-        } else {
-          await checkPatternEscalation(agentId, "verification", _memoryApiKey);
+        if (memoryPoster.postBackground("/store", {
+          text: "[Auto-Lesson][tag=verification] Suggested without verifiable check before recommendation.",
+          category: "lesson",
+          importance: 0.9,
+          agent: agentId,
+          source: "session_capture",
+        }, { label: "session-end-capture auto lesson", timeoutMs: 10000 })) {
+          const timer = setTimeout(() => {
+            checkPatternEscalation(agentId, "verification", _memoryApiKey).catch((err) => {
+              console.warn(`[session-end-capture] pattern escalation failed: ${err.message || err}`);
+            });
+          }, 1000);
+          timer.unref?.();
         }
       }
     } catch (err) {
