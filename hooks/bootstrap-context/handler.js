@@ -54,6 +54,19 @@ function isCronNoise(text = "") {
   return CRON_NOISE_PATTERNS.some((p) => p.test(text));
 }
 
+function isCronSession(event) {
+  const sessionKey = resolveSessionKey(event).toLowerCase();
+  if (sessionKey.includes(":cron:")) return true;
+
+  const text = String(
+    event?.context?.message ||
+      event?.context?.prompt ||
+      event?.context?.content ||
+      ""
+  );
+  return isCronNoise(text);
+}
+
 function isLowSignalMemory(text = "") {
   if (!text) return true;
   if (isCronNoise(text)) return true;
@@ -262,14 +275,23 @@ const bootstrapContextHook = async (event) => {
 
   const workspaceDir = resolveWorkspaceDir(event);
   const agentId = resolveAgentId(event, workspaceDir);
-  const sessionNamespace = deriveSessionNamespace(event?.sessionKey);
-  const memoryDir = path.join(workspaceDir, "memory");
-  const policy = await readWorkspacePolicy(workspaceDir);
+  const sessionKey = resolveSessionKey(event);
+  const sessionNamespace = deriveSessionNamespace(sessionKey);
+  const cronSession = isCronSession(event);
+
+  if (cronSession) {
+    console.warn(
+      `[bootstrap-context] skipped heavy recall for cron session (agent=${agentId} namespace=${sessionNamespace})`
+    );
+    return;
+  }
 
   console.warn(
     `[bootstrap-context] hook fired (agent=${agentId} namespace=${sessionNamespace})`
   );
 
+  const memoryDir = path.join(workspaceDir, "memory");
+  const policy = await readWorkspacePolicy(workspaceDir);
   const sections = [];
 
   const lessons = await fetchLessons(agentId);

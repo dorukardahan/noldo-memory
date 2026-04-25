@@ -11,7 +11,9 @@ metadata:
 
 # Bootstrap Context Hook
 
-Injects relevant memory context at the start of every agent session.
+Injects relevant memory context at the start of every interactive agent session.
+Cron sessions are skipped so scheduled jobs do not spend their startup budget on
+heavy memory recall before their own prompt runs.
 
 ## What It Does
 
@@ -19,6 +21,7 @@ Injects relevant memory context at the start of every agent session.
 2. Falls back to broader agent recall for durable lessons and decisions
 3. Reads today's and yesterday's daily notes from `workspace/memory/`
 4. Pushes combined context as `SESSION_CONTEXT` bootstrap file
+5. Skips heavy recall for `:cron:` sessions and steward cron prompts
 
 ## Workspace policy
 
