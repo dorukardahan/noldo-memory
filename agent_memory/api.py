@@ -606,6 +606,8 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
         time_range = (temporal[0].timestamp(), temporal[1].timestamp())
 
     all_results: List[Dict[str, Any]] = []
+    search_modes: List[str] = []
+    degraded = False
     for agent_id in _storage_pool.get_all_agents():
         try:
             search = _get_search(agent_id, request=request)
@@ -614,9 +616,12 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 limit=req.limit,
                 min_score=req.min_score,
                 time_range=time_range,
+                namespace=req.namespace,
                 memory_type=req.memory_type,
                 agent=agent_id,
             )
+            search_modes.append(search.last_search_mode)
+            degraded = degraded or search.last_search_degraded
             for r in results:
                 d = r.to_dict()
                 d["agent"] = agent_id
@@ -632,14 +637,38 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
     all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
     all_results = all_results[: req.limit]
 
+    # Apply token budget trimming if requested.
+    trimmed = False
+    if req.max_tokens is not None and all_results:
+        from .token_utils import trim_results_to_budget
+
+        original_count = len(all_results)
+        all_results = trim_results_to_budget(all_results, req.max_tokens)
+        trimmed = len(all_results) < original_count
+
+    search_mode = "full"
+    unique_modes = {mode for mode in search_modes if mode}
+    if len(unique_modes) == 1:
+        search_mode = next(iter(unique_modes))
+    elif unique_modes:
+        search_mode = "mixed"
+
     response = {
         "query": req.query,
         "agent": "all",
         "count": len(all_results),
         "triggered": should_trigger(req.query),
+        "search_mode": search_mode,
         "results": all_results,
         "cross_agent": True,
     }
+    if len(unique_modes) > 1:
+        response["search_modes"] = sorted(unique_modes)
+    if degraded:
+        response["degraded"] = True
+    if trimmed:
+        response["trimmed"] = True
+        response["max_tokens"] = req.max_tokens
     if time_range is not None:
         response["time_range"] = {
             "start": time_range[0],

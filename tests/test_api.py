@@ -270,6 +270,40 @@ class TestRecall:
             assert "score" in result
             assert "confidence_tier" in result
 
+    async def test_cross_agent_recall_reports_search_mode_and_filters_namespace(self, client):
+        await client.post(
+            "/v1/store",
+            json={
+                "text": "shared zeroapi namespace marker alpha",
+                "namespace": "shared-ns",
+                "agent": "worker",
+            },
+        )
+        await client.post(
+            "/v1/store",
+            json={
+                "text": "default zeroapi namespace marker alpha",
+                "namespace": "default",
+                "agent": "main",
+            },
+        )
+
+        resp = await client.post(
+            "/v1/recall",
+            json={
+                "query": "zeroapi namespace marker alpha",
+                "agent": "all",
+                "namespace": "shared-ns",
+                "limit": 5,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cross_agent"] is True
+        assert data["search_mode"] != "keyword_only"
+        assert data["count"] >= 1
+        assert {item["namespace"] for item in data["results"]} == {"shared-ns"}
+
 
 # ---------------------------------------------------------------------------
 # /v1/capture

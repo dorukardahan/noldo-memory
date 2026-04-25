@@ -1,0 +1,20 @@
+{
+  "id": "noldomem",
+  "name": "NoldoMem",
+  "description": "NoldoMem long-term memory tools for OpenClaw agents - recall, store, pin",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": { "type": "string", "default": "http://127.0.0.1:8787" },
+      "apiKeyFile": { "type": "string", "default": "~/.noldomem/memory-api-key" },
+      "defaultNamespace": { "type": "string", "default": "default" },
+      "enableAutoRecall": { "type": "boolean", "default": false },
+      "enableAutoCapture": { "type": "boolean", "default": false },
+      "recallLimit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+      "recallMaxTokens": { "type": "integer", "minimum": 100, "maximum": 16000, "default": 2000 },
+      "captureMaxItems": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3 },
+      "requestTimeoutMs": { "type": "integer", "minimum": 250, "maximum": 60000, "default": 15000 }
+    }
+  }
+}

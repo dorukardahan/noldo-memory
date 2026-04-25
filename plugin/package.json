@@ -1,0 +1,13 @@
+{
+  "name": "@dorukardahan/noldo-memory-plugin",
+  "version": "1.23.3",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "openclaw": {
+    "plugin": true
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.49"
+  }
+}

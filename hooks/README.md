@@ -17,9 +17,12 @@ The recommended path is to link this directory as an OpenClaw hook pack so updat
 | `session-end-capture` | `command:new`, `command:reset` | Captures session-transition context, builds QA pairs, writes `last-session.md` with per-session namespace capture | `POST /v1/capture` |
 | `bootstrap-context` | `agent:bootstrap` | Recalls session-scoped memories first, then workspace-durable lessons/decisions, injects `SESSION_CONTEXT`; skips heavy recall for cron sessions | `POST /v1/recall` for interactive sessions |
 | `after-tool-call` | `after_tool_call` (plugin hook) | Captures high-signal operational command outputs | `POST /v1/store` |
+| `before-compaction` | `before_compaction` (plugin hook) | Captures high-signal context before compaction and appends a workspace snapshot | `POST /v1/capture` |
 | `post-compaction-restore` | `agent:bootstrap` | Restores `COMPACTION_RECOVERY` bootstrap context when compaction flag exists | No API call (filesystem snapshot restore) |
 | `pre-session-save` | `command:new` | Saves critical context snapshot before a reset/new | No API call by default (optional `POST /v1/capture`) |
 | `subagent-complete` | `subagent_ended` (plugin hook) | Logs subagent completion/errors and stores failure context for post-mortem | `POST /v1/capture` (error cases) |
+| `claim-scanner` | `message:sent` | Logs unverified completion/config claims for later audit | `POST /v1/store` |
+| `message-recall` | `message:received` | Optional mid-conversation recall for status/config questions | `POST /v1/recall` |
 
 ## Directory Layout
 

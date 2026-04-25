@@ -153,7 +153,17 @@ mirrored `handler.js.example` references for manual workflows.
 
 Fallback manual mode is still possible through [`hooks/README.md`](./hooks/README.md).
 
-**4d. Set the API key for hooks:**
+**4d. Install the native OpenClaw plugin:**
+
+```bash
+openclaw plugins install -l "$(pwd)/plugin"
+```
+
+The plugin gives agents explicit `noldomem_recall`, `noldomem_store`, and
+`noldomem_pin` tools. The hook pack remains responsible for lifecycle capture
+and bootstrap context injection. See [`plugin/README.md`](./plugin/README.md).
+
+**4e. Set the API key for hooks and plugin:**
 
 ```bash
 mkdir -p ~/.noldomem
@@ -168,7 +178,7 @@ Optional multi-workspace session discovery for maintenance/ingest utilities:
 AGENT_MEMORY_SESSIONS_ROOT="$HOME/.openclaw/agents"
 ```
 
-**4e. Restart OpenClaw** to load the hooks.
+**4f. Restart OpenClaw** to load the hooks and plugin.
 
 Optional per-workspace policy file:
 
@@ -237,7 +247,10 @@ POST /v1/rule {"text": "Always run tests before commit", "agent": "YOUR_AGENT_ID
 
 ## How Hooks Work
 
-NoldoMem connects to OpenClaw through 7 lifecycle hooks:
+NoldoMem connects to OpenClaw through a native plugin plus 10 lifecycle hooks:
+
+- The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`.
+- The hook pack handles lifecycle capture, bootstrap recall, compaction snapshots, and session transitions.
 
 | Hook | When | What It Does |
 |------|------|-------------|
@@ -245,9 +258,12 @@ NoldoMem connects to OpenClaw through 7 lifecycle hooks:
 | **realtime-capture** | During chat | Detects feedback/corrections, stores as lessons |
 | **session-end-capture** | Session end | Detects unverified suggestions, auto-generates lessons |
 | **after-tool-call** | After tool use | Captures command outputs (allowlist-filtered) |
+| **before-compaction** | Before compaction | Captures high-signal context before it is summarized away |
 | **pre-session-save** | Before save | Tags session with memory metadata |
 | **post-compaction-restore** | After compaction | Re-injects critical memories lost in context compaction |
 | **subagent-complete** | Sub-agent done | Captures sub-agent results |
+| **claim-scanner** | After replies | Logs unverified feature/config claims for audit |
+| **message-recall** | User message | Optional mid-conversation recall hook |
 
 Each hook has a `HOOK.md` in [`hooks/`](./hooks/) explaining its behavior and configuration.
 

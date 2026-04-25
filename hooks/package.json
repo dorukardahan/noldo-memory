@@ -1,9 +1,10 @@
 {
   "name": "@dorukardahan/noldo-memory-hooks",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "openclaw": {
     "hooks": [
+      "./before-compaction",
       "./after-tool-call",
       "./bootstrap-context",
       "./claim-scanner",
