@@ -78,6 +78,7 @@ class CrossEncoderReranker:
         # Serialize inference to avoid CPU spikes on VPS under parallel recalls.
         self._infer_lock = threading.Lock()
         self._cache: Dict[str, Tuple[float, float]] = {}
+        self._dependency_unavailable = False
 
     @classmethod
     def _resolve_model_name(cls, value: str) -> str:
@@ -86,7 +87,7 @@ class CrossEncoderReranker:
 
     @property
     def available(self) -> bool:
-        return bool(self.enabled)
+        return bool(self.enabled and not self._dependency_unavailable)
 
     def warmup(self) -> bool:
         """Load model eagerly. Safe to call repeatedly."""
@@ -103,6 +104,7 @@ class CrossEncoderReranker:
                         try:
                             from sentence_transformers import CrossEncoder  # type: ignore
                         except Exception as exc:  # pragma: no cover - optional dependency
+                            self._dependency_unavailable = True
                             logger.warning("Cross-encoder dependency unavailable: %s", exc)
                             return False
 

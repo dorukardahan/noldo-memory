@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import urllib.request
+import builtins
 
-from agent_memory.reranker import APIReranker
+from agent_memory.reranker import APIReranker, CrossEncoderReranker
 
 
 class _FakeResponse:
@@ -71,3 +72,23 @@ def test_api_reranker_returns_empty_when_unavailable(monkeypatch, tmp_path):
 
     assert reranker.available is False
     assert reranker.score("query", ["doc"]) == []
+
+
+def test_cross_encoder_missing_dependency_is_not_retried(monkeypatch):
+    real_import = builtins.__import__
+    attempts = {"count": 0}
+
+    def fake_import(name, *args, **kwargs):
+        if name == "sentence_transformers":
+            attempts["count"] += 1
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    reranker = CrossEncoderReranker(enabled=True)
+
+    assert reranker.score("query", ["doc one"]) == []
+    assert reranker.available is False
+    assert reranker.score("query", ["doc two"]) == []
+    assert attempts["count"] == 1

@@ -81,6 +81,15 @@ function hasSubstantiveUserMessage(messages = []) {
   });
 }
 
+function shouldWriteSnapshot(messages = []) {
+  if (messages.length === 0) return false;
+  if (hasSubstantiveUserMessage(messages)) return true;
+  // Slash-only sessions still have user-role messages, but they carry no state.
+  // Assistant-only windows can happen when the substantive user prompt is just
+  // outside the recent-message cap, so preserve them for compaction recovery.
+  return !messages.some((message) => message?.role === "user");
+}
+
 async function resolveSessionFile(sessionFilePath) {
   try {
     await fs.access(sessionFilePath);
@@ -187,7 +196,7 @@ const preSessionSaveHook = async (event) => {
     console.warn("[pre-session-save] no sessionFile — skipping");
   }
 
-  if (snapshot.recentMessages.length > 0 && hasSubstantiveUserMessage(snapshot.recentMessages)) {
+  if (shouldWriteSnapshot(snapshot.recentMessages)) {
     const snapshotPath = path.join(memoryDir, "critical-context-snapshot.json");
     await fs.writeFile(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
     console.warn(`[pre-session-save] snapshot written to ${snapshotPath}`);
