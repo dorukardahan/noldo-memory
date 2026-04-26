@@ -39,6 +39,26 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - Update README if you add/change API endpoints or config options
 - All CI checks must pass before merge
 
+## Releases
+
+Releases are manual. Do not add semantic-release or auto-release workflows.
+
+Before tagging a release:
+
+1. Update the version in all runtime manifests:
+   - `pyproject.toml`
+   - `agent_memory/__init__.py`
+   - `plugin/package.json`
+   - `hooks/package.json`
+   - `plugin/index.js`
+2. Update `CHANGELOG.md`.
+3. Run CI locally where practical:
+   ```bash
+   ruff check agent_memory/ tests/ scripts/
+   python -m pytest tests/ -v
+   ```
+4. Create the git tag and GitHub release manually.
+
 ## Code Style
 
 - Python 3.10+
