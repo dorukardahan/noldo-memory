@@ -116,6 +116,24 @@ class TestHealth:
         assert checks["disk_usage"]["ok"] is True
         assert checks["disk_usage"]["db_size_bytes"] >= 0
 
+    async def test_health_deep_ignores_soft_deleted_vectorless_rows(self, client):
+        store_resp = await client.post("/v1/store", json={"text": "soft deleted health row"})
+        assert store_resp.status_code == 200
+        memory_id = store_resp.json()["id"]
+
+        storage = api_module._storage_pool.get("main")
+        conn = storage._get_conn()
+        conn.execute(
+            "UPDATE memories SET vector_rowid = NULL, deleted_at = ? WHERE id = ?",
+            (time.time(), memory_id),
+        )
+        conn.commit()
+
+        resp = await client.get("/v1/health/deep")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["checks"]["vectorless"]["count"] == 0
+
 
 # ---------------------------------------------------------------------------
 # /v1/stats

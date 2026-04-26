@@ -22,17 +22,7 @@ import os
 import threading
 import time
 import urllib.request
-from typing import Dict, List, Optional, Protocol, Tuple
-
-try:  # optional dependency
-    from sentence_transformers import CrossEncoder  # type: ignore
-except Exception:  # pragma: no cover - dependency may be missing in some envs
-    CrossEncoder = None  # type: ignore
-
-try:  # optional dependency
-    import torch  # type: ignore
-except Exception:  # pragma: no cover
-    torch = None  # type: ignore
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +86,7 @@ class CrossEncoderReranker:
 
     @property
     def available(self) -> bool:
-        return bool(self.enabled and CrossEncoder is not None)
+        return bool(self.enabled)
 
     def warmup(self) -> bool:
         """Load model eagerly. Safe to call repeatedly."""
@@ -110,10 +100,22 @@ class CrossEncoderReranker:
             with self._lock:
                 if self._model is None:
                     try:
-                        if torch is not None:
+                        try:
+                            from sentence_transformers import CrossEncoder  # type: ignore
+                        except Exception as exc:  # pragma: no cover - optional dependency
+                            logger.warning("Cross-encoder dependency unavailable: %s", exc)
+                            return False
+
+                        torch_module: Optional[Any]
+                        try:
+                            import torch as torch_module  # type: ignore
+                        except Exception:  # pragma: no cover - optional dependency
+                            torch_module = None
+
+                        if torch_module is not None:
                             try:
-                                torch.set_num_threads(self.torch_threads)
-                                torch.set_num_interop_threads(1)
+                                torch_module.set_num_threads(self.torch_threads)
+                                torch_module.set_num_interop_threads(1)
                             except Exception:
                                 pass
                         logger.info("Loading cross-encoder reranker model: %s", self.model_name)
