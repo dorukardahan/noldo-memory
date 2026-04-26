@@ -51,7 +51,7 @@ from .embed_worker import EmbedWorker
 from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
 from .pool import StoragePool
-from .reranker import CrossEncoderReranker
+from .reranker import APIReranker, CrossEncoderReranker
 from .search import HybridSearch, SearchWeights
 from .storage import MemoryStorage
 from .rules import RuleDetector
@@ -222,43 +222,65 @@ async def lifespan(app: FastAPI):
         importance=_config.weight_importance,
     )
 
-    _reranker = CrossEncoderReranker(
-        enabled=_config.reranker_enabled,
-        model_name=_config.reranker_model,
-        top_k=_config.reranker_top_k,
-        torch_threads=_config.reranker_threads,
-        max_doc_chars=_config.reranker_max_doc_chars,
-    )
-
-    if _config.reranker_enabled and _config.reranker_prewarm:
-        t0 = time.time()
-        ok = _reranker.warmup()
-        dt = round(time.time() - t0, 2)
-        if ok:
-            logger.info("Primary reranker prewarmed in %ss", dt)
-        else:
-            logger.warning("Primary reranker prewarm failed in %ss (will fallback)", dt)
-
+    _reranker = None
     _bg_reranker = None
-    if _config.reranker_two_pass_enabled:
-        primary_model = CrossEncoderReranker._resolve_model_name(_config.reranker_model)
-        bg_model = CrossEncoderReranker._resolve_model_name(_config.reranker_two_pass_model)
-        if bg_model != primary_model:
-            _bg_reranker = CrossEncoderReranker(
-                enabled=True,
-                model_name=_config.reranker_two_pass_model,
-                top_k=_config.reranker_two_pass_top_k,
-                torch_threads=_config.reranker_two_pass_threads,
-                max_doc_chars=_config.reranker_two_pass_max_doc_chars,
-            )
-            if _config.reranker_two_pass_prewarm:
-                t0 = time.time()
-                ok = _bg_reranker.warmup()
-                dt = round(time.time() - t0, 2)
-                if ok:
-                    logger.info("Two-pass background reranker prewarmed in %ss", dt)
-                else:
-                    logger.warning("Two-pass background prewarm failed in %ss", dt)
+
+    if _config.reranker_enabled and _config.reranker_api_enabled:
+        # API reranker (OpenRouter/Cohere) replaces local cross-encoder.
+        _reranker = APIReranker(
+            enabled=True,
+            api_key=_config.reranker_api_key,
+            api_key_file=_config.reranker_api_key_file,
+            api_url=_config.reranker_api_url,
+            model=_config.reranker_api_model,
+            top_k=_config.reranker_top_k,
+            max_doc_chars=_config.reranker_max_doc_chars,
+            timeout_sec=_config.reranker_api_timeout,
+        )
+        if _reranker.available:
+            logger.info("API reranker ready: %s", _config.reranker_api_model)
+        else:
+            logger.warning("API reranker enabled but unavailable (missing API key?)")
+            _reranker = None
+        # No two-pass needed with API reranker (already high quality)
+    elif _config.reranker_enabled:
+        # Local cross-encoder reranker (original behavior)
+        _reranker = CrossEncoderReranker(
+            enabled=True,
+            model_name=_config.reranker_model,
+            top_k=_config.reranker_top_k,
+            torch_threads=_config.reranker_threads,
+            max_doc_chars=_config.reranker_max_doc_chars,
+        )
+
+        if _config.reranker_prewarm:
+            t0 = time.time()
+            ok = _reranker.warmup()
+            dt = round(time.time() - t0, 2)
+            if ok:
+                logger.info("Primary reranker prewarmed in %ss", dt)
+            else:
+                logger.warning("Primary reranker prewarm failed in %ss (will fallback)", dt)
+
+        if _config.reranker_two_pass_enabled:
+            primary_model = CrossEncoderReranker._resolve_model_name(_config.reranker_model)
+            bg_model = CrossEncoderReranker._resolve_model_name(_config.reranker_two_pass_model)
+            if bg_model != primary_model:
+                _bg_reranker = CrossEncoderReranker(
+                    enabled=True,
+                    model_name=_config.reranker_two_pass_model,
+                    top_k=_config.reranker_two_pass_top_k,
+                    torch_threads=_config.reranker_two_pass_threads,
+                    max_doc_chars=_config.reranker_two_pass_max_doc_chars,
+                )
+                if _config.reranker_two_pass_prewarm:
+                    t0 = time.time()
+                    ok = _bg_reranker.warmup()
+                    dt = round(time.time() - t0, 2)
+                    if ok:
+                        logger.info("Two-pass background reranker prewarmed in %ss", dt)
+                    else:
+                        logger.warning("Two-pass background prewarm failed in %ss", dt)
 
     _start_time = time.time()
 
@@ -1367,7 +1389,7 @@ async def health_deep() -> Dict[str, Any]:
             }
 
             vectorless_row = conn.execute(
-                "SELECT COUNT(*) AS c FROM memories WHERE vector_rowid IS NULL"
+                "SELECT COUNT(*) AS c FROM memories WHERE vector_rowid IS NULL AND deleted_at IS NULL"
             ).fetchone()
             checks["vectorless"] = {
                 "ok": True,

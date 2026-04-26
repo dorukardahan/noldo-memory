@@ -43,7 +43,7 @@ class Config:
     weight_strength: float = 0.07
     weight_importance: float = 0.08
 
-    # Reranker (cross-encoder)
+    # Reranker (cross-encoder or API)
     reranker_enabled: bool = True
     # Accepts preset names: fast|balanced|quality OR full HF model id
     reranker_model: str = "balanced"
@@ -52,6 +52,14 @@ class Config:
     reranker_threads: int = 4
     reranker_max_doc_chars: int = 600
     reranker_prewarm: bool = True
+
+    # API reranker (replaces local cross-encoder when enabled)
+    reranker_api_enabled: bool = False
+    reranker_api_key: str = ""
+    reranker_api_key_file: str = ""
+    reranker_api_model: str = "cohere/rerank-4-pro"
+    reranker_api_url: str = "https://openrouter.ai/api/v1/rerank"
+    reranker_api_timeout: int = 10
 
     # Two-pass reranking (fast response + background quality refresh)
     reranker_two_pass_enabled: bool = True
@@ -189,6 +197,12 @@ def load_config(config_path: Optional[str] = None) -> Config:
         "AGENT_MEMORY_RERANKER_THREADS": ("reranker_threads", int),
         "AGENT_MEMORY_RERANKER_MAX_DOC_CHARS": ("reranker_max_doc_chars", int),
         "AGENT_MEMORY_RERANKER_PREWARM": ("reranker_prewarm", _parse_bool),
+        "AGENT_MEMORY_RERANKER_API_ENABLED": ("reranker_api_enabled", _parse_bool),
+        "AGENT_MEMORY_RERANKER_API_KEY": ("reranker_api_key", str),
+        "AGENT_MEMORY_RERANKER_API_KEY_FILE": ("reranker_api_key_file", str),
+        "AGENT_MEMORY_RERANKER_API_MODEL": ("reranker_api_model", str),
+        "AGENT_MEMORY_RERANKER_API_URL": ("reranker_api_url", str),
+        "AGENT_MEMORY_RERANKER_API_TIMEOUT": ("reranker_api_timeout", int),
         "AGENT_MEMORY_RERANKER_TWO_PASS_ENABLED": ("reranker_two_pass_enabled", _parse_bool),
         "AGENT_MEMORY_RERANKER_TWO_PASS_MODEL": ("reranker_two_pass_model", str),
         "AGENT_MEMORY_RERANKER_TWO_PASS_TOP_K": ("reranker_two_pass_top_k", int),

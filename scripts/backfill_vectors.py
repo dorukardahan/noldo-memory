@@ -249,21 +249,7 @@ async def main():
 
     # Determine which agents to process
     if args.agent == "all":
-        # Discover all agents from pool directory
-        agents_dir = Path(base_dir) / "agents"
-        if agents_dir.exists():
-            agent_ids = [
-                d.name for d in agents_dir.iterdir()
-                if d.is_dir() and (d / "memory.db").exists()
-            ]
-        else:
-            agent_ids = ["main"]
-        # Also check main database
-        main_db = Path(base_dir) / "memory.db"
-        if main_db.exists():
-            agent_ids.append("main")
-        # Deduplicate
-        agent_ids = list(set(agent_ids))
+        agent_ids = pool.get_all_agents()
     else:
         agent_ids = [args.agent]
 
