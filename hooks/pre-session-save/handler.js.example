@@ -65,6 +65,31 @@ function getAgentId(workspaceDir) {
   return "main";
 }
 
+function isIgnorableUserContext(text = "") {
+  const raw = String(text || "").trim();
+  if (!raw) return true;
+  if (raw.startsWith("/")) return true;
+  if (/^System:\s*\[[^\]]+\]\s*Slack message(?: edited)? .*:\s*\/[\w-]+/i.test(raw)) return true;
+  if (/A new session was started via \/new or \/reset/i.test(raw)) return true;
+  return false;
+}
+
+function hasSubstantiveUserMessage(messages = []) {
+  return messages.some((message) => {
+    if (message?.role !== "user") return false;
+    return !isIgnorableUserContext(message.text);
+  });
+}
+
+function shouldWriteSnapshot(messages = []) {
+  if (messages.length === 0) return false;
+  if (hasSubstantiveUserMessage(messages)) return true;
+  // Slash-only sessions still have user-role messages, but they carry no state.
+  // Assistant-only windows can happen when the substantive user prompt is just
+  // outside the recent-message cap, so preserve them for compaction recovery.
+  return !messages.some((message) => message?.role === "user");
+}
+
 async function resolveSessionFile(sessionFilePath) {
   try {
     await fs.access(sessionFilePath);
@@ -171,10 +196,7 @@ const preSessionSaveHook = async (event) => {
     console.warn("[pre-session-save] no sessionFile — skipping");
   }
 
-  if (snapshot.recentMessages.length > 0) {
-    const summaryParts = snapshot.recentMessages.map((m) => `${m.role}: ${m.text}`);
-    const summaryText = `Session snapshot (${snapshot.timestamp}):\n${summaryParts.join("\n")}`;
-
+  if (shouldWriteSnapshot(snapshot.recentMessages)) {
     const snapshotPath = path.join(memoryDir, "critical-context-snapshot.json");
     await fs.writeFile(snapshotPath, JSON.stringify(snapshot, null, 2), "utf-8");
     console.warn(`[pre-session-save] snapshot written to ${snapshotPath}`);
@@ -187,7 +209,7 @@ const preSessionSaveHook = async (event) => {
     const agentId = getAgentId(workspaceDir);
     await pinCriticalMemories(agentId);
   } else {
-    console.warn("[pre-session-save] no messages to save — skipping write");
+    console.warn("[pre-session-save] no substantive user context — skipping write");
     // Still pin critical memories even without new messages
     const agentId = getAgentId(workspaceDir);
     await pinCriticalMemories(agentId);

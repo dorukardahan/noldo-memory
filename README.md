@@ -350,6 +350,14 @@ Query -> Semantic (0.50) -> sqlite-vec cosine KNN
       RRF fusion (k=60) -> Primary reranker (top-10) -> Background reranker (top-3)
 ```
 
+Reranking has two modes:
+
+- Local cross-encoder: default, uses `sentence-transformers` models.
+- API reranker: set `AGENT_MEMORY_RERANKER_API_ENABLED=true` and provide
+  `AGENT_MEMORY_RERANKER_API_KEY` or `AGENT_MEMORY_RERANKER_API_KEY_FILE`.
+  API reranking handles the primary pass and can fall back to the local
+  cross-encoder at runtime if the hosted call fails.
+
 ## Production Deployment
 
 ### systemd

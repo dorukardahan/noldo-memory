@@ -17,6 +17,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,21 @@ from agent_memory.triggers import score_importance
 logger = logging.getLogger("openclaw_sync")
 
 STATE_FILE = Path.home() / ".agent-memory" / "sync_state.json"
+
+
+def _sync_embed_sub_batch() -> int:
+    """Conservative sub-batch size for periodic sync.
+
+    The cron path may target a local llama-server over ``OPENROUTER_BASE_URL``.
+    Large sub-batches can monopolize the embedding worker and delay interactive
+    queries, so keep the default small and allow override via env.
+    """
+    raw = os.environ.get("OPENCLAW_SYNC_EMBED_SUB_BATCH", "1").strip() or "1"
+    try:
+        value = int(raw)
+    except ValueError:
+        return 1
+    return max(1, min(value, 8))
 
 
 def discover_all_agent_sessions(base_dir: Optional[str] = None) -> Dict[str, List[Path]]:
@@ -203,7 +219,9 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
 
             if embedder and texts:
                 try:
-                    vectors = await embedder.embed_batch_resilient(texts, max_sub_batch=8)
+                    vectors = await embedder.embed_batch_resilient(
+                        texts, max_sub_batch=_sync_embed_sub_batch()
+                    )
                 except Exception as exc:
                     logger.warning("Embedding failed for %s/%s: %s", agent_id, sid[:8], exc)
 

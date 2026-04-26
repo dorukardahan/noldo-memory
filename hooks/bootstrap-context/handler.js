@@ -50,6 +50,14 @@ const LOW_SIGNAL_MEMORY_PATTERNS = [
   /^System:\s*\[(?:Queued|Internal|Subagent)\b/i,
 ];
 
+const SESSION_TRANSCRIPT_PATTERNS = [
+  /^# Session:/m,
+  /^- \*\*Session Key\*\*:/m,
+  /^## Conversation Summary$/m,
+  /^user:\s*System:\s*\[/im,
+  /^assistant:\s*\[\[reply_to_current\]\]/im,
+];
+
 function isCronNoise(text = "") {
   return CRON_NOISE_PATTERNS.some((p) => p.test(text));
 }
@@ -93,6 +101,11 @@ function stripLowSignalText(text = "") {
     .split("\n")
     .filter((line) => !LOW_SIGNAL_MEMORY_PATTERNS.some((p) => p.test(line)));
   return cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function isSessionTranscript(text = "") {
+  const raw = String(text || "");
+  return SESSION_TRANSCRIPT_PATTERNS.some((pattern) => pattern.test(raw));
 }
 
 async function recall(agentId, query, options = {}) {
@@ -231,6 +244,9 @@ async function readLastSessionSummary(workspaceDir) {
   const filePath = path.join(workspaceDir, "memory", "last-session.md");
   try {
     const content = await fs.readFile(filePath, "utf-8");
+    if (isSessionTranscript(content)) {
+      return null;
+    }
     const cleaned = stripLowSignalText(content);
     if (cleaned) {
       return truncateSection(cleaned, MAX_LAST_SESSION_CHARS);
@@ -248,19 +264,27 @@ async function readDailyNotes(memoryDir) {
   const today = now.toISOString().split("T")[0];
   const yesterday = new Date(now - 86400000).toISOString().split("T")[0];
   const parts = [];
+  const files = await fs.readdir(memoryDir).catch((e) => {
+    if (e?.code !== "ENOENT") {
+      console.warn("[bootstrap-context] error:", e.message || e);
+    }
+    return [];
+  });
 
   for (const date of [today, yesterday]) {
-    try {
-      const files = await fs.readdir(memoryDir);
-      const matches = files.filter((f) => f.startsWith(date) && f.endsWith(".md"));
-      for (const file of matches) {
+    const matches = files.filter((f) => f.startsWith(date) && f.endsWith(".md"));
+    for (const file of matches) {
+      try {
         const content = await fs.readFile(path.join(memoryDir, file), "utf-8");
+        if (isSessionTranscript(content)) {
+          continue;
+        }
         const cleaned = stripLowSignalText(content);
         if (cleaned) parts.push(`## ${file}\n${cleaned}`);
-      }
-    } catch (e) {
-      if (e?.code !== "ENOENT") {
-        console.warn("[bootstrap-context] error:", e.message || e);
+      } catch (e) {
+        if (e?.code !== "ENOENT") {
+          console.warn("[bootstrap-context] error:", e.message || e);
+        }
       }
     }
   }
