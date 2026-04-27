@@ -247,7 +247,7 @@ class APIReranker:
         self.cache_ttl_sec = max(30, int(cache_ttl_sec))
         self.cache_max = max(100, int(cache_max))
         self.max_doc_chars = max(200, int(max_doc_chars))
-        self.timeout_sec = max(3, int(timeout_sec))
+        self.timeout_sec = max(1, int(timeout_sec))
         self._cache: Dict[str, Tuple[float, float]] = {}
         self.fallback_reranker = fallback_reranker
 
