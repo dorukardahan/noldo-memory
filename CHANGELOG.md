@@ -6,6 +6,13 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.3] - 2026-04-27
+
+### Fixed
+- Bound `agent=all` recall latency by reranking once after cross-agent merge instead of reranking once per agent database.
+- Disabled slow local cross-encoder runtime fallback for hosted reranker failures by default. Set `AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK=true` to opt in.
+- Allowed hosted reranker timeout values down to 1 second for interactive CPU-only deployments.
+
 ### Fixed
 - Keep `memory_type` canonical across API, ingest, storage, search, and docs. Unknown or operational labels are normalized to `other` instead of persisting drift such as `incident`, `deployment`, or `config_change`.
 
