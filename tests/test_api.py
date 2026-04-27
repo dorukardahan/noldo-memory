@@ -36,6 +36,24 @@ class _StubEmbedder:
         pass
 
 
+class _CountingReranker:
+    top_k = 10
+
+    def __init__(self):
+        self.calls = 0
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    def warmup(self) -> bool:
+        return True
+
+    def score(self, query, docs, doc_ids=None):
+        self.calls += 1
+        return [0.8 - (idx * 0.01) for idx, _ in enumerate(docs)]
+
+
 @pytest.fixture(autouse=True)
 def _init_api_state(tmp_path):
     """Wire the api module globals to a temp DB so every test starts clean."""
@@ -52,6 +70,8 @@ def _init_api_state(tmp_path):
     api_module._search_weights = SearchWeights(
         semantic=0.55, keyword=0.25, recency=0.10, strength=0.10,
     )
+    api_module._reranker = None
+    api_module._bg_reranker = None
     api_module._config = Config(api_key="", openrouter_api_key="test-key")
     api_module._start_time = time.time()
 
@@ -63,6 +83,8 @@ def _init_api_state(tmp_path):
     api_module._search_cache = {}
     api_module._kg_cache = {}
     api_module._search_weights = None
+    api_module._reranker = None
+    api_module._bg_reranker = None
     api_module._config = None
 
 
@@ -321,6 +343,32 @@ class TestRecall:
         assert data["search_mode"] != "keyword_only"
         assert data["count"] >= 1
         assert {item["namespace"] for item in data["results"]} == {"shared-ns"}
+
+    async def test_cross_agent_recall_reranks_once_after_merge(self, client):
+        reranker = _CountingReranker()
+        api_module._reranker = reranker
+        api_module._search_cache = {}
+
+        await client.post(
+            "/v1/store",
+            json={"text": "alpha cross agent memory one", "agent": "main"},
+        )
+        await client.post(
+            "/v1/store",
+            json={"text": "alpha cross agent memory two", "agent": "worker"},
+        )
+
+        resp = await client.post(
+            "/v1/recall",
+            json={"query": "alpha cross agent memory", "agent": "all", "limit": 5},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cross_agent"] is True
+        assert data["count"] >= 2
+        assert reranker.calls == 1
+        assert max(item["rerank_score"] for item in data["results"]) > 0
 
 
 # ---------------------------------------------------------------------------

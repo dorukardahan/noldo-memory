@@ -94,13 +94,18 @@ cross-encoder model:
 AGENT_MEMORY_RERANKER_API_ENABLED=true
 AGENT_MEMORY_RERANKER_API_MODEL=cohere/rerank-4-pro
 AGENT_MEMORY_RERANKER_API_KEY_FILE=$HOME/.openrouter_key
+# Optional. Disabled by default because local fallback can be too slow for
+# interactive recall on CPU-only hosts.
+AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK=false
 ```
 
 When the hosted reranker is available, NoldoMem skips local reranker prewarm and
 two-pass background reranking. If the key or endpoint is missing, it falls back
 to the local cross-encoder path at startup. If the hosted call fails at runtime,
-NoldoMem now uses a lazy local cross-encoder fallback for that request instead of
-dropping straight to lexical overlap.
+NoldoMem uses fast lexical fallback unless
+`AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK=true` is set. Cross-agent
+`agent=all` recall reranks once after merging agent results instead of calling
+the hosted reranker once per agent database.
 
 ### Step 3: Start NoldoMem
 

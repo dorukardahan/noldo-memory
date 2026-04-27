@@ -53,7 +53,7 @@ from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
 from .pool import StoragePool
 from .reranker import APIReranker, BaseReranker, CrossEncoderReranker
-from .search import HybridSearch, SearchWeights
+from .search import HybridSearch, SearchWeights, _lexical_overlap, _rrf_fuse
 from .storage import MemoryStorage
 from .rules import RuleDetector
 from .triggers import score_importance, should_trigger
@@ -237,15 +237,20 @@ async def lifespan(app: FastAPI):
             timeout_sec=_config.reranker_api_timeout,
         )
         if api_reranker.available:
-            api_reranker.fallback_reranker = CrossEncoderReranker(
-                enabled=True,
-                model_name=_config.reranker_model,
-                top_k=_config.reranker_top_k,
-                torch_threads=_config.reranker_threads,
-                max_doc_chars=_config.reranker_max_doc_chars,
-            )
+            if _config.reranker_api_local_fallback:
+                api_reranker.fallback_reranker = CrossEncoderReranker(
+                    enabled=True,
+                    model_name=_config.reranker_model,
+                    top_k=_config.reranker_top_k,
+                    torch_threads=_config.reranker_threads,
+                    max_doc_chars=_config.reranker_max_doc_chars,
+                )
             _reranker = api_reranker
-            logger.info("API reranker ready: %s (runtime local fallback enabled)", _config.reranker_api_model)
+            logger.info(
+                "API reranker ready: %s (local fallback=%s)",
+                _config.reranker_api_model,
+                "enabled" if _config.reranker_api_local_fallback else "disabled",
+            )
         else:
             logger.warning("API reranker unavailable, falling back to local cross-encoder")
 
@@ -619,6 +624,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 namespace=req.namespace,
                 memory_type=req.memory_type,
                 agent=agent_id,
+                rerank=False,
             )
             search_modes.append(search.last_search_mode)
             degraded = degraded or search.last_search_degraded
@@ -633,8 +639,10 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("Cross-agent recall failed for %s: %s", agent_id, exc)
 
-    # Sort by score descending, take top N
+    # Sort by score descending, then run one bounded rerank pass on the merged
+    # cross-agent pool. This avoids one hosted rerank call per agent database.
     all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    all_results = await _rerank_cross_agent_results(req.query, all_results)
     all_results = all_results[: req.limit]
 
     # Apply token budget trimming if requested.
@@ -675,6 +683,52 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
             "end": time_range[1],
         }
     return response
+
+
+async def _rerank_cross_agent_results(query: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Apply a single rerank pass after cross-agent merge.
+
+    Per-agent reranking can multiply hosted API latency by the number of agent
+    databases. For ``agent=all`` we first collect shard candidates without
+    reranking, then rerank only the merged top-N pool once.
+    """
+    if len(results) <= 1 or _reranker is None:
+        return results
+
+    try:
+        top_k = max(1, int(getattr(_reranker, "top_k", 10)))
+    except Exception:
+        top_k = 10
+
+    cands = results[: min(len(results), top_k)]
+    keys = [f"{item.get('agent', 'main')}:{item.get('id', '')}" for item in cands]
+    texts = [str(item.get("text", "")) for item in cands]
+
+    rerank_scores = await asyncio.to_thread(_reranker.score, query, texts, keys)
+    if not rerank_scores or len(rerank_scores) != len(cands):
+        rerank_scores = [_lexical_overlap(query, text) for text in texts]
+
+    if not rerank_scores:
+        return results
+
+    rerank_map = {key: float(score) for key, score in zip(keys, rerank_scores)}
+    base_ranked = [f"{item.get('agent', 'main')}:{item.get('id', '')}" for item in results]
+    rerank_ranked = [
+        key for key, _ in sorted(rerank_map.items(), key=lambda item: item[1], reverse=True)
+    ]
+
+    weight = _config.reranker_weight if _config else 0.20
+    fused = _rrf_fuse([base_ranked, rerank_ranked], [1.0 - weight, weight], k=60)
+
+    for item in results:
+        key = f"{item.get('agent', 'main')}:{item.get('id', '')}"
+        if key in rerank_map:
+            item["rerank_score"] = round(rerank_map[key], 4)
+        if key in fused:
+            item["score"] = fused[key]
+
+    results.sort(key=lambda item: item.get("score", 0), reverse=True)
+    return results
 
 
 @app.post("/v1/capture")

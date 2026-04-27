@@ -455,6 +455,7 @@ class HybridSearch:
         time_range: Optional[Tuple[float, float]] = None,
         namespace: Optional[str] = None,
         memory_type: Optional[str] = None,
+        rerank: bool = True,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -856,7 +857,7 @@ class HybridSearch:
 
         # Build SearchResult objects ------------------------------------------
         pre_limit = limit
-        if self.reranker is not None:
+        if rerank and self.reranker is not None:
             # Friend-repo style: gather a wider candidate pool before reranking.
             pre_limit = max(limit, min(candidate_limit, max(self.reranker.top_k, 15)))
 
@@ -893,7 +894,7 @@ class HybridSearch:
         # Cross-encoder reranker on top-N candidates.
         # Fallback: lightweight lexical overlap if cross-encoder is unavailable.
         # CPU-safe gating: rerank only when ranking is ambiguous.
-        if len(results) > 1:
+        if rerank and len(results) > 1:
             try:
                 query_token_count = len(_tokenize_for_rerank(q_norm))
 
@@ -968,7 +969,7 @@ class HybridSearch:
                 logger.debug("Reranker skipped: %s", exc)
 
         # Two-pass refresh: run heavy quality reranker in background and update cache.
-        if time_range is None:
+        if rerank and time_range is None:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
                 cache_query_norm=cache_query_norm,

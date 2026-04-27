@@ -14,6 +14,7 @@ def test_load_config_reads_api_reranker_env(monkeypatch):
     monkeypatch.setenv("AGENT_MEMORY_RERANKER_API_MODEL", "cohere/rerank-4")
     monkeypatch.setenv("AGENT_MEMORY_RERANKER_API_URL", "https://example.invalid/rerank")
     monkeypatch.setenv("AGENT_MEMORY_RERANKER_API_TIMEOUT", "7")
+    monkeypatch.setenv("AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK", "true")
     monkeypatch.setenv("AGENT_MEMORY_RERANKER_API_KEY_FILE", "~/custom-rerank-key")
 
     cfg = load_config()
@@ -22,6 +23,7 @@ def test_load_config_reads_api_reranker_env(monkeypatch):
     assert cfg.reranker_api_model == "cohere/rerank-4"
     assert cfg.reranker_api_url == "https://example.invalid/rerank"
     assert cfg.reranker_api_timeout == 7
+    assert cfg.reranker_api_local_fallback is True
     assert cfg.reranker_api_key_file == "~/custom-rerank-key"
 
 
@@ -148,6 +150,73 @@ async def test_lifespan_prefers_api_reranker_when_available(tmp_path, monkeypatc
             reranker_enabled=True,
             reranker_api_enabled=True,
             reranker_api_key="rerank-key",
+            reranker_two_pass_enabled=True,
+            embed_worker_enabled=False,
+        ),
+    )
+
+    async with api_module.lifespan(api_module.app):
+        assert isinstance(api_module._reranker, StubApiReranker)
+        assert api_module._bg_reranker is None
+        assert len(api_instances) == 1
+        assert len(cross_instances) == 0
+        assert api_module._reranker.fallback_reranker is None
+
+
+@pytest.mark.asyncio
+async def test_lifespan_can_enable_api_reranker_local_fallback(tmp_path, monkeypatch):
+    api_instances = []
+    cross_instances = []
+
+    class StubApiReranker:
+        def __init__(self, **kwargs):
+            self.available = True
+            self.top_k = kwargs["top_k"]
+            self.fallback_reranker = kwargs.get("fallback_reranker")
+            api_instances.append(kwargs)
+
+        def warmup(self) -> bool:
+            return True
+
+        def score(self, query, docs, doc_ids=None):
+            return [0.9 for _ in docs[: self.top_k]]
+
+    class StubCrossReranker:
+        def __init__(self, **kwargs):
+            cross_instances.append(kwargs)
+            self.top_k = kwargs["top_k"]
+
+        @staticmethod
+        def _resolve_model_name(value: str) -> str:
+            return value
+
+        @property
+        def available(self) -> bool:
+            return True
+
+        def warmup(self) -> bool:
+            return True
+
+        def score(self, query, docs, doc_ids=None):
+            return [0.5 for _ in docs[: self.top_k]]
+
+    async def stub_warmup_loop():
+        return None
+
+    monkeypatch.setattr(api_module, "APIReranker", StubApiReranker)
+    monkeypatch.setattr(api_module, "CrossEncoderReranker", StubCrossReranker)
+    monkeypatch.setattr(api_module, "warmup_loop", stub_warmup_loop)
+    monkeypatch.setattr(
+        api_module,
+        "load_config",
+        lambda: Config(
+            db_path=str(tmp_path / "memory.sqlite"),
+            embedding_dimensions=4,
+            openrouter_api_key="embed-key",
+            reranker_enabled=True,
+            reranker_api_enabled=True,
+            reranker_api_key="rerank-key",
+            reranker_api_local_fallback=True,
             reranker_two_pass_enabled=True,
             embed_worker_enabled=False,
         ),

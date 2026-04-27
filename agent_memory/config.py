@@ -60,6 +60,7 @@ class Config:
     reranker_api_model: str = "cohere/rerank-4-pro"
     reranker_api_url: str = "https://openrouter.ai/api/v1/rerank"
     reranker_api_timeout: int = 10
+    reranker_api_local_fallback: bool = False
 
     # Two-pass reranking (fast response + background quality refresh)
     reranker_two_pass_enabled: bool = True
@@ -153,6 +154,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         AGENT_MEMORY_RERANKER_API_MODEL
         AGENT_MEMORY_RERANKER_API_URL
         AGENT_MEMORY_RERANKER_API_TIMEOUT
+        AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK
         AGENT_MEMORY_RERANKER_TWO_PASS_ENABLED
         AGENT_MEMORY_RERANKER_TWO_PASS_MODEL
         AGENT_MEMORY_RERANKER_TWO_PASS_TOP_K
@@ -209,6 +211,7 @@ def load_config(config_path: Optional[str] = None) -> Config:
         "AGENT_MEMORY_RERANKER_API_MODEL": ("reranker_api_model", str),
         "AGENT_MEMORY_RERANKER_API_URL": ("reranker_api_url", str),
         "AGENT_MEMORY_RERANKER_API_TIMEOUT": ("reranker_api_timeout", int),
+        "AGENT_MEMORY_RERANKER_API_LOCAL_FALLBACK": ("reranker_api_local_fallback", _parse_bool),
         "AGENT_MEMORY_RERANKER_TWO_PASS_ENABLED": ("reranker_two_pass_enabled", _parse_bool),
         "AGENT_MEMORY_RERANKER_TWO_PASS_MODEL": ("reranker_two_pass_model", str),
         "AGENT_MEMORY_RERANKER_TWO_PASS_TOP_K": ("reranker_two_pass_top_k", int),
