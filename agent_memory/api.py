@@ -833,6 +833,31 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     }
 
 
+async def _embed_single_for_store(text: str) -> Optional[List[float]]:
+    """Embed explicit /v1/store writes when no background embed worker will do it.
+
+    If the worker is enabled we keep the fast async path. If it is disabled,
+    returning a vector here prevents freshly stored memories from staying
+    semantic-invisible until an external backfill cron runs.
+    """
+    if _embedder is None:
+        return None
+    if _config is not None and _config.embed_worker_enabled:
+        return None
+
+    retries = max(1, int(_config.embed_max_retries if _config else 3))
+    for attempt in range(retries):
+        try:
+            return await _embedder.embed(text)
+        except Exception as exc:
+            if attempt < retries - 1:
+                logger.warning("Store embed retry %d/%d: %s", attempt + 1, retries, exc)
+                await asyncio.sleep(0.5 * (attempt + 1))
+            else:
+                logger.error("Store embed failed after %d attempts: %s", retries, exc)
+    return None
+
+
 @app.post("/v1/store")
 async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     """Manually store a single memory."""
@@ -840,11 +865,6 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
         raise HTTPException(400, "Cannot store to 'all' -- specify an agent")
 
     storage = _get_storage(req.agent, request=request)
-
-    # Async embedding: store without vector, let embed_worker handle it.
-    # This reduces store latency from ~8.8s to <100ms.
-    # embed_worker runs every 5 minutes and backfills vectorless memories.
-    vector = None
 
     # Rule detection: override category/importance if instruction detected
     category = req.category
@@ -859,6 +879,8 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     req.text = normalize_memory_text(req.text)
     if is_low_signal_memory_text(req.text):
         raise HTTPException(400, "Memory text is low-signal transport metadata")
+
+    vector = await _embed_single_for_store(req.text)
 
     # Provenance: use source from request if provided, default to 'api'
     source = getattr(req, 'source', None) or 'api'
@@ -901,15 +923,12 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
 
     storage = _get_storage(req.agent, request=request)
 
-    # Async embedding: store without vector, let embed_worker handle it.
-    # This reduces store latency from ~8.8s to <100ms.
-    # embed_worker runs every 5 minutes and backfills vectorless memories.
-    vector = None
-
     from .ingest import is_low_signal_memory_text, normalize_memory_text
     req.text = normalize_memory_text(req.text)
     if is_low_signal_memory_text(req.text):
         raise HTTPException(400, "Memory text is low-signal transport metadata")
+
+    vector = await _embed_single_for_store(req.text)
 
     res = storage.merge_or_store(
         text=req.text,

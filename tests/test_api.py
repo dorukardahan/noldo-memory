@@ -253,6 +253,38 @@ class TestStore:
         assert resp.status_code == 200
         assert resp.json()["stored"] is True
 
+    async def test_store_embeds_inline_when_worker_disabled(self, client):
+        api_module._config.embed_worker_enabled = False
+
+        resp = await client.post("/v1/store", json={
+            "text": "Inline vector store test",
+        })
+
+        assert resp.status_code == 200
+        mid = resp.json()["id"]
+        storage = api_module._storage_pool.get("main")
+        row = storage._get_conn().execute(
+            "SELECT vector_rowid FROM memories WHERE id = ?", (mid,)
+        ).fetchone()
+        assert row is not None
+        assert row["vector_rowid"] is not None
+
+    async def test_store_defers_embedding_when_worker_enabled(self, client):
+        api_module._config.embed_worker_enabled = True
+
+        resp = await client.post("/v1/store", json={
+            "text": "Async vector store test",
+        })
+
+        assert resp.status_code == 200
+        mid = resp.json()["id"]
+        storage = api_module._storage_pool.get("main")
+        row = storage._get_conn().execute(
+            "SELECT vector_rowid FROM memories WHERE id = ?", (mid,)
+        ).fetchone()
+        assert row is not None
+        assert row["vector_rowid"] is None
+
     async def test_store_validation_error(self, client):
         resp = await client.post("/v1/store", json={})
         assert resp.status_code == 422  # missing required text
