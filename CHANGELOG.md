@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.7] - 2026-05-03
+
+### Changed
+- Declare the native OpenClaw plugin runtime entrypoint and 2026.5.2 package compatibility metadata, so fresh local plugin installs use the current installer path instead of legacy index discovery.
+
 ## [1.27.6] - 2026-05-03
 
 ### Fixed

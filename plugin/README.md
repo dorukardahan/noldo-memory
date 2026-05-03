@@ -12,8 +12,9 @@ It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
 tool access to that service.
 
-The plugin is dependency-free; a local `openclaw plugins install -l ./plugin`
-does not require an extra npm install step.
+The plugin is dependency-free and declares `openclaw.extensions`, so a local
+`openclaw plugins install -l ./plugin` uses the current OpenClaw 2026.5.2+
+installer path without an extra npm install step.
 
 ## Install
 

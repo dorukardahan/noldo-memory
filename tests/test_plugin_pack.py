@@ -11,6 +11,13 @@ def test_openclaw_plugin_pack_is_installable():
 
     assert manifest["id"] == "noldomem"
     assert package["openclaw"]["plugin"] is True
+    assert package["openclaw"]["extensions"] == ["./index.js"]
+    assert package["openclaw"]["install"] == {"minHostVersion": ">=2026.5.2"}
+    assert package["openclaw"]["compat"] == {"pluginApi": ">=2026.5.2"}
+    assert package["openclaw"]["build"] == {
+        "openclawVersion": "2026.5.2",
+        "pluginSdkVersion": "2026.5.2",
+    }
     assert "dependencies" not in package
     assert (plugin_root / package["main"]).is_file()
 

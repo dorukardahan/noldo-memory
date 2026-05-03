@@ -166,7 +166,9 @@ openclaw plugins install -l "$(pwd)/plugin"
 
 The plugin gives agents explicit `noldomem_recall`, `noldomem_store`, and
 `noldomem_pin` tools. The hook pack remains responsible for lifecycle capture
-and bootstrap context injection. See [`plugin/README.md`](./plugin/README.md).
+and bootstrap context injection. The package declares its runtime entrypoint for
+the OpenClaw 2026.5.2+ plugin installer path. See
+[`plugin/README.md`](./plugin/README.md).
 
 **4e. Set the API key for hooks and plugin:**
 

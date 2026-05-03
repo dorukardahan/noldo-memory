@@ -1,10 +1,23 @@
 {
   "name": "@dorukardahan/noldo-memory-plugin",
-  "version": "1.27.6",
+  "version": "1.27.7",
   "private": true,
   "type": "module",
   "main": "index.js",
   "openclaw": {
-    "plugin": true
+    "plugin": true,
+    "extensions": [
+      "./index.js"
+    ],
+    "install": {
+      "minHostVersion": ">=2026.5.2"
+    },
+    "compat": {
+      "pluginApi": ">=2026.5.2"
+    },
+    "build": {
+      "openclawVersion": "2026.5.2",
+      "pluginSdkVersion": "2026.5.2"
+    }
   }
 }
