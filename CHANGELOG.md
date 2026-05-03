@@ -6,8 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.4] - 2026-05-03
+
 ### Fixed
 - Declare NoldoMem tool contracts and startup activation in the OpenClaw plugin manifest so `noldomem_recall`, `noldomem_store`, and `noldomem_pin` register reliably on OpenClaw 2026.5.2+ manifest-first startup paths.
+- Embed explicit `/v1/store` and `/v1/rule` writes inline when the background embed worker is disabled, preventing fresh `noldomem_store` memories from staying vectorless until the next backfill.
 
 ## [1.27.3] - 2026-04-27
 
