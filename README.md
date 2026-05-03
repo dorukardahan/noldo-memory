@@ -74,16 +74,16 @@ Works with OpenRouter, OpenAI, or any OpenAI-compatible embedding API.
 | heavy | Qwen3-Embedding-8B | ~8GB | 12GB+ | Dedicated server |
 
 ```bash
-# Download model (example: standard profile)
-huggingface-cli download Qwen/Qwen3-Embedding-4B-GGUF Qwen3-Embedding-4B-Q8_0.gguf --local-dir models/
+# Download model (example: light/default profile)
+huggingface-cli download Qwen/Qwen3-Embedding-0.6B-GGUF Qwen3-Embedding-0.6B-Q8_0.gguf --local-dir models/
 
 # Start embedding server
-llama-server --model models/Qwen3-Embedding-4B-Q8_0.gguf \
+llama-server --model models/Qwen3-Embedding-0.6B-Q8_0.gguf \
   --embedding --pooling last --host 127.0.0.1 --port 8090
 
 # In .env:
 # OPENROUTER_BASE_URL=http://127.0.0.1:8090/v1
-# AGENT_MEMORY_DIMENSIONS=2560
+# AGENT_MEMORY_DIMENSIONS=1024
 ```
 
 Optional hosted reranker for better top-k ordering without loading a local

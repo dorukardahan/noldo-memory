@@ -23,8 +23,8 @@ class Config:
 
     # OpenRouter embedding
     openrouter_api_key: str = ""
-    embedding_model: str = "qwen/qwen3-embedding-4b"
-    embedding_dimensions: int = 2560
+    embedding_model: str = "qwen/qwen3-embedding-0.6b"
+    embedding_dimensions: int = 1024
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Storage — default path; falls back to legacy directory if it exists

@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.9] - 2026-05-03
+
+### Changed
+- Default new local embedding setups to Qwen3-Embedding-0.6B / 1024 dimensions and make larger CPU models an explicit `detect-hardware.sh --prefer-quality` choice. This keeps fresh installs aligned with the production-tested low-latency profile and reduces dimension-mismatch risk.
+
 ## [1.27.8] - 2026-05-03
 
 ### Fixed

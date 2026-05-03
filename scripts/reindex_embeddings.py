@@ -2,7 +2,7 @@
 """Re-embed all memories with current embedding configuration.
 
 Reads model, dimensions, and API URL from environment / .env file.
-Safe for profile changes (e.g. switching from 4B to 8B).
+Safe for profile changes (e.g. switching from 0.6B to 4B).
 
 Steps:
 1. Read all memories from SQLite
@@ -46,8 +46,8 @@ def _resolve_db_path() -> str:
 DB_PATH = _resolve_db_path()
 EMBED_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "http://localhost:8090/v1").rstrip("/")
 EMBED_URL = f"{EMBED_BASE_URL}/embeddings"
-EMBED_MODEL = os.environ.get("AGENT_MEMORY_MODEL", "qwen/qwen3-embedding-4b")
-EMBED_DIM = int(os.environ.get("AGENT_MEMORY_DIMENSIONS", "2560"))
+EMBED_MODEL = os.environ.get("AGENT_MEMORY_MODEL", "qwen/qwen3-embedding-0.6b")
+EMBED_DIM = int(os.environ.get("AGENT_MEMORY_DIMENSIONS", "1024"))
 MAX_CHARS = int(os.environ.get("AGENT_MEMORY_MAX_EMBED_CHARS", "3500"))
 API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 BATCH_SIZE = 2  # conservative for local llama-server

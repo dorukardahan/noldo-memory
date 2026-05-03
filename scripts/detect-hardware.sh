@@ -3,17 +3,29 @@
 #
 # Usage:
 #   ./scripts/detect-hardware.sh              # show recommendation
-#   ./scripts/detect-hardware.sh --json       # machine-readable output
-#   ./scripts/detect-hardware.sh --apply      # write recommended .env settings
+#   ./scripts/detect-hardware.sh --json              # machine-readable output
+#   ./scripts/detect-hardware.sh --apply             # write recommended .env settings
+#   ./scripts/detect-hardware.sh --prefer-quality    # opt into larger CPU models
 #
 # Profiles:
 #   minimal  — ≤2GB RAM free, 1-2 cores   → EmbeddingGemma 300M (314MB)
-#   light    — 2-4GB RAM, 2-4 cores        → Qwen3-Embedding-0.6B (610MB)
-#   standard — 4-8GB RAM, 4-8 cores        → Qwen3-Embedding-4B (4.0GB)   ← default
-#   heavy    — 8-16GB RAM, 8+ cores        → Qwen3-Embedding-8B (8.1GB)
+#   light    — default CPU recommendation  → Qwen3-Embedding-0.6B (610MB)
+#   standard — opt-in CPU quality profile   → Qwen3-Embedding-4B (4.0GB)
+#   heavy    — opt-in CPU quality profile   → Qwen3-Embedding-8B (8.1GB)
 #   gpu      — NVIDIA GPU with ≥6GB VRAM   → Qwen3-Embedding-8B + GPU offload
 
 set -euo pipefail
+
+PREFER_QUALITY=false
+ARGS=()
+for arg in "$@"; do
+  if [ "$arg" = "--prefer-quality" ]; then
+    PREFER_QUALITY=true
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
 
 # ─── Gather hardware info ───────────────────────────────────────────────
 TOTAL_RAM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo 0)
@@ -38,13 +50,13 @@ fi
 DISK_AVAIL_GB=$(df -BG /opt 2>/dev/null | awk 'NR==2{print $4}' | tr -d 'G' || echo 0)
 
 # ─── Determine profile ──────────────────────────────────────────────────
-PROFILE="standard"
-MODEL_NAME="Qwen3-Embedding-4B-Q8_0.gguf"
-MODEL_ID="qwen/qwen3-embedding-4b"
-DIMENSIONS=2560
-MODEL_SIZE_MB=4096
-THREADS=8
-PARALLEL=2
+PROFILE="light"
+MODEL_NAME="Qwen3-Embedding-0.6B-Q8_0.gguf"
+MODEL_ID="qwen/qwen3-embedding-0.6b"
+DIMENSIONS=1024
+MODEL_SIZE_MB=610
+THREADS=$((CPU_CORES > 4 ? 4 : CPU_CORES))
+PARALLEL=1
 
 if [ "$HAS_GPU" = true ] && [ "$GPU_VRAM_MB" -ge 6000 ]; then
   PROFILE="gpu"
@@ -54,7 +66,7 @@ if [ "$HAS_GPU" = true ] && [ "$GPU_VRAM_MB" -ge 6000 ]; then
   MODEL_SIZE_MB=8192
   THREADS=$CPU_CORES
   PARALLEL=4
-elif [ "$TOTAL_RAM_MB" -ge 12000 ] && [ "$CPU_CORES" -ge 8 ]; then
+elif [ "$PREFER_QUALITY" = true ] && [ "$TOTAL_RAM_MB" -ge 12000 ] && [ "$CPU_CORES" -ge 8 ]; then
   PROFILE="heavy"
   MODEL_NAME="Qwen3-Embedding-8B-Q8_0.gguf"
   MODEL_ID="qwen/qwen3-embedding-8b"
@@ -62,9 +74,12 @@ elif [ "$TOTAL_RAM_MB" -ge 12000 ] && [ "$CPU_CORES" -ge 8 ]; then
   MODEL_SIZE_MB=8192
   THREADS=$((CPU_CORES > 16 ? 16 : CPU_CORES))
   PARALLEL=2
-elif [ "$TOTAL_RAM_MB" -ge 6000 ] && [ "$CPU_CORES" -ge 4 ]; then
+elif [ "$PREFER_QUALITY" = true ] && [ "$TOTAL_RAM_MB" -ge 6000 ] && [ "$CPU_CORES" -ge 4 ]; then
   PROFILE="standard"
-  # defaults already set
+  MODEL_NAME="Qwen3-Embedding-4B-Q8_0.gguf"
+  MODEL_ID="qwen/qwen3-embedding-4b"
+  DIMENSIONS=2560
+  MODEL_SIZE_MB=4096
   THREADS=$((CPU_CORES > 12 ? 12 : CPU_CORES))
 elif [ "$TOTAL_RAM_MB" -ge 2500 ] && [ "$CPU_CORES" -ge 2 ]; then
   PROFILE="light"
@@ -131,7 +146,7 @@ if [ "${1:-}" = "--apply" ]; then
   echo ""
   echo "Next: start your embedding server:"
   echo "  llama-server --model $MODEL_NAME \\"
-  echo "    --embedding --pooling last --host 0.0.0.0 --port 8090 \\"
+  echo "    --embedding --pooling last --host 127.0.0.1 --port 8090 \\"
   echo "    --ctx-size 8192 --batch-size 2048 --threads $THREADS --parallel $PARALLEL"
   exit 0
 fi
@@ -160,11 +175,12 @@ echo "    Parallel:   $PARALLEL"
 echo ""
 echo "  llama-server command:"
 echo "    llama-server --model $MODEL_NAME \\"
-echo "      --embedding --pooling last --host 0.0.0.0 --port 8090 \\"
+echo "      --embedding --pooling last --host 127.0.0.1 --port 8090 \\"
 echo "      --ctx-size 8192 --batch-size 2048 --threads $THREADS --parallel $PARALLEL"
 echo ""
-echo "  Apply to .env:  ./scripts/detect-hardware.sh --apply"
-echo "  JSON output:    ./scripts/detect-hardware.sh --json"
+echo "  Apply to .env:      ./scripts/detect-hardware.sh --apply"
+echo "  JSON output:        ./scripts/detect-hardware.sh --json"
+echo "  Larger CPU models:  ./scripts/detect-hardware.sh --prefer-quality"
 echo ""
 echo "  ┌──────────────────────────────────────────────────────────┐"
 echo "  │ All Profiles:                                            │"
@@ -173,13 +189,13 @@ echo "  │ minimal  — EmbeddingGemma 300M  (314MB, dim=768)        │"
 echo "  │            ≤2GB RAM, 1-2 cores, Raspberry Pi / tiny VPS │"
 echo "  │                                                          │"
 echo "  │ light    — Qwen3-Embed-0.6B     (610MB, dim=1024)       │"
-echo "  │            2-4GB RAM, 2-4 cores, small VPS              │"
+echo "  │            default CPU profile, small VPS friendly      │"
 echo "  │                                                          │"
 echo "  │ standard — Qwen3-Embed-4B       (4.0GB, dim=2560)       │"
-echo "  │            4-8GB RAM, 4-8 cores, mid-range server       │"
+echo "  │            opt-in via --prefer-quality                  │"
 echo "  │                                                          │"
 echo "  │ heavy    — Qwen3-Embed-8B       (8.1GB, dim=4096)       │"
-echo "  │            12GB+ RAM, 8+ cores, dedicated server        │"
+echo "  │            opt-in via --prefer-quality                  │"
 echo "  │                                                          │"
 echo "  │ gpu      — Qwen3-Embed-8B + GPU (8.1GB, dim=4096)       │"
 echo "  │            NVIDIA GPU ≥6GB VRAM, fastest inference       │"
