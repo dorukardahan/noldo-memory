@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.5] - 2026-05-03
+
+### Fixed
+- Preserve semantic recall for namespace or memory-type scoped vector search by widening sqlite-vec candidates before applying metadata filters. This prevents sparse workspace/session scopes from falling back to keyword-only scoring when closer global memories crowd out scoped vectors.
+
 ## [1.27.4] - 2026-05-03
 
 ### Fixed
