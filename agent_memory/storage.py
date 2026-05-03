@@ -1080,59 +1080,89 @@ class MemoryStorage:
         """
         conn = self._get_conn()
         blob = np.array(query_vector, dtype=np.float32).tobytes()
+        requested_limit = max(1, int(limit))
+        has_metadata_filter = namespace is not None or memory_type is not None
 
-        rows = conn.execute(
-            """
-            SELECT
-                mv.rowid   AS vec_rowid,
-                mv.distance AS distance
-            FROM memory_vectors mv
-            WHERE mv.embedding MATCH ?
-            ORDER BY mv.distance
-            LIMIT ?
-            """,
-            (blob, limit),
-        ).fetchall()
+        # sqlite-vec applies KNN LIMIT before we join/filter memory metadata.
+        # For namespace or memory_type scoped search, widen progressively so a
+        # sparse scoped memory is not dropped just because global neighbours
+        # from other scopes are closer.
+        if has_metadata_filter:
+            total_row = conn.execute("SELECT COUNT(*) AS c FROM memory_vectors").fetchone()
+            total_vectors = int(total_row["c"] if total_row else 0)
+            fetch_limit = min(max(requested_limit * 20, 200), max(total_vectors, requested_limit))
+            max_fetch_limit = total_vectors if total_vectors <= 20000 else min(total_vectors, 20000)
+            if max_fetch_limit <= 0:
+                max_fetch_limit = requested_limit
+        else:
+            fetch_limit = requested_limit
+            max_fetch_limit = requested_limit
 
-        # Pre-filter by min_score and collect vec_rowid → similarity mapping
-        candidates: List[tuple[int, float]] = []
-        for r in rows:
-            # sqlite-vec returns cosine *distance* (0 = identical, 2 = opposite)
-            similarity = 1.0 - (r["distance"] / 2.0)
-            if similarity >= min_score:
-                candidates.append((r["vec_rowid"], round(similarity, 4)))
+        def _fetch_rows(candidate_limit: int):
+            return conn.execute(
+                """
+                SELECT
+                    mv.rowid   AS vec_rowid,
+                    mv.distance AS distance
+                FROM memory_vectors mv
+                WHERE mv.embedding MATCH ?
+                ORDER BY mv.distance
+                LIMIT ?
+                """,
+                (blob, candidate_limit),
+            ).fetchall()
 
-        if not candidates:
-            return []
+        while True:
+            rows = _fetch_rows(fetch_limit)
 
-        # Batch fetch: single query instead of N+1 per-row lookups
-        vec_rowids = [c[0] for c in candidates]
-        sim_map = {c[0]: c[1] for c in candidates}
-        placeholders = ",".join("?" for _ in vec_rowids)
+            # Pre-filter by min_score and collect vec_rowid → similarity mapping
+            candidates: List[tuple[int, float]] = []
+            for r in rows:
+                # sqlite-vec returns cosine *distance* (0 = identical, 2 = opposite)
+                similarity = 1.0 - (r["distance"] / 2.0)
+                if similarity >= min_score:
+                    candidates.append((r["vec_rowid"], round(similarity, 4)))
 
-        where_parts = [f"vector_rowid IN ({placeholders})", "deleted_at IS NULL", "importance >= 0.05"]
-        params: List[Any] = list(vec_rowids)
-        if namespace is not None:
-            where_parts.append("namespace = ?")
-            params.append(namespace)
-        if memory_type is not None:
-            where_parts.append("COALESCE(memory_type, 'other') = ?")
-            params.append(memory_type)
-            if memory_type == "lesson":
-                where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
+            if not candidates:
+                return []
 
-        sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
-        mem_rows = conn.execute(sql, tuple(params)).fetchall()
+            # Batch fetch: single query instead of N+1 per-row lookups
+            vec_rowids = [c[0] for c in candidates]
+            sim_map = {c[0]: c[1] for c in candidates}
+            mem_rows = []
+            for start in range(0, len(vec_rowids), 900):
+                chunk = vec_rowids[start:start + 900]
+                placeholders = ",".join("?" for _ in chunk)
+                where_parts = [
+                    f"vector_rowid IN ({placeholders})",
+                    "deleted_at IS NULL",
+                    "importance >= 0.05",
+                ]
+                params: List[Any] = list(chunk)
+                if namespace is not None:
+                    where_parts.append("namespace = ?")
+                    params.append(namespace)
+                if memory_type is not None:
+                    where_parts.append("COALESCE(memory_type, 'other') = ?")
+                    params.append(memory_type)
+                    if memory_type == "lesson":
+                        where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
 
-        results: List[Dict[str, Any]] = []
-        for mem in mem_rows:
-            d = dict(mem)
-            d["score"] = sim_map.get(mem["vector_rowid"], 0.0)
-            results.append(d)
+                sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
+                mem_rows.extend(conn.execute(sql, tuple(params)).fetchall())
 
-        # Preserve original similarity ordering (highest first)
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results
+            results: List[Dict[str, Any]] = []
+            for mem in mem_rows:
+                d = dict(mem)
+                d["score"] = sim_map.get(mem["vector_rowid"], 0.0)
+                results.append(d)
+
+            # Preserve original similarity ordering (highest first)
+            results.sort(key=lambda x: x["score"], reverse=True)
+            if len(results) >= requested_limit or fetch_limit >= max_fetch_limit:
+                return results[:requested_limit]
+
+            fetch_limit = min(max_fetch_limit, max(fetch_limit * 2, fetch_limit + 200))
 
     # ------------------------------------------------------------------
     # Full-text search

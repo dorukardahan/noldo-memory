@@ -79,6 +79,29 @@ class TestVectorSearch:
         # Orthogonal vectors should have low similarity
         assert len(results) == 0
 
+    def test_namespace_filter_searches_within_scope(self, storage):
+        for i in range(30):
+            storage.store_memory(
+                text=f"global neighbour {i}",
+                vector=[1.0, 0.0, 0.0, 0.0],
+                namespace="global",
+            )
+        storage.store_memory(
+            text="target namespace memory",
+            vector=[0.0, 1.0, 0.0, 0.0],
+            namespace="target",
+        )
+
+        results = storage.search_vectors(
+            [1.0, 0.0, 0.0, 0.0],
+            limit=1,
+            namespace="target",
+        )
+
+        assert len(results) == 1
+        assert results[0]["text"] == "target namespace memory"
+        assert results[0]["namespace"] == "target"
+
 
 class TestFTSSearch:
     def test_text_search(self, storage):
