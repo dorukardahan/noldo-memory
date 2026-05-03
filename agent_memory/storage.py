@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -1254,9 +1255,11 @@ class MemoryStorage:
         """FTS5 search. Returns memories sorted by BM25 relevance."""
         conn = self._get_conn()
 
-        # Escape the query for FTS5 — wrap each token in double quotes
+        # Build a safe FTS5 query from searchable tokens only. Raw text can
+        # contain JSON, quotes, or shell-like punctuation that breaks MATCH.
+        tokens = re.findall(r"[\w]+(?:[.-][\w]+)*", query, flags=re.UNICODE)
         safe_query = " OR ".join(
-            f'"{tok}"' for tok in query.split() if tok.strip()
+            f'"{tok}"' for tok in tokens if tok.strip()
         )
         if not safe_query:
             return []

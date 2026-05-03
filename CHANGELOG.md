@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.8] - 2026-05-03
+
+### Fixed
+- Tokenize full-text search queries before building FTS5 MATCH expressions, so JSON snippets and quoted model names no longer break recall with syntax errors.
+
 ## [1.27.7] - 2026-05-03
 
 ### Changed

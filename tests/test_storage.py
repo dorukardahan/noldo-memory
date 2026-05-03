@@ -141,6 +141,14 @@ class TestFTSSearch:
         results = storage.search_text("konuştuk", limit=5)
         assert len(results) >= 1
 
+    def test_text_search_handles_embedded_quotes_in_query_tokens(self, storage):
+        storage.store_memory(text="route model gpt-5.4 through zeroapi")
+
+        results = storage.search_text('{"model":"gpt-5.4"}', limit=5)
+
+        assert len(results) >= 1
+        assert "gpt-5.4" in results[0]["text"]
+
 
 class TestEntityCRUD:
     def test_store_and_get_entity(self, storage):
