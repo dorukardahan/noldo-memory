@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.6] - 2026-05-03
+
+### Fixed
+- Respect sqlite-vec's 4096 KNN limit during scoped vector search and fall back to exact in-scope cosine scoring when a sparse namespace or memory-type filter still needs more candidates.
+
 ## [1.27.5] - 2026-05-03
 
 ### Fixed

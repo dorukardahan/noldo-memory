@@ -22,6 +22,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+SQLITE_VEC_MAX_K = 4096
+
 VALID_MEMORY_TYPES = frozenset({
     "fact",
     "preference",
@@ -1091,9 +1093,10 @@ class MemoryStorage:
             total_row = conn.execute("SELECT COUNT(*) AS c FROM memory_vectors").fetchone()
             total_vectors = int(total_row["c"] if total_row else 0)
             fetch_limit = min(max(requested_limit * 20, 200), max(total_vectors, requested_limit))
-            max_fetch_limit = total_vectors if total_vectors <= 20000 else min(total_vectors, 20000)
+            max_fetch_limit = min(total_vectors, SQLITE_VEC_MAX_K)
             if max_fetch_limit <= 0:
                 max_fetch_limit = requested_limit
+            fetch_limit = min(fetch_limit, max_fetch_limit)
         else:
             fetch_limit = requested_limit
             max_fetch_limit = requested_limit
@@ -1160,9 +1163,86 @@ class MemoryStorage:
             # Preserve original similarity ordering (highest first)
             results.sort(key=lambda x: x["score"], reverse=True)
             if len(results) >= requested_limit or fetch_limit >= max_fetch_limit:
+                if (
+                    has_metadata_filter
+                    and len(results) < requested_limit
+                    and total_vectors > max_fetch_limit
+                ):
+                    fallback = self._search_filtered_vectors_bruteforce(
+                        conn=conn,
+                        query_vector=np.array(query_vector, dtype=np.float32),
+                        min_score=min_score,
+                        limit=requested_limit,
+                        namespace=namespace,
+                        memory_type=memory_type,
+                    )
+                    if fallback:
+                        return fallback
                 return results[:requested_limit]
 
             fetch_limit = min(max_fetch_limit, max(fetch_limit * 2, fetch_limit + 200))
+
+    def _search_filtered_vectors_bruteforce(
+        self,
+        *,
+        conn: sqlite3.Connection,
+        query_vector: np.ndarray,
+        min_score: float,
+        limit: int,
+        namespace: Optional[str],
+        memory_type: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        where_parts = [
+            "m.vector_rowid IS NOT NULL",
+            "m.deleted_at IS NULL",
+            "m.importance >= 0.05",
+        ]
+        params: List[Any] = []
+        if namespace is not None:
+            where_parts.append("m.namespace = ?")
+            params.append(namespace)
+        if memory_type is not None:
+            where_parts.append("COALESCE(m.memory_type, 'other') = ?")
+            params.append(memory_type)
+            if memory_type == "lesson":
+                where_parts.append("COALESCE(m.lesson_status, 'active') = 'active'")
+
+        rows = conn.execute(
+            f"""
+            SELECT m.*, mv.embedding AS embedding
+              FROM memories m
+              JOIN memory_vectors mv ON mv.rowid = m.vector_rowid
+             WHERE {' AND '.join(where_parts)}
+            """,
+            tuple(params),
+        ).fetchall()
+
+        query_norm = float(np.linalg.norm(query_vector))
+        if query_norm <= 0.0:
+            return []
+
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            embedding = row["embedding"]
+            if embedding is None:
+                continue
+            vector = np.frombuffer(embedding, dtype=np.float32)
+            if vector.shape != query_vector.shape:
+                continue
+            vector_norm = float(np.linalg.norm(vector))
+            if vector_norm <= 0.0:
+                continue
+            cosine = float(np.dot(query_vector, vector) / (query_norm * vector_norm))
+            similarity = 1.0 - ((1.0 - cosine) / 2.0)
+            if similarity < min_score:
+                continue
+            d = dict(row)
+            d.pop("embedding", None)
+            d["score"] = round(similarity, 4)
+            results.append(d)
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:limit]
 
     # ------------------------------------------------------------------
     # Full-text search

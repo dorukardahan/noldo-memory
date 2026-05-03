@@ -2,6 +2,7 @@
 
 import pytest
 
+import agent_memory.storage as storage_module
 from agent_memory.storage import MemoryStorage
 
 
@@ -101,6 +102,29 @@ class TestVectorSearch:
         assert len(results) == 1
         assert results[0]["text"] == "target namespace memory"
         assert results[0]["namespace"] == "target"
+
+    def test_namespace_filter_uses_bruteforce_after_sqlite_vec_cap(self, storage, monkeypatch):
+        monkeypatch.setattr(storage_module, "SQLITE_VEC_MAX_K", 2)
+        for i in range(5):
+            storage.store_memory(
+                text=f"global cap neighbour {i}",
+                vector=[1.0, 0.0, 0.0, 0.0],
+                namespace="global",
+            )
+        storage.store_memory(
+            text="target memory beyond capped global neighbours",
+            vector=[0.0, 1.0, 0.0, 0.0],
+            namespace="target",
+        )
+
+        results = storage.search_vectors(
+            [1.0, 0.0, 0.0, 0.0],
+            limit=1,
+            namespace="target",
+        )
+
+        assert len(results) == 1
+        assert results[0]["text"] == "target memory beyond capped global neighbours"
 
 
 class TestFTSSearch:
