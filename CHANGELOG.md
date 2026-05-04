@@ -6,6 +6,10 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Document OpenClaw 2026.5.3 plugin hook timeout policy for the NoldoMem native plugin, so optional lifecycle capture cannot stall the gateway when the memory API is slow.
+- Clarify that custom NoldoMem deployments should remove native `memory_search` / `memory_get` from explicit agent tool allow lists while keeping `noldomem_recall`, `noldomem_store`, and `noldomem_pin`.
+
 ## [1.27.9] - 2026-05-03
 
 ### Changed

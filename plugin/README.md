@@ -33,6 +33,15 @@ Then enable it in `openclaw.json`:
     "entries": {
       "noldomem": {
         "enabled": true,
+        "hooks": {
+          "allowPromptInjection": false,
+          "timeoutMs": 5000,
+          "timeouts": {
+            "after_tool_call": 3000,
+            "before_compaction": 10000,
+            "subagent_ended": 3000
+          }
+        },
         "config": {
           "baseUrl": "http://127.0.0.1:8787",
           "apiKeyFile": "~/.noldomem/memory-api-key",
@@ -48,6 +57,10 @@ Then enable it in `openclaw.json`:
 }
 ```
 
+`hooks.timeoutMs` and `hooks.timeouts` are supported by OpenClaw 2026.5.3+.
+They bound optional lifecycle hooks without changing explicit
+`noldomem_recall`, `noldomem_store`, or `noldomem_pin` tool calls.
+
 Restart OpenClaw after installing.
 
 ## Plugin vs Hook Pack
@@ -62,3 +75,7 @@ Use both pieces for the full custom-memory workflow:
 Keep `enableAutoRecall=false` unless you explicitly want the native plugin to
 run a recall check before prompt build. The hook pack already handles bootstrap
 recall and is cheaper for normal operation.
+
+If the agent has an explicit tool allow list, remove OpenClaw's native
+`memory_search` and `memory_get` tools when NoldoMem is the intended memory
+system. Keep `noldomem_recall`, `noldomem_store`, and `noldomem_pin` allowed.

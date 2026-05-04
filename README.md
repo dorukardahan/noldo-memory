@@ -133,6 +133,23 @@ python -m agent_memory
 }
 ```
 
+If your agents use explicit `tools.allow` lists, remove OpenClaw's native
+`memory_search` and `memory_get` tools from those lists and keep the NoldoMem
+tools instead. Otherwise the model can choose the stale native memory path even
+though `memorySearch.enabled` is false.
+
+```json
+{
+  "tools": {
+    "alsoAllow": [
+      "noldomem_recall",
+      "noldomem_store",
+      "noldomem_pin"
+    ]
+  }
+}
+```
+
 **4b. Enable hooks:**
 
 ```json
@@ -169,6 +186,29 @@ The plugin gives agents explicit `noldomem_recall`, `noldomem_store`, and
 and bootstrap context injection. The package declares its runtime entrypoint for
 the OpenClaw 2026.5.2+ plugin installer path. See
 [`plugin/README.md`](./plugin/README.md).
+
+For OpenClaw 2026.5.3+, set hook timeouts on the plugin entry so optional
+lifecycle capture cannot delay the gateway if the memory API is slow:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "noldomem": {
+        "hooks": {
+          "allowPromptInjection": false,
+          "timeoutMs": 5000,
+          "timeouts": {
+            "after_tool_call": 3000,
+            "before_compaction": 10000,
+            "subagent_ended": 3000
+          }
+        }
+      }
+    }
+  }
+}
+```
 
 **4e. Set the API key for hooks and plugin:**
 
