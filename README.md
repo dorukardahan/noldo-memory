@@ -258,6 +258,10 @@ curl -X POST localhost:8787/v1/recall \
 
 **Put this in your agent's TOOLS.md or system prompt so the agent knows how to use NoldoMem:**
 
+NoldoMem can also back non-OpenClaw agents through a small adapter that calls
+the public HTTP API; see
+[`docs/external-runtime-adapters.md`](./docs/external-runtime-adapters.md).
+
 ```markdown
 ## Memory API (NoldoMem)
 
