@@ -10,6 +10,13 @@ def test_openclaw_plugin_pack_is_installable():
     package = json.loads((plugin_root / "package.json").read_text())
 
     assert manifest["id"] == "noldomem"
+    assert manifest["contracts"]["tools"] == [
+        "noldomem_recall",
+        "noldomem_store",
+        "noldomem_pin",
+    ]
+    assert manifest["activation"]["onStartup"] is True
+
     assert package["openclaw"]["plugin"] is True
     assert package["openclaw"]["extensions"] == ["./index.js"]
     assert package["openclaw"]["install"] == {"minHostVersion": ">=2026.5.2"}
