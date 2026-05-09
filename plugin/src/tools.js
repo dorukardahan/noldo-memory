@@ -210,7 +210,7 @@ export function registerTools(api, client, cfg) {
         const agent = resolveAgentId(ctx);
         try {
           const data = await client.pin({
-            memory_id: params.memory_id,
+            id: params.memory_id,
             agent,
           });
           return {

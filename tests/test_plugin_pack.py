@@ -53,3 +53,12 @@ def test_native_plugin_registers_current_openclaw_typed_hooks():
     assert 'api.on("after_tool_call"' in hooks_source
     assert 'api.on("before_compaction"' in hooks_source
     assert 'api.on("subagent_ended"' in hooks_source
+
+
+def test_plugin_pin_uses_public_pin_api_id_contract():
+    repo_root = Path(__file__).resolve().parent.parent
+    tools_source = (repo_root / "plugin" / "src" / "tools.js").read_text()
+    pin_source = tools_source.split("// ── noldomem_pin ──", 1)[1]
+
+    assert "id: params.memory_id" in pin_source
+    assert "memory_id: params.memory_id" not in pin_source

@@ -40,6 +40,15 @@ Example store request:
 }
 ```
 
+Example pin request:
+
+```json
+{
+  "id": "memory-id-to-pin",
+  "agent": "external-agent"
+}
+```
+
 ## Memory Types
 
 External adapters should use only the public `memory_type` enum:
