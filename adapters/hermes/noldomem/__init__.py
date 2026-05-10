@@ -28,6 +28,9 @@ except Exception:  # pragma: no cover - Hermes supplies this at runtime
 
 VALID_MEMORY_TYPES = {"fact", "preference", "rule", "conversation", "lesson", "other"}
 DEFAULT_BASE_URL = "http://127.0.0.1:8787"
+# NoldoMem API rejects recall queries longer than 2000 chars (HTTP 422).
+# Truncate well below that to leave room for safe UTF-8 boundaries.
+RECALL_QUERY_MAX_CHARS = 1950
 
 
 @dataclass
@@ -342,7 +345,7 @@ class NoldoMemProvider(MemoryProvider):
         try:
             if tool_name == "noldomem_recall":
                 body = self._base_body(session_id=kwargs.get("session_id", ""))
-                body["query"] = str(args.get("query") or "").strip()
+                body["query"] = _truncate(str(args.get("query") or "").strip(), RECALL_QUERY_MAX_CHARS)
                 body["limit"] = _as_int(args.get("limit"), self._config.recall_limit, minimum=1, maximum=20)
                 if args.get("namespace"):
                     body["namespace"] = str(args["namespace"])
@@ -419,7 +422,7 @@ class NoldoMemProvider(MemoryProvider):
             return ""
         try:
             body = self._base_body(session_id=session_id)
-            body.update({"query": query, "limit": self._config.recall_limit})
+            body.update({"query": _truncate(query, RECALL_QUERY_MAX_CHARS), "limit": self._config.recall_limit})
             data = self._client.recall(body)
             context = self._format_recall(data)
             key = self._cache_key(query, session_id)
