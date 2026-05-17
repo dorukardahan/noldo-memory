@@ -31,6 +31,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 # NoldoMem API rejects recall queries longer than 2000 chars (HTTP 422).
 # Truncate well below that to leave room for safe UTF-8 boundaries.
 RECALL_QUERY_MAX_CHARS = 1950
+DEFAULT_TIMEOUT_SECONDS = 8.0
 
 
 @dataclass
@@ -41,7 +42,7 @@ class NoldoMemConfig:
     namespace: str = "default"
     recall_limit: int = 5
     recall_max_chars: int = 3500
-    timeout_seconds: float = 2.0
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     prefetch_enabled: bool = True
     sync_prefetch_on_miss: bool = True
     sync_turns_enabled: bool = False
@@ -195,7 +196,7 @@ class NoldoMemProvider(MemoryProvider):
             ),
             timeout_seconds=_as_float(
                 os.environ.get("NOLDOMEM_TIMEOUT_SECONDS") or raw.get("timeout_seconds"),
-                2.0,
+                DEFAULT_TIMEOUT_SECONDS,
                 minimum=0.2,
                 maximum=10.0,
             ),

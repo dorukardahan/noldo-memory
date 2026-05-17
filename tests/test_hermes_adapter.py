@@ -24,7 +24,7 @@ sys.modules.setdefault("agent.memory_manager", memory_manager_module)
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "adapters" / "hermes"))
 
-from noldomem import NoldoMemHTTPClient, NoldoMemProvider  # noqa: E402
+from noldomem import DEFAULT_TIMEOUT_SECONDS, NoldoMemHTTPClient, NoldoMemProvider  # noqa: E402
 
 
 class _Response:
@@ -71,6 +71,19 @@ def test_provider_exposes_stable_tool_names(monkeypatch, tmp_path):
 
     assert names == ["noldomem_recall", "noldomem_store", "noldomem_pin"]
     assert provider.is_available() is True
+
+
+def test_provider_default_timeout_allows_hosted_reranker_latency(monkeypatch, tmp_path):
+    key_file = tmp_path / "key"
+    key_file.write_text("test-key", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NOLDOMEM_API_KEY_FILE", str(key_file))
+
+    provider = NoldoMemProvider()
+    cfg = provider.load_config(str(tmp_path))
+
+    assert cfg.timeout_seconds == DEFAULT_TIMEOUT_SECONDS
+    assert cfg.timeout_seconds >= 8.0
 
 
 def test_provider_pin_tool_uses_id_payload(monkeypatch, tmp_path):

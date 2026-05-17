@@ -41,7 +41,7 @@ Create `$HERMES_HOME/noldomem.json`:
   "namespace": "default",
   "recall_limit": 5,
   "recall_max_chars": 3500,
-  "timeout_seconds": 2.0,
+  "timeout_seconds": 8.0,
   "prefetch_enabled": true,
   "sync_prefetch_on_miss": true,
   "sync_turns_enabled": false,

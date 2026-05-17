@@ -6,6 +6,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.27.11] - 2026-05-17
+
+### Fixed
+- Raise the Hermes NoldoMem adapter default HTTP timeout to 8 seconds so healthy recall/store calls with hosted reranking or inline embedding do not fail at the old 2 second boundary.
+
 ### Changed
 - Document OpenClaw 2026.5.3 plugin hook timeout policy for the NoldoMem native plugin, so optional lifecycle capture cannot stall the gateway when the memory API is slow.
 - Clarify that custom NoldoMem deployments should remove native `memory_search` / `memory_get` from explicit agent tool allow lists while keeping `noldomem_recall`, `noldomem_store`, and `noldomem_pin`.
