@@ -163,6 +163,7 @@ host event + trusted agent/session scope
 | Outgoing text | OpenClaw successful `message_sent` marks delivered; Hermes sync marks generated | Generation success is not transport receipt. Missing host scope is rejected |
 | Outgoing media | API can preserve a supplied delivery/extraction assertion | Pinned outgoing hook does not expose the full attachment payload. No proof of end-to-end delivered media capture |
 | Expiring/missing attachments | Derivative remains usable with original reference stripped of query/fragment | Does not recover lost content; reference-only input does not invent facts |
+| Long text | Capture heuristics inspect the bounded prefix; successful outgoing delivery and full-text injection guards still apply | Text beyond the existing 2000 UTF-16-unit bound is not retained; truncation does not split a surrogate pair |
 | Duplicate/async events | Exact provenance-matched retries deduplicate before embeddings; in-flight cache generations fence writes/forget | Unkeyed replay after deletion is not a forgotten-source admission system |
 | Same-agent subtasks | Trusted scope plus child source session | Cross-agent target session is refused; no preference-sharing pool |
 
@@ -203,9 +204,10 @@ migrated or reindexed.
 
 `DELETE /v1/forget` and scoped `noldomem_forget` delete the connected revision
 family, FTS/vector entries and linked temporal facts, invalidating caches.
+Historical recall includes closed/current versions, excluding future starts unless
+an explicit `as_of` selects that time.
 Query-based forgetting also searches closed/future revisions, so an old-only
-phrase can identify the family. They
-do not erase source transcripts, previously emitted context, backups, native
+phrase can identify the family. Forgetting does not erase source transcripts, previously emitted context, backups, native
 memory or arbitrary re-imported copies. Native/OpenClaw session-level forgotten
 admission is a stronger capability in that specific respect.
 
@@ -301,7 +303,7 @@ component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
 The local unified compile/lint/test audit passed after the review fixes
-(483 tests, one optional skip). Python sdist and
+(485 tests, one optional skip). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).

@@ -1111,7 +1111,7 @@ async def forget(req: ForgetRequest, request: Request) -> Dict[str, Any]:
         return {"deleted": deleted, "id": req.id}
 
     if req.query:
-        results = storage.search_text(req.query, limit=1, include_history=True)
+        results = storage.search_text(req.query, limit=1, include_history=True, include_future=True)
         if results:
             mid = results[0]["id"]
             deleted = storage.delete_memory(mid)

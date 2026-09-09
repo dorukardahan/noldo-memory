@@ -1017,9 +1017,11 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def validity_filter(*, include_history=False, as_of=None, prefix=""):
+    def validity_filter(*, include_history=False, as_of=None, prefix="", include_future=False):
         if include_history and as_of is None:
-            return "1=1", []
+            if include_future:  # Scoped forgetting must also find scheduled text.
+                return "1=1", []
+            return f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?)", [time.time()]
         moment = time.time() if as_of is None else as_of
         return (f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?) AND "
                 f"({prefix}valid_to IS NULL OR {prefix}valid_to > ?)", [moment, moment])
@@ -1213,14 +1215,14 @@ class MemoryStorage:
     def search_text(
         self, query: str, limit: int = 10, namespace: Optional[str] = None,
         memory_type: Optional[str] = None, *, include_history: bool = False,
-        as_of: Optional[float] = None,
+        as_of: Optional[float] = None, include_future: bool = False,
     ) -> List[Dict[str, Any]]:
         """FTS5 search with scope and validity applied BEFORE the candidate limit."""
         tokens = re.findall(r"[\w]+(?:[.-][\w]+)*", query, flags=re.UNICODE)
         safe_query = " OR ".join(f'"{tok}"' for tok in tokens if tok.strip())
         if not safe_query:
             return []
-        validity, values = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.")
+        validity, values = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", include_future=include_future)
         where = ["memory_fts MATCH ?", "m.deleted_at IS NULL", "m.importance >= 0.05", validity]
         params = [safe_query] + values
         if namespace is not None:

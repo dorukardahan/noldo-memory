@@ -7,6 +7,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Exclude scheduled future revisions from ordinary history recall while retaining them for explicit forgetting; capture long messages within the existing text bound.
 - Treat an absent embedder as degraded; atomically import only linear revision families and preserve retained child boundaries.
 - Keep recall degradation status local to each request; preserve rule evidence and include historical text in query-based forgetting.
 - Declare forgetting in the OpenClaw tool manifest; validate partial-import lineage against retained rows.

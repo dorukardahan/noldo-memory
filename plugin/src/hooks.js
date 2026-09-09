@@ -42,9 +42,15 @@ const CAPTURE_TRIGGERS = [
   /\b(rule|kural|policy|politika)\b/i,
 ];
 
+function boundedCaptureText(text) {
+  // Preserve the existing UTF-16 bound without sending a cut surrogate pair.
+  return text.slice(0, 2000).replace(/[\uD800-\uDBFF]$/u, "");
+}
+
 function shouldCapture(text) {
-  if (!text || text.length < 15 || text.length > 2000) return false;
+  if (!text || text.length < 15) return false;
   if (looksLikePromptInjection(text)) return false;
+  text = boundedCaptureText(text);
   if (SKIP_PATTERNS.some((p) => p.test(text))) return false;
   // Capture if explicitly trigger-worthy or moderately long with substance
   return (
@@ -192,7 +198,7 @@ function selectCompactionMessages(messages) {
     if (role !== "user" && role !== "assistant") continue;
     const text = redactOperationalText(extractMessageText(message)).trim();
     if (!shouldCapture(text)) continue;
-    picked.push({ role, text: text.slice(0, 2000) });
+    picked.push({ role, text: boundedCaptureText(text) });
     if (picked.length >= 20) break;
   }
   return picked;
@@ -257,7 +263,7 @@ export function registerAutoCapture(api, client, cfg) {
     for (const text of candidates) {
       try {
         await client.store({
-          text: text.slice(0, 2000),
+          text: boundedCaptureText(text),
           agent,
           source: "plugin-auto-capture",
           session_id: ctx.sessionKey || ctx.sessionId,
@@ -281,7 +287,7 @@ export function registerAutoCapture(api, client, cfg) {
     if (!agent || !shouldCapture(event.content)) return;
     try {
       await client.store({
-        text: event.content.slice(0, 2000), agent, source: "plugin-message-sent",
+        text: boundedCaptureText(event.content), agent, source: "plugin-message-sent",
         namespace: cfg.defaultNamespace, session_id: ctx.sessionKey,
         category: "assistant", memory_type: "conversation",
         evidence: { event_id: event.messageId, role: "assistant", assertion: "derived", delivery: "delivered" },
@@ -363,7 +369,7 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
         .join("\\n");
       try {
         await client.store({
-          text: text.slice(0, 2000),
+          text: boundedCaptureText(text),
           agent,
           source: "plugin-subagent-ended",
           session_id: event.targetSessionKey,

@@ -466,3 +466,19 @@ async def test_import_parent_replacement_preserves_retained_child_edges(client, 
     rows = {m['id']: m for m in (await client.get('/v1/export')).json()}
     assert rows['parent']['valid_to'] == rows['child']['valid_from'] == 10
     assert rows['parent']['namespace'] == rows['child']['namespace'] == 'default'
+
+
+@pytest.mark.asyncio
+async def test_history_excludes_scheduled_future_but_forget_can_find_it(client):
+    import time
+    old = (await client.post('/v1/store', json={'text': 'The observatory dome is violet.'})).json()['id']
+    future = time.time() + 86400
+    new = (await client.post('/v1/store', json={
+        'text': 'The observatory roof will become silver.', 'supersedes': old, 'valid_from': future,
+    })).json()['id']
+    history = (await client.post('/v1/recall', json={'query': 'previously observatory'})).json()['results']
+    assert [r['id'] for r in history] == [old]
+    scheduled = (await client.post('/v1/recall', json={'query': 'observatory', 'as_of': future + 1})).json()['results']
+    assert [r['id'] for r in scheduled] == [new]
+    assert (await client.request('DELETE', '/v1/forget', json={'query': 'silver'})).json()['deleted']
+    assert (await client.get('/v1/export')).json() == []
