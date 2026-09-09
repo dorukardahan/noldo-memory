@@ -604,7 +604,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
     # lexical-only degraded mode when the caller explicitly requires semantics.
     result_dicts = [r.to_dict() for r in results
                     if req.min_semantic_score is None or
-                    (not search.last_search_degraded and r.semantic_score >= req.min_semantic_score)]
+                    (not results.degraded and r.semantic_score >= req.min_semantic_score)]
 
     # Apply token budget trimming if requested
     trimmed = False
@@ -620,10 +620,10 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         "agent": agent_key,
         "count": len(result_dicts),
         "triggered": should_trigger(req.query),
-        "search_mode": search.last_search_mode,
+        "search_mode": results.mode,
         "results": result_dicts,
     }
-    if search.last_search_degraded:
+    if results.degraded:
         response["degraded"] = True
     if trimmed:
         response["trimmed"] = True
@@ -674,10 +674,10 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 include_history=req.historical_query(), as_of=req.as_of,
                 record_access=False,
             )
-            search_modes.append(search.last_search_mode)
-            degraded = degraded or search.last_search_degraded
+            search_modes.append(results.mode)
+            degraded = degraded or results.degraded
             for r in results:
-                if req.min_semantic_score is not None and (search.last_search_degraded or r.semantic_score < req.min_semantic_score):
+                if req.min_semantic_score is not None and (results.degraded or r.semantic_score < req.min_semantic_score):
                     continue
                 d = r.to_dict()
                 d["agent"] = agent_id
@@ -1040,6 +1040,8 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if req.agent == "all":
         raise HTTPException(400, "Cannot store to 'all' -- specify an agent")
 
+    if req.supersedes is not None or req.valid_from is not None:
+        raise HTTPException(422, "Use /v1/store for explicit rule revisions")
     storage = _get_storage(req.agent, request=request)
 
     from .ingest import is_low_signal_memory_text, normalize_memory_text
@@ -1054,11 +1056,12 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
         vector=vector,
         category="rule",
         importance=1.0,
-        source_session=None,
+        source_session=req.session_id,
         namespace=req.namespace,
         memory_type="rule",
         source=getattr(req, 'source', None) or 'api',
         trust_level='user',
+        evidence=req.evidence.model_dump(exclude_none=True) if req.evidence else None,
     )
 
     storage.invalidate_search_cache(agent=req.agent or "main")
@@ -1108,7 +1111,7 @@ async def forget(req: ForgetRequest, request: Request) -> Dict[str, Any]:
         return {"deleted": deleted, "id": req.id}
 
     if req.query:
-        results = storage.search_text(req.query, limit=1)
+        results = storage.search_text(req.query, limit=1, include_history=True)
         if results:
             mid = results[0]["id"]
             deleted = storage.delete_memory(mid)

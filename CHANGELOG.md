@@ -7,6 +7,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Keep recall degradation status local to each request; preserve rule evidence and include historical text in query-based forgetting.
 - Declare forgetting in the OpenClaw tool manifest; validate partial-import lineage against retained rows.
 - Reinforce only results admitted to recall output, and prevent degraded searches from becoming semantic cache hits.
 - Bind OpenClaw tools and lifecycle capture to trusted agent context; reject missing scope and model-supplied cross-agent overrides.

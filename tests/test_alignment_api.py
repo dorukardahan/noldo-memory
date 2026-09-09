@@ -277,3 +277,104 @@ async def test_rejected_automatic_recall_does_not_reinforce_memories(client, mon
     admitted = (await client.post('/v1/recall', json=query)).json()['results']
     assert [r['id'] for r in admitted] == [stored]
     assert storage.get_memory(stored)['strength'] > before['strength']
+
+
+@pytest.mark.asyncio
+async def test_rule_endpoint_preserves_evidence_and_source_session(client):
+    payload = {'agent': 'alpha', 'text': 'Always choose quiet observatory visits.',
+               'session_id': 'session-a', 'evidence': {'event_id': 'rule-a', 'assertion': 'reported'}}
+    first = (await client.post('/v1/rule', json=payload)).json()
+    second = (await client.post('/v1/rule', json={**payload, 'evidence': {'event_id': 'rule-b'}})).json()
+    assert first['id'] != second['id']
+    exported = (await client.get('/v1/export', params={'agent': 'alpha'})).json()
+    assert {m['evidence']['event_id'] for m in exported} == {'rule-a', 'rule-b'}
+    assert all(m['source_session'] == 'session-a' for m in exported)
+    rejected = await client.post('/v1/rule', json={**payload, 'supersedes': first['id']})
+    assert rejected.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_forgetting_by_old_only_text_deletes_revision_family(client):
+    old = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'I prefer violet domes.',
+    })).json()['id']
+    await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'I now prefer silver roofs.', 'supersedes': old,
+    })
+    other = (await client.post('/v1/store', json={
+        'agent': 'beta', 'text': 'I prefer violet domes.',
+    })).json()['id']
+    response = await client.request('DELETE', '/v1/forget', json={'agent': 'alpha', 'query': 'violet'})
+    assert response.json()['deleted']
+    assert (await client.get('/v1/export', params={'agent': 'alpha'})).json() == []
+    assert [m['id'] for m in (await client.get('/v1/export', params={'agent': 'beta'})).json()] == [other]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_recall_does_not_discard_a_healthy_semantic_result(client, monkeypatch):
+    import asyncio
+    import agent_memory.api as api
+    started, release = asyncio.Event(), asyncio.Event()
+    storage = api._storage_pool.get('alpha')
+    storage.store_memory('The observatory has a violet dome.', vector=[1, 0, 0, 0])
+
+    async def embedding(text):
+        if 'healthy' in text:
+            started.set()
+            await release.wait()
+            return [1, 0, 0, 0]
+        raise ConnectionError('synthetic outage')
+
+    monkeypatch.setattr(api._embedder, 'embed', embedding)
+    query = {'agent': 'alpha', 'min_semantic_score': 0.0}
+    healthy = asyncio.create_task(client.post('/v1/recall', json={**query, 'query': 'healthy observatory'}))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        failed = (await client.post('/v1/recall', json={**query, 'query': 'outage observatory'})).json()
+    finally:
+        release.set()
+    success = (await asyncio.wait_for(healthy, 2)).json()
+    assert failed['degraded'] and failed['results'] == []
+    assert not success.get('degraded', False)
+    assert success['results']
+
+
+@pytest.mark.asyncio
+async def test_overlapping_healthy_recall_does_not_admit_or_cache_an_outage(client, monkeypatch):
+    import asyncio
+    import agent_memory.api as api
+    started, release = asyncio.Event(), asyncio.Event()
+    storage = api._storage_pool.get('alpha')
+    for text in ('The observatory has a violet dome.', 'The observatory opens at dusk.'):
+        storage.store_memory(text, vector=[1, 0, 0, 0])
+
+    async def embedding(text):
+        if 'outage' in text:
+            raise ConnectionError('synthetic outage')
+        return [1, 0, 0, 0]
+
+    class Reranker:
+        top_k = 10
+        def score(self, query, docs, ids):
+            return [.9] * len(docs)
+
+    async def run_score(func, query, *args):
+        if 'outage' in query:
+            started.set()
+            await release.wait()
+        return func(query, *args)
+
+    monkeypatch.setattr(api._embedder, 'embed', embedding)
+    monkeypatch.setattr(api, '_reranker', Reranker())
+    monkeypatch.setattr(asyncio, 'to_thread', run_score)
+    query = {'agent': 'alpha', 'min_semantic_score': 0.0}
+    outage = asyncio.create_task(client.post('/v1/recall', json={**query, 'query': 'outage observatory'}))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        healthy = (await client.post('/v1/recall', json={**query, 'query': 'healthy observatory'})).json()
+    finally:
+        release.set()
+    failed = (await asyncio.wait_for(outage, 2)).json()
+    assert healthy['results'] and not healthy.get('degraded', False)
+    assert failed['degraded'] and failed['results'] == []
+    assert not any('outage' in r['query_norm'] for r in storage._get_conn().execute('SELECT query_norm FROM search_result_cache'))

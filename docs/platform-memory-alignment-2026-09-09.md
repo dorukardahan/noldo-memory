@@ -184,7 +184,8 @@ Normal recall excludes closed/future versions. `as_of` selects an interval;
 `include_history` returns previous versions. A narrow historical-language hint
 is a convenience, not complete temporal understanding. The model still has to
 recognize a correction and call the tool; automatic natural-language revision
-accuracy has not been measured. Concurrent stale revisions fail instead of
+accuracy has not been measured. `/v1/rule` preserves supplied evidence/session
+provenance and directs explicit revision requests to `/v1/store`. Concurrent stale revisions fail instead of
 creating competing current branches.
 
 Synthetic tests cover rollback after insertion failure and export/import of
@@ -198,7 +199,9 @@ Unversioned rows retain the existing decay/archival policy. No existing live dat
 migrated or reindexed.
 
 `DELETE /v1/forget` and scoped `noldomem_forget` delete the connected revision
-family, FTS/vector entries and linked temporal facts, invalidating caches. They
+family, FTS/vector entries and linked temporal facts, invalidating caches.
+Query-based forgetting also searches closed/future revisions, so an old-only
+phrase can identify the family. They
 do not erase source transcripts, previously emitted context, backups, native
 memory or arbitrary re-imported copies. Native/OpenClaw session-level forgotten
 admission is a stronger capability in that specific respect.
@@ -253,6 +256,9 @@ Only results admitted after API semantic/token filtering receive access boosts.
 Degraded and deliberately lexical-only searches do not populate the semantic
 result cache; its new key namespace excludes old entries without degradation
 metadata. Repeated outage tests cover both zero and nonzero admission floors.
+Search returns a list-compatible batch with request-local mode/degradation
+status; overlapping healthy/outage calls cannot change each other's admission
+or cache eligibility. Legacy last-completed diagnostics are not used by recall.
 Versioned searches currently bypass search-result caching
 to avoid future validity-boundary staleness, a deliberate performance cost.
 
@@ -291,7 +297,7 @@ component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
 The local unified compile/lint/test audit passed after the review fixes
-(471 tests, one optional skip). Python sdist and
+(475 tests, one optional skip). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).

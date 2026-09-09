@@ -296,6 +296,15 @@ def _rrf_fuse(
     return scores
 
 
+class SearchResults(list[SearchResult]):
+    """List-compatible search results carrying request-local completion status."""
+
+    def __init__(self, items=(), *, degraded=False, mode="full"):
+        super().__init__(items)
+        self.degraded = degraded
+        self.mode = mode
+
+
 class HybridSearch:
     """Five-layer hybrid search engine with RRF fusion."""
 
@@ -471,16 +480,23 @@ class HybridSearch:
         include_history: bool = False,
         as_of: Optional[float] = None,
         record_access: bool = True,
-    ) -> List[SearchResult]:
+    ) -> SearchResults:
         """Run hybrid search and return fused, ranked results.
 
         Graceful degradation: if the embedding API is unavailable,
         lexical + non-vector layers (keyword/recency/strength/importance)
         are still used.
         """
-        # Reset degradation flags
-        self.last_search_degraded = False
-        self.last_search_mode = "full"
+        # Status belongs to this call, not the shared per-agent search object.
+        degraded = False
+        search_mode = "full"
+
+        def finish(items):
+            # Legacy diagnostics expose the last completed call only. Concurrent
+            # callers must use the status carried by their returned batch.
+            self.last_search_degraded = degraded
+            self.last_search_mode = search_mode
+            return SearchResults(items, degraded=degraded, mode=search_mode)
 
         cache_generation = self.storage.cache_generation
         has_versions = self.storage._get_conn().execute(
@@ -504,9 +520,10 @@ class HybridSearch:
             if cached_json:
                 try:
                     cached_data = json.loads(cached_json)
-                    self.last_search_mode = "cache_hit"
+                    cached_results = [SearchResult(**r) for r in cached_data]
+                    search_mode = "cache_hit"
                     collector.inc_cache_hit()
-                    return [SearchResult(**r) for r in cached_data]
+                    return finish(cached_results)
                 except Exception as exc:
                     logger.warning("Failed to parse cached search results: %s", exc)
                     collector.inc_cache_miss()
@@ -708,8 +725,8 @@ class HybridSearch:
                 sem_results = await sem_task
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
-                self.last_search_degraded = True
-                self.last_search_mode = "keyword_only"
+                degraded = True
+                search_mode = "keyword_only"
 
             try:
                 kw_results = await kw_task
@@ -721,8 +738,8 @@ class HybridSearch:
                 sem_results = await _semantic_search()
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
-                self.last_search_degraded = True
-                self.last_search_mode = "keyword_only"
+                degraded = True
+                search_mode = "keyword_only"
 
         elif use_keyword:
             try:
@@ -773,7 +790,7 @@ class HybridSearch:
                 all_candidates[mid] = r
 
         if not all_candidates:
-            return []
+            return finish([])
 
         # Type filtering strategy:
         # - Explicit memory_type parameter (caller intent) → hard filter
@@ -788,7 +805,7 @@ class HybridSearch:
             semantic_ids = [mid for mid in semantic_ids if mid in all_candidates]
             keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
             if not all_candidates:
-                return []
+                return finish([])
 
         # Temporal filter: remove candidates outside time_range
         if time_range is not None:
@@ -803,7 +820,7 @@ class HybridSearch:
             keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
             if before > 0 and len(all_candidates) == 0:
                 logger.debug("Temporal filter removed all %d candidates", before)
-                return []
+                return finish([])
 
         # Layer 3 — Recency: rank all candidates by created_at
         recency_ranked = sorted(
@@ -877,7 +894,7 @@ class HybridSearch:
             weights_list.append(self.weights.importance)
 
         if not ranked_lists:
-            return []
+            return finish([])
 
         rrf_scores = _rrf_fuse(ranked_lists, weights_list)
         for mid, bonus in memory_type_bonus.items():
@@ -1003,10 +1020,10 @@ class HybridSearch:
 
         # A write/forget during an awaited embed/rerank invalidates the snapshot.
         if self.storage.cache_generation != cache_generation:
-            return []
+            return finish([])
 
         # Two-pass refresh: run heavy quality reranker in background and update cache.
-        if rerank and cache_allowed and not self.last_search_degraded:
+        if rerank and cache_allowed and not degraded:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
                 cache_query_norm=cache_query_norm,
@@ -1033,7 +1050,7 @@ class HybridSearch:
                 pass
 
         # Do not turn an outage into a supposedly semantic cache hit later.
-        if cache_allowed and not self.last_search_degraded:
+        if cache_allowed and not degraded:
             try:
                 results_json = json.dumps([r.to_dict() for r in results])
                 self.storage.cache_search_result(
@@ -1046,4 +1063,4 @@ class HybridSearch:
             except Exception as exc:
                 logger.warning("Failed to cache search results: %s", exc)
 
-        return results
+        return finish(results)
