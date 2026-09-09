@@ -200,7 +200,9 @@ lineage before writes. Partial imports validate references against retained
 existing rows when duplicate IDs are skipped, and reject references to skipped
 empty-content parents or branching histories. Imports prepare embeddings
 before taking a write lock, then revalidate retained parent/child boundaries
-and commit all rows/vectors atomically. Failed or raced imports leave no partial
+and commit all rows/vectors atomically. Overwriting an existing revision must
+keep its parent link; detaching or reparenting it is rejected even in a batch.
+Failed or raced imports leave no partial
 restore. Consolidation does not merge provenance-bearing or
 versioned rows. Decay still adjusts their ranking strength but does not archive
 explicit revision families; they remain available until explicit forgetting.

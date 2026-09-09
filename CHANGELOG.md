@@ -9,7 +9,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Use one validity timestamp per search, keep explicit as-of queries independent from ingestion-date phrases, and screen recalled metadata before OpenClaw prompt formatting.
 - Exclude scheduled future revisions from ordinary history recall while retaining them for explicit forgetting; capture long messages within the existing text bound.
-- Treat an absent embedder as degraded; atomically import only linear revision families and preserve retained child boundaries.
+- Treat an absent embedder as degraded; atomically import only linear revision families, preserve retained child boundaries and reject detaching/reparenting existing revisions.
 - Keep recall degradation status local to each request; preserve rule evidence and include historical text in query-based forgetting.
 - Declare forgetting in the OpenClaw tool manifest; validate partial-import lineage against retained rows.
 - Reinforce only results admitted to recall output, and prevent degraded searches from becoming semantic cache hits.

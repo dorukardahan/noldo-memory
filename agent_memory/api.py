@@ -2100,6 +2100,12 @@ def _validate_import_lineage(storage, memories, skip_duplicates):
             continue
         if skip_duplicates and existing.get(mem.get("id")) is not None:
             continue  # Validate the retained row when a descendant references it.
+        prior = existing.get(mem.get("id"))
+        if (prior is not None and prior.get("supersedes")
+                and prior["supersedes"] != mem.get("supersedes")):
+            # An overwrite may edit content, but must not detach/reparent a
+            # revision and turn its retained predecessor into an orphan.
+            raise HTTPException(422, "Import cannot change an existing revision parent")
         # Replacing a parent must preserve edges to children not replaced by
         # this batch, including their scope and validity boundary.
         if mem.get("id"):

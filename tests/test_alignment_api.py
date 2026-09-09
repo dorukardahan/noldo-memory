@@ -469,6 +469,27 @@ async def test_import_parent_replacement_preserves_retained_child_edges(client, 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('parent_id', [None, 'other', 'parent'])
+async def test_import_child_overwrite_preserves_existing_parent(client, parent_id):
+    parent = {'id': 'parent', 'text': 'The observatory had a violet dome.', 'valid_to': 10}
+    child = {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'}
+    other = {'id': 'other', 'text': 'The library had a copper roof.', 'valid_to': 10}
+    assert (await client.post('/v1/import', json={'memories': [parent, child, other]})).status_code == 200
+    before = (await client.get('/v1/export')).json()
+    replacement = {'id': 'child', 'text': 'The observatory now has a blue dome.'}
+    if parent_id is not None:
+        replacement.update(supersedes=parent_id, valid_from=10)
+    response = await client.post('/v1/import', json={'skip_duplicates': False, 'memories': [replacement]})
+    assert response.status_code == (200 if parent_id == 'parent' else 422)
+    after = (await client.get('/v1/export')).json()
+    if parent_id != 'parent':
+        assert after == before
+    historical = (await client.post('/v1/recall', json={'query': 'observatory', 'as_of': 5})).json()['results']
+    assert 'child' not in {m['id'] for m in historical}
+    assert 'parent' in {m['id'] for m in historical}
+
+
+@pytest.mark.asyncio
 async def test_history_excludes_scheduled_future_but_forget_can_find_it(client):
     import time
     old = (await client.post('/v1/store', json={'text': 'The observatory dome is violet.'})).json()['id']
