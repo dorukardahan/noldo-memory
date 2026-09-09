@@ -398,7 +398,7 @@ class HybridSearch:
                     return
 
                 docs = [r.text for r in cands[:top_n]]
-                ids = [r.id for r in cands[:top_n]]
+                ids = [f"{agent}:{r.id}" for r in cands[:top_n]]
 
                 ce_scores = await asyncio.to_thread(
                     self.bg_reranker.score,
@@ -958,7 +958,7 @@ class HybridSearch:
                             self.reranker.score,
                             q_norm,
                             [r.text for r in cands],
-                            [r.id for r in cands],
+                            [f"{agent}:{r.id}" for r in cands],
                         )
                         if ce_scores and len(ce_scores) == len(cands):
                             used_cross_encoder = True

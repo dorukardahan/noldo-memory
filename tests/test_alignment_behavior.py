@@ -162,3 +162,48 @@ def test_hermes_cache_identity_includes_admission_floor(monkeypatch, tmp_path):
     assert len(calls) == 2
     assert calls[1]['min_semantic_score'] == .5
     provider.shutdown()
+
+
+def test_reranker_cache_separates_agent_and_edited_content():
+    from agent_memory.reranker import APIReranker, CrossEncoderReranker
+    for cls in [APIReranker, CrossEncoderReranker]:
+        ranker = cls.__new__(cls)  # Key calculation requires no model or credentials.
+        old = ranker._cache_key('dome color', 'alpha:shared-id', 'A violet dome.')
+        edited = ranker._cache_key('dome color', 'alpha:shared-id', 'A silver dome.')
+        other = ranker._cache_key('dome color', 'beta:shared-id', 'A violet dome.')
+        assert len({old, edited, other}) == 3
+
+
+async def test_shared_reranker_does_not_reuse_another_agents_score(tmp_path, monkeypatch):
+    import json
+    import urllib.request
+    from agent_memory.pool import StoragePool
+    from agent_memory.reranker import APIReranker
+    from agent_memory.search import HybridSearch
+    from tests.test_reranker import _FakeResponse
+
+    requests = []
+
+    def response(request, timeout):
+        requests.append(json.loads(request.data))
+        return _FakeResponse({'results': [{'index': 0, 'relevance_score': .9}, {'index': 1, 'relevance_score': .6}]})
+
+    monkeypatch.setattr(urllib.request, 'urlopen', response)
+    ranker = APIReranker(enabled=True, api_key='YOUR_API_KEY', api_url='https://example.invalid/rerank')
+
+    class Embedder:
+        async def embed(self, text):
+            return [1, 0, 0, 0]
+
+    pool = StoragePool(str(tmp_path), dimensions=4)
+    try:
+        for agent in ['alpha', 'beta']:
+            storage = pool.get(agent)
+            for i, text in enumerate(['The observatory dome is violet.', 'The observatory visit is in the evening.']):
+                storage.store_memory(text, vector=[1, 0, 0, 0], memory_id='same-id-' + str(i))
+            search = HybridSearch(storage, Embedder(), reranker=ranker)
+            result = await search.search('Plan the quiet evening observatory visit', agent=agent)
+            assert result
+        assert len(requests) == 2, 'even identical text/IDs use separate agent score-cache entries'
+    finally:
+        pool.close_all()

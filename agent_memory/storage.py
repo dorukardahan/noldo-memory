@@ -710,7 +710,8 @@ class MemoryStorage:
         - < 21 days old -> protect (min 0.8)
         - Very recent (last 72h) -> boost (+0.1)
         - 21-90 days -> importance-adjusted decay (gentle: 0.07 base)
-        - GC phase: soft-delete zombies at floor with low importance, unaccessed 60+ days
+        - GC phase: archive unversioned zombies at floor, low importance, unaccessed 60+ days
+        - Revision families retain current/history rows until explicit forgetting.
         - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable.
         - Lessons: 270+ days floor, 60-day protect, 60-270 days -> 0.02 decay
           min_strength for lessons is 0.8 (immune from dropping below useful threshold)
@@ -814,6 +815,7 @@ class MemoryStorage:
                  WHERE deleted_at IS NULL
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') != 'lesson'
+                   AND valid_from IS NULL AND valid_to IS NULL AND supersedes IS NULL
                    AND strength <= ?
                    AND importance <= 0.3
                    AND COALESCE(last_accessed_at, created_at) < ? - ?

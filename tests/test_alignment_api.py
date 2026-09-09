@@ -180,3 +180,39 @@ async def test_capture_duplicate_events_skip_repeat_batch_embedding(client, monk
     assert first['stored'] == 1 and first['merged'] == 1
     assert retry['stored'] == 0 and retry['merged'] == 1
     assert calls == [1]
+
+
+@pytest.mark.asyncio
+async def test_historical_inference_matches_existing_admin_recall_scope(client):
+    old = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'The observatory had a violet dome.',
+    })).json()['id']
+    new = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'The observatory now has a silver dome.', 'supersedes': old,
+    })).json()['id']
+    for scope in ('alpha', 'all'):
+        query = {'agent': scope, 'query': 'Previously the observatory dome'}
+        history = (await client.post('/v1/recall', json=query)).json()['results']
+        assert {r['id'] for r in history} == {old, new}
+        current = (await client.post('/v1/recall', json={**query, 'include_history': False})).json()['results']
+        assert [r['id'] for r in current] == [new]
+
+
+def test_decay_preserves_revision_family_but_still_archives_unversioned_rows(tmp_storage):
+    import time
+    old = tmp_storage.store_memory('The observatory had a violet dome.', importance=.2)
+    new = tmp_storage.revise_memory(old, text='The observatory has a silver dome.',
+                                    vector=None, valid_from=1700000000)['id']
+    ordinary = tmp_storage.store_memory('An unrelated faded observatory note.', importance=.2)
+    conn = tmp_storage._get_conn()
+    conn.execute('UPDATE memories SET created_at = ?, last_accessed_at = ?, strength = .3',
+                 (time.time() - 120 * 86400, time.time() - 120 * 86400))
+    conn.commit()
+    tmp_storage.decay_all()
+    rows = {r['id']: r for r in conn.execute('SELECT id, deleted_at FROM memories')}
+    assert rows[old]['deleted_at'] is None
+    assert rows[new]['deleted_at'] is None
+    assert rows[ordinary]['deleted_at'] is not None
+    assert {r['id'] for r in tmp_storage.search_text('observatory', include_history=True)} == {old, new}
+    assert tmp_storage.delete_memory(new)
+    assert tmp_storage.search_text('observatory', include_history=True) == []

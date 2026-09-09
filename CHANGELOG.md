@@ -10,6 +10,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Bind OpenClaw tools and lifecycle capture to trusted agent context; reject missing scope and model-supplied cross-agent overrides.
 - Preserve distinct statements and provenance instead of merging by vector similarity; deduplicate exact retries without growing text.
 - Invalidate in-flight and cached recall after writes, and disable Hermes provider-local caching by default.
+- Scope reranker score caches by agent and document content; retain explicit revision families during decay archival.
+- Apply historical-query inference consistently to the existing administrative recall endpoint.
 - Keep filtered vector fallback on the same L2 metric as the existing sqlite-vec index.
 
 ### Added

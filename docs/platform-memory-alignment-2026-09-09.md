@@ -190,8 +190,10 @@ creating competing current branches.
 Synthetic tests cover rollback after insertion failure and export/import of
 validity/evidence. Imports reject malformed intervals and cyclic/cross-namespace
 lineage before writes. Consolidation does not merge provenance-bearing or
-versioned rows. Existing retention/decay still applies; this is not unlimited
-history retention. No existing live database was migrated or reindexed.
+versioned rows. Decay still adjusts their ranking strength but does not archive
+explicit revision families; they remain available until explicit forgetting.
+Unversioned rows retain the existing decay/archival policy. No existing live database was
+migrated or reindexed.
 
 `DELETE /v1/forget` and scoped `noldomem_forget` delete the connected revision
 family, FTS/vector entries and linked temporal facts, invalidating caches. They
@@ -243,7 +245,9 @@ configured. `/capture` deduplicates both within a batch and against stored
 provenance before embedding. These are call-count improvements, not a measured
 end-to-end response speedup. Hermes's local TTL defaults to zero because another
 session cannot invalidate that private cache; server cache and own-write
-invalidation remain. Versioned searches currently bypass search-result caching
+invalidation remain. Shared reranker score caches include the agent, record ID and current text,
+preventing cross-agent score reuse and reuse after an in-place edit.
+Versioned searches currently bypass search-result caching
 to avoid future validity-boundary staleness, a deliberate performance cost.
 
 | Decision | Reason and verification |
@@ -280,13 +284,28 @@ missing required packages. The host also requires a newer Node than the local
 component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
-The local unified test/lint suite passed (456 tests, one optional skip); focused
-follow-up checks cover the subsequently added forgetting tool. Python sdist and
-wheel build succeeded in a separate pinned build environment. Exact-head
-repository CI/review are pending while this branch is under development. Deployment, merge and release are separate actions.
+The local unified compile/lint/test audit passed after the review fixes
+(463 tests, one optional skip). Python sdist and
+wheel build succeeded in a separate pinned build environment.
+On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
+audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).
+A separate full dependency resolution and audit of the unchanged baseline
+requirements reproduced the same finding. The [official NLTK advisory](https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp),
+published August 12 and updated August 31, lists model-artifact path sandbox
+bypasses through 3.10.3 and no patched release. NoldoMem reaches NLTK through
+Zeyrek's sentence/word tokenizers; this path does not call the listed model
+import/export APIs. That narrower reachability is not a clean dependency audit.
+The advisory database has conflicting fixed-version metadata, so it is not used
+to assert a fix. No audit exception, tokenizer substitution or dependency
+protection override was applied. CI remains blocked on an upstream fix or a
+separately justified dependency change. The configured Codex review identified
+revision archival and administrative historical-inference gaps; focused
+regressions accompany the fixes. Final-head CI/review must be checked separately.
+Deployment, merge and release are separate actions.
 
 Public-artifact review used the tracked-only, filename-only secret scanner. It
-reported 33 baseline files and 34 candidate files; the sole additional file is
-the synthetic Hermes harness with a literal `YOUR_API_KEY` placeholder. Existing
+reported 33 baseline files and 35 candidate files. The two additional files are
+the synthetic Hermes harness and reranker isolation test, both with literal
+`YOUR_API_KEY` placeholders. Existing
 heuristic matches are not a clean-scan certificate. No private corpus, production
 paths, account identities, credentials or operational logs were added.

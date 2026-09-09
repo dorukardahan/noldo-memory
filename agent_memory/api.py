@@ -503,6 +503,11 @@ class RecallRequest(RequestModel):
     memory_type: Optional[VALID_MEMORY_TYPES] = Field(default=None, description="Filter by memory type")
     agent: Optional[str] = None
 
+    def historical_query(self) -> bool:
+        if self.include_history is not None:
+            return self.include_history
+        return bool(re.search(r"\b(previously|used to|historical|önceden|eskiden|önceki)\b", self.query, re.I))
+
 
 class CaptureRequest(RequestModel):
     messages: List[Dict[str, Any]] = Field(..., max_length=200)
@@ -589,7 +594,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         namespace=req.namespace,
         memory_type=req.memory_type,
         agent=agent_key,
-        include_history=(req.include_history if req.include_history is not None else bool(re.search(r"\b(previously|used to|historical|önceden|eskiden|önceki)\b", req.query, re.I))),
+        include_history=req.historical_query(),
         as_of=req.as_of,
     )
 
@@ -655,7 +660,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 memory_type=req.memory_type,
                 agent=agent_id,
                 rerank=False,
-                include_history=bool(req.include_history), as_of=req.as_of,
+                include_history=req.historical_query(), as_of=req.as_of,
             )
             search_modes.append(search.last_search_mode)
             degraded = degraded or search.last_search_degraded
