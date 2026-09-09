@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- Declare forgetting in the OpenClaw tool manifest; validate partial-import lineage against retained rows.
+- Reinforce only results admitted to recall output, and prevent degraded searches from becoming semantic cache hits.
 - Bind OpenClaw tools and lifecycle capture to trusted agent context; reject missing scope and model-supplied cross-agent overrides.
 - Preserve distinct statements and provenance instead of merging by vector similarity; deduplicate exact retries without growing text.
 - Invalidate in-flight and cached recall after writes, and disable Hermes provider-local caching by default.

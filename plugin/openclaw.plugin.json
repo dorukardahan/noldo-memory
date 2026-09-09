@@ -1,10 +1,10 @@
 {
   "id": "noldomem",
   "name": "NoldoMem",
-  "description": "NoldoMem long-term memory tools for OpenClaw agents - recall, store, pin",
+  "description": "NoldoMem long-term memory tools for OpenClaw agents - recall, store, pin, forget",
   "version": "1.27.16",
   "contracts": {
-    "tools": ["noldomem_recall", "noldomem_store", "noldomem_pin"]
+    "tools": ["noldomem_recall", "noldomem_store", "noldomem_pin", "noldomem_forget"]
   },
   "activation": {
     "onStartup": true

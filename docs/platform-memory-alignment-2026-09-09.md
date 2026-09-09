@@ -189,7 +189,9 @@ creating competing current branches.
 
 Synthetic tests cover rollback after insertion failure and export/import of
 validity/evidence. Imports reject malformed intervals and cyclic/cross-namespace
-lineage before writes. Consolidation does not merge provenance-bearing or
+lineage before writes. Partial imports validate references against retained
+existing rows when duplicate IDs are skipped, and reject references to skipped
+empty-content parents. Consolidation does not merge provenance-bearing or
 versioned rows. Decay still adjusts their ranking strength but does not archive
 explicit revision families; they remain available until explicit forgetting.
 Unversioned rows retain the existing decay/archival policy. No existing live database was
@@ -247,6 +249,10 @@ end-to-end response speedup. Hermes's local TTL defaults to zero because another
 session cannot invalidate that private cache; server cache and own-write
 invalidation remain. Shared reranker score caches include the agent, record ID and current text,
 preventing cross-agent score reuse and reuse after an in-place edit.
+Only results admitted after API semantic/token filtering receive access boosts.
+Degraded and deliberately lexical-only searches do not populate the semantic
+result cache; its new key namespace excludes old entries without degradation
+metadata. Repeated outage tests cover both zero and nonzero admission floors.
 Versioned searches currently bypass search-result caching
 to avoid future validity-boundary staleness, a deliberate performance cost.
 
@@ -285,7 +291,7 @@ component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
 The local unified compile/lint/test audit passed after the review fixes
-(463 tests, one optional skip). Python sdist and
+(471 tests, one optional skip). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).
@@ -299,8 +305,9 @@ The advisory database has conflicting fixed-version metadata, so it is not used
 to assert a fix. No audit exception, tokenizer substitution or dependency
 protection override was applied. CI remains blocked on an upstream fix or a
 separately justified dependency change. The configured Codex review identified
-revision archival and administrative historical-inference gaps; focused
-regressions accompany the fixes. Final-head CI/review must be checked separately.
+revision archival, administrative historical inference, manifest completeness,
+partial-import lineage and admission-side-effect gaps; focused regressions
+accompany the fixes. Final-head CI/review must be checked separately.
 Deployment, merge and release are separate actions.
 
 Public-artifact review used the tracked-only, filename-only secret scanner. It

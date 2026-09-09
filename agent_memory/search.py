@@ -158,7 +158,8 @@ def _build_cache_query_norm(
     memory_type: Optional[str],
 ) -> str:
     """Namespace/filter-aware cache key without changing public API."""
-    parts = [query_norm]
+    # v2 excludes lexical-only/degraded entries that lacked status metadata.
+    parts = ["semantic-cache-v2", query_norm]
     if namespace:
         parts.append(f"ns:{namespace}")
     if memory_type:
@@ -469,6 +470,7 @@ class HybridSearch:
         rerank: bool = True,
         include_history: bool = False,
         as_of: Optional[float] = None,
+        record_access: bool = True,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -484,7 +486,7 @@ class HybridSearch:
         has_versions = self.storage._get_conn().execute(
             "SELECT 1 FROM memories WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL LIMIT 1"
         ).fetchone()
-        cache_allowed = time_range is None and not has_versions
+        cache_allowed = time_range is None and not has_versions and use_semantic
 
         # 1. Query normalization + intent-aware filter selection + cache check
         q_norm = normalize_query(query)
@@ -1004,7 +1006,7 @@ class HybridSearch:
             return []
 
         # Two-pass refresh: run heavy quality reranker in background and update cache.
-        if rerank and cache_allowed:
+        if rerank and cache_allowed and not self.last_search_degraded:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
                 cache_query_norm=cache_query_norm,
@@ -1024,14 +1026,14 @@ class HybridSearch:
             results = results[:limit]
 
         # Spaced repetition: boost strength on top hits
-        for r in results[:3]:
+        for r in (results[:3] if record_access else []):
             try:
                 self.storage.boost_strength(r.id)
             except Exception:
                 pass
 
-        # 3. Store Results in Cache (skip for temporal queries)
-        if cache_allowed:
+        # Do not turn an outage into a supposedly semantic cache hit later.
+        if cache_allowed and not self.last_search_degraded:
             try:
                 results_json = json.dumps([r.to_dict() for r in results])
                 self.storage.cache_search_result(

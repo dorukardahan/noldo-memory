@@ -15,6 +15,7 @@ def test_openclaw_plugin_pack_is_installable():
         "noldomem_recall",
         "noldomem_store",
         "noldomem_pin",
+        "noldomem_forget",
     ]
     assert manifest["activation"]["onStartup"] is True
 

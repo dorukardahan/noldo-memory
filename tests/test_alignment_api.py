@@ -8,7 +8,10 @@ from agent_memory.api import app
 
 
 @pytest.fixture
-async def client():
+async def client(monkeypatch):
+    # Each independent test gets fresh middleware state, including the unchanged
+    # 120-request limiter, just as it gets fresh API globals and databases.
+    monkeypatch.setattr(app, "middleware_stack", app.build_middleware_stack())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as value:
         yield value
 
@@ -216,3 +219,61 @@ def test_decay_preserves_revision_family_but_still_archives_unversioned_rows(tmp
     assert {r['id'] for r in tmp_storage.search_text('observatory', include_history=True)} == {old, new}
     assert tmp_storage.delete_memory(new)
     assert tmp_storage.search_text('observatory', include_history=True) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stored_state', ['current', 'other_namespace', 'matching'])
+async def test_partial_import_validates_the_parent_that_is_actually_retained(client, stored_state):
+    import agent_memory.api as api
+    storage = api._storage_pool.get('alpha')
+    storage.store_memory('The observatory had a violet dome.', memory_id='parent',
+                         namespace='other' if stored_state == 'other_namespace' else 'default',
+                         valid_to=None if stored_state == 'current' else 10)
+    response = await client.post('/v1/import', json={'agent': 'alpha', 'memories': [
+        {'id': 'parent', 'text': 'The observatory had a blue dome.', 'valid_to': 10},
+        {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'},
+    ]})
+    if stored_state == 'matching':
+        assert response.status_code == 200
+        assert response.json()['imported'] == 1
+    else:
+        assert response.status_code == 422
+        assert storage.get_memory('child') is None
+    assert storage.get_memory('parent')['text'] == 'The observatory had a violet dome.'
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_lineage_to_a_parent_skipped_for_empty_content(client):
+    response = await client.post('/v1/import', json={'memories': [
+        {'id': 'parent', 'text': '', 'valid_to': 10},
+        {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'},
+    ]})
+    assert response.status_code == 422
+    assert (await client.get('/v1/export')).json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scope', ['alpha', 'all'])
+@pytest.mark.parametrize('floor', [0.0, 0.5])
+async def test_rejected_automatic_recall_does_not_reinforce_memories(client, monkeypatch, scope, floor):
+    import agent_memory.api as api
+    stored = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'The observatory has a violet dome.',
+    })).json()['id']
+    storage = api._storage_pool.get('alpha')
+    before = storage.get_memory(stored)
+
+    async def unavailable(text):
+        raise ConnectionError('synthetic outage')
+
+    monkeypatch.setattr(api._embedder, 'embed', unavailable)
+    query = {'agent': scope, 'query': 'violet observatory dome'}
+    for _ in range(2):
+        response = (await client.post('/v1/recall', json={**query, 'min_semantic_score': floor})).json()
+        assert response['results'] == []
+    after = storage.get_memory(stored)
+    assert after['strength'] == before['strength']
+    assert after['last_accessed_at'] == before['last_accessed_at']
+    admitted = (await client.post('/v1/recall', json=query)).json()['results']
+    assert [r['id'] for r in admitted] == [stored]
+    assert storage.get_memory(stored)['strength'] > before['strength']

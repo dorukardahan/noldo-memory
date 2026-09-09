@@ -596,6 +596,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         agent=agent_key,
         include_history=req.historical_query(),
         as_of=req.as_of,
+        record_access=False,
     )
 
     # An optional, model-calibrated admission floor for automatic injection.
@@ -613,6 +614,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         result_dicts = trim_results_to_budget(result_dicts, req.max_tokens)
         trimmed = len(result_dicts) < original_count
 
+    _record_recall_access(result_dicts, request, agent_key)
     response = {
         "query": req.query,
         "agent": agent_key,
@@ -632,6 +634,15 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
             "end": time_range[1],
         }
     return response
+
+
+def _record_recall_access(results, request, agent=None):
+    """Reinforce only API-admitted results, after semantic and token filtering."""
+    for result in results[:3]:
+        try:
+            _get_storage(result.get("agent", agent), request=request).boost_strength(result["id"])
+        except Exception:
+            logger.debug("Could not record admitted recall access")
 
 
 async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
@@ -661,6 +672,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 agent=agent_id,
                 rerank=False,
                 include_history=req.historical_query(), as_of=req.as_of,
+                record_access=False,
             )
             search_modes.append(search.last_search_mode)
             degraded = degraded or search.last_search_degraded
@@ -691,6 +703,8 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
         original_count = len(all_results)
         all_results = trim_results_to_budget(all_results, req.max_tokens)
         trimmed = len(all_results) < original_count
+
+    _record_recall_access(all_results, request)
 
     search_mode = "full"
     unique_modes = {mode for mode in search_modes if mode}
@@ -2078,7 +2092,17 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
     incoming = {mem["id"]: mem for mem in req.memories if mem.get("id")}
     if len(incoming) != sum(bool(mem.get("id")) for mem in req.memories):
         raise HTTPException(422, "Duplicate IDs in import")
+    from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
+    eligible_incoming = {
+        mid: mem for mid, mem in incoming.items()
+        if mem.get("text", "").strip() and not _is_low_signal_imp(_normalize_imp(mem["text"].strip()))
+    }
+    existing = {mid: storage.get_memory(mid) for mid in incoming}
     for mem in req.memories:
+        if mem.get("id") and mem["id"] not in eligible_incoming:
+            continue
+        if req.skip_duplicates and existing.get(mem.get("id")) is not None:
+            continue  # Validate the retained row when a descendant references it.
         seen = {mem.get("id")}
         current = mem
         while current.get("supersedes"):
@@ -2086,7 +2110,9 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
             if previous_id in seen:
                 raise HTTPException(422, "Cyclic revision lineage")
             seen.add(previous_id)
-            previous = incoming.get(previous_id) or storage.get_memory(previous_id)
+            stored = storage.get_memory(previous_id)
+            previous = (stored if req.skip_duplicates and stored is not None
+                        else eligible_incoming.get(previous_id) or stored)
             if (previous is None or previous.get("namespace", "default") != current.get("namespace", "default")
                     or current.get("valid_from") is None or previous.get("valid_to") != current["valid_from"]):
                 raise HTTPException(422, "Revision lineage must have matching scope and validity boundaries")
@@ -2111,7 +2137,6 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                 continue
 
         # Normalize BEFORE embedding so vector matches stored text
-        from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
         text = _normalize_imp(text)
         if _is_low_signal_imp(text):
             skipped += 1

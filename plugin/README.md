@@ -5,6 +5,7 @@ This native OpenClaw plugin exposes NoldoMem as agent tools:
 - `noldomem_recall` - search long-term memory
 - `noldomem_store` - store important facts, preferences, decisions, and lessons
 - `noldomem_pin` - protect critical memories from decay and cleanup
+- `noldomem_forget` - delete an assertion and its connected revision history
 - native typed hooks for operational tool capture, compaction capture, and
   subagent failure capture
 

@@ -196,9 +196,9 @@ Fallback manual mode is still possible through [`hooks/README.md`](./hooks/READM
 openclaw plugins install -l "$(pwd)/plugin"
 ```
 
-The plugin gives agents explicit `noldomem_recall`, `noldomem_store`, and
-`noldomem_pin` tools. The hook pack remains responsible for lifecycle capture
-and bootstrap context injection. The package declares its runtime entrypoint for
+The plugin gives agents explicit `noldomem_recall`, `noldomem_store`,
+`noldomem_pin`, and `noldomem_forget` tools. Select either its typed hooks or
+the legacy hook pack for each automatic capture/injection event. The package declares its runtime entrypoint for
 the OpenClaw 2026.5.2+ plugin installer path. See
 [`plugin/README.md`](./plugin/README.md).
 Operational capture ignores NoldoMem's own explicit tools, so memory reads and
@@ -283,7 +283,7 @@ the public HTTP API. Hermes Agent has a native `MemoryProvider` adapter in
 runtime guidance lives in
 [`docs/external-runtime-adapters.md`](./docs/external-runtime-adapters.md).
 For Hermes v2026.5.28+, verify that the effective toolsets still expose
-`noldomem_recall`, `noldomem_store`, and `noldomem_pin`; external
+`noldomem_recall`, `noldomem_store`, `noldomem_pin`, and `noldomem_forget`; external
 `MemoryProvider` tools are gated by the `memory` toolset when explicit toolsets
 are configured.
 
@@ -327,7 +327,7 @@ POST /v1/rule {"text": "Always run tests before commit", "agent": "YOUR_AGENT_ID
 NoldoMem offers a typed OpenClaw plugin and a legacy lifecycle hook pack. Select
 one automatic capture/injection path per event; enabling both can duplicate work:
 
-- The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`.
+- The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`, `noldomem_forget`.
 - The hook pack handles lifecycle capture, bootstrap recall, compaction snapshots, and session transitions.
 
 | Hook | When | What It Does |
