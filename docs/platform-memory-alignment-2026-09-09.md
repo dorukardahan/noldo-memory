@@ -192,7 +192,10 @@ Synthetic tests cover rollback after insertion failure and export/import of
 validity/evidence. Imports reject malformed intervals and cyclic/cross-namespace
 lineage before writes. Partial imports validate references against retained
 existing rows when duplicate IDs are skipped, and reject references to skipped
-empty-content parents. Consolidation does not merge provenance-bearing or
+empty-content parents or branching histories. Imports prepare embeddings
+before taking a write lock, then revalidate retained parent/child boundaries
+and commit all rows/vectors atomically. Failed or raced imports leave no partial
+restore. Consolidation does not merge provenance-bearing or
 versioned rows. Decay still adjusts their ranking strength but does not archive
 explicit revision families; they remain available until explicit forgetting.
 Unversioned rows retain the existing decay/archival policy. No existing live database was
@@ -253,6 +256,7 @@ session cannot invalidate that private cache; server cache and own-write
 invalidation remain. Shared reranker score caches include the agent, record ID and current text,
 preventing cross-agent score reuse and reuse after an in-place edit.
 Only results admitted after API semantic/token filtering receive access boosts.
+An absent embedder is also degraded, including a zero admission floor.
 Degraded and deliberately lexical-only searches do not populate the semantic
 result cache; its new key namespace excludes old entries without degradation
 metadata. Repeated outage tests cover both zero and nonzero admission floors.
@@ -297,7 +301,7 @@ component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
 The local unified compile/lint/test audit passed after the review fixes
-(475 tests, one optional skip). Python sdist and
+(483 tests, one optional skip). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).

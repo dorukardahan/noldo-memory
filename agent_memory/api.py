@@ -2078,6 +2078,64 @@ class ImportRequest(RequestModel):
         return value
 
 
+def _validate_import_lineage(storage, memories, skip_duplicates):
+    """Check incoming chains against rows actually retained by the import."""
+    incoming = {mem["id"]: mem for mem in memories if mem.get("id")}
+    if len(incoming) != sum(bool(mem.get("id")) for mem in memories):
+        raise HTTPException(422, "Duplicate IDs in import")
+    from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
+    eligible_incoming = {
+        mid: mem for mid, mem in incoming.items()
+        if mem.get("text", "").strip() and not _is_low_signal_imp(_normalize_imp(mem["text"].strip()))
+    }
+    def check_edge(child, parent):
+        if (parent is None or parent.get("namespace", "default") != child.get("namespace", "default")
+                or child.get("valid_from") is None or parent.get("valid_to") != child["valid_from"]):
+            raise HTTPException(422, "Revision lineage must have matching scope and validity boundaries")
+
+    existing = {mid: storage.get_memory(mid) for mid in incoming}
+    children = {}
+    for mem in memories:
+        if not mem.get("text", "").strip() or _is_low_signal_imp(_normalize_imp(mem["text"].strip())):
+            continue
+        if skip_duplicates and existing.get(mem.get("id")) is not None:
+            continue  # Validate the retained row when a descendant references it.
+        # Replacing a parent must preserve edges to children not replaced by
+        # this batch, including their scope and validity boundary.
+        if mem.get("id"):
+            for row in storage._get_conn().execute(
+                "SELECT * FROM memories WHERE supersedes = ?", (mem["id"],)
+            ).fetchall():
+                retained = dict(row)
+                if not skip_duplicates:
+                    retained = eligible_incoming.get(retained["id"]) or retained
+                if retained.get("supersedes") == mem["id"]:
+                    check_edge(retained, mem)
+        parent = mem.get("supersedes")
+        if parent:
+            if parent in children:
+                raise HTTPException(422, "Revision imports must form a single chain")
+            children[parent] = mem
+            sibling = storage._get_conn().execute(
+                "SELECT id FROM memories WHERE supersedes = ? AND id != ? LIMIT 1",
+                (parent, mem.get("id") or ""),
+            ).fetchone()
+            if sibling is not None:
+                raise HTTPException(422, "A revision child already exists for this parent")
+        seen = {mem.get("id")}
+        current = mem
+        while current.get("supersedes"):
+            previous_id = current["supersedes"]
+            if previous_id in seen:
+                raise HTTPException(422, "Cyclic revision lineage")
+            seen.add(previous_id)
+            stored = storage.get_memory(previous_id)
+            previous = (stored if skip_duplicates and stored is not None
+                        else eligible_incoming.get(previous_id) or stored)
+            check_edge(current, previous)
+            current = previous
+
+
 @app.post("/v1/import")
 async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any]:
     """Import memories from JSONL/JSON array.
@@ -2092,37 +2150,12 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
     agent_key = StoragePool.normalize_key(req.agent) if req.agent else None
     storage = _get_storage(agent_key, request=request)
 
-    incoming = {mem["id"]: mem for mem in req.memories if mem.get("id")}
-    if len(incoming) != sum(bool(mem.get("id")) for mem in req.memories):
-        raise HTTPException(422, "Duplicate IDs in import")
     from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal_imp, normalize_memory_text as _normalize_imp
-    eligible_incoming = {
-        mid: mem for mid, mem in incoming.items()
-        if mem.get("text", "").strip() and not _is_low_signal_imp(_normalize_imp(mem["text"].strip()))
-    }
-    existing = {mid: storage.get_memory(mid) for mid in incoming}
-    for mem in req.memories:
-        if mem.get("id") and mem["id"] not in eligible_incoming:
-            continue
-        if req.skip_duplicates and existing.get(mem.get("id")) is not None:
-            continue  # Validate the retained row when a descendant references it.
-        seen = {mem.get("id")}
-        current = mem
-        while current.get("supersedes"):
-            previous_id = current["supersedes"]
-            if previous_id in seen:
-                raise HTTPException(422, "Cyclic revision lineage")
-            seen.add(previous_id)
-            stored = storage.get_memory(previous_id)
-            previous = (stored if req.skip_duplicates and stored is not None
-                        else eligible_incoming.get(previous_id) or stored)
-            if (previous is None or previous.get("namespace", "default") != current.get("namespace", "default")
-                    or current.get("valid_from") is None or previous.get("valid_to") != current["valid_from"]):
-                raise HTTPException(422, "Revision lineage must have matching scope and validity boundaries")
-            current = previous
+    _validate_import_lineage(storage, req.memories, req.skip_duplicates)
 
     imported = 0
     skipped = 0
+    prepared = []
 
     for mem in req.memories:
         text = mem.get("text", "").strip()
@@ -2168,31 +2201,50 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                             mid or "new",
                             exc,
                         )
-        storage.store_memory(
-            text=text,
-            vector=vector,
-            category=mem.get("category", "other"),
-            importance=float(mem.get("importance", 0.5)),
-            source_session=mem.get("source_session"),
-            namespace=mem.get("namespace", "default"),
-            memory_type=mem.get("memory_type", "other"),
-            source=mem.get("source", "import"),
-            trust_level=mem.get("trust_level", "import"),
-            strength=float(mem.get("strength", 1.0)),
-            created_at=mem.get("created_at"),
-            updated_at=mem.get("updated_at"),
-            last_accessed_at=mem.get("last_accessed_at"),
-            deleted_at=mem.get("deleted_at"),
-            pinned=int(mem.get("pinned", 0) or 0),
-            lesson_status=mem.get("lesson_status"),
-            lesson_scope=mem.get("lesson_scope"),
-            resolved_at=mem.get("resolved_at"),
-            evidence=Evidence.model_validate(mem["evidence"]).model_dump(exclude_none=True) if mem.get("evidence") else None,
-            valid_from=mem.get("valid_from"), valid_to=mem.get("valid_to"),
-            supersedes=mem.get("supersedes"),
-            memory_id=mid,
-        )
-        imported += 1
+        prepared.append((mem, text, vector))
+
+    # Embeddings are ready before acquiring the write lock. Revalidate against
+    # current rows inside the same transaction as all inserts, with no await.
+    conn = storage._get_conn()
+    try:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            to_write = []
+            for mem, text, vector in prepared:
+                if req.skip_duplicates and mem.get("id") and storage.get_memory(mem["id"]) is not None:
+                    skipped += 1
+                else:
+                    to_write.append((mem, text, vector))
+            _validate_import_lineage(storage, [mem for mem, _, _ in to_write], req.skip_duplicates)
+            for mem, text, vector in to_write:
+                storage.store_memory(
+                    text=text,
+                    vector=vector,
+                    category=mem.get("category", "other"),
+                    importance=float(mem.get("importance", 0.5)),
+                    source_session=mem.get("source_session"),
+                    namespace=mem.get("namespace", "default"),
+                    memory_type=mem.get("memory_type", "other"),
+                    source=mem.get("source", "import"),
+                    trust_level=mem.get("trust_level", "import"),
+                    strength=float(mem.get("strength", 1.0)),
+                    created_at=mem.get("created_at"),
+                    updated_at=mem.get("updated_at"),
+                    last_accessed_at=mem.get("last_accessed_at"),
+                    deleted_at=mem.get("deleted_at"),
+                    pinned=int(mem.get("pinned", 0) or 0),
+                    lesson_status=mem.get("lesson_status"),
+                    lesson_scope=mem.get("lesson_scope"),
+                    resolved_at=mem.get("resolved_at"),
+                    evidence=Evidence.model_validate(mem["evidence"]).model_dump(exclude_none=True) if mem.get("evidence") else None,
+                    valid_from=mem.get("valid_from"), valid_to=mem.get("valid_to"),
+                    supersedes=mem.get("supersedes"),
+                    memory_id=mem.get("id"),
+                    _commit=False,
+                )
+                imported += 1
+    except (ValueError, TypeError, sqlite3.IntegrityError):
+        raise HTTPException(422, "Import could not be applied atomically") from None
 
     storage.invalidate_search_cache(agent=agent_key or "main")
     logger.info(

@@ -488,8 +488,8 @@ class HybridSearch:
         are still used.
         """
         # Status belongs to this call, not the shared per-agent search object.
-        degraded = False
-        search_mode = "full"
+        degraded = use_semantic and self.embedder is None
+        search_mode = "keyword_only" if degraded else "full"
 
         def finish(items):
             # Legacy diagnostics expose the last completed call only. Concurrent

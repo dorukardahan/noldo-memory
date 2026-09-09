@@ -378,3 +378,91 @@ async def test_overlapping_healthy_recall_does_not_admit_or_cache_an_outage(clie
     assert healthy['results'] and not healthy.get('degraded', False)
     assert failed['degraded'] and failed['results'] == []
     assert not any('outage' in r['query_norm'] for r in storage._get_conn().execute('SELECT query_norm FROM search_result_cache'))
+
+
+@pytest.mark.asyncio
+async def test_absent_embedder_is_degraded_and_never_admitted_or_cached(client, monkeypatch):
+    import agent_memory.api as api
+    storage = api._storage_pool.get('alpha')
+    storage.store_memory('The observatory has a violet dome.')
+    monkeypatch.setattr(api, '_embedder', None)
+    query = {'agent': 'alpha', 'query': 'violet observatory dome'}
+    for _ in range(2):
+        response = (await client.post('/v1/recall', json={**query, 'min_semantic_score': 0})).json()
+        assert response['degraded'] and response['search_mode'] == 'keyword_only'
+        assert response['results'] == []
+    assert storage._get_conn().execute('SELECT COUNT(*) FROM search_result_cache').fetchone()[0] == 0
+    assert (await client.post('/v1/recall', json=query)).json()['results']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('existing_child', [False, True])
+async def test_import_rejects_branching_revision_families(client, existing_child):
+    parent = {'id': 'parent', 'text': 'The observatory had a violet dome.', 'valid_to': 10}
+    child = {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'}
+    fork = {**child, 'id': 'fork', 'text': 'The observatory has a blue dome.'}
+    if existing_child:
+        assert (await client.post('/v1/import', json={'memories': [parent, child]})).status_code == 200
+        records = [fork]
+    else:
+        records = [parent, child, fork]
+    response = await client.post('/v1/import', json={'memories': records})
+    assert response.status_code == 422
+    after = (await client.get('/v1/export')).json()
+    assert {m['id'] for m in after} == ({'parent', 'child'} if existing_child else set())
+
+
+@pytest.mark.asyncio
+async def test_import_rolls_back_all_rows_and_vectors_when_a_later_record_is_invalid(client):
+    import agent_memory.api as api
+    response = await client.post('/v1/import', json={'memories': [
+        {'text': 'The observatory has a violet dome.'},
+        {'text': 'The observatory opens at dusk.', 'importance': 'invalid'},
+    ]})
+    assert response.status_code == 422
+    storage = api._storage_pool.get('main')
+    assert (await client.get('/v1/export')).json() == []
+    assert storage._get_conn().execute('SELECT COUNT(*) FROM memory_vectors').fetchone()[0] == 0
+    assert storage.search_text('observatory', include_history=True) == []
+
+
+@pytest.mark.asyncio
+async def test_import_rechecks_retained_lineage_after_awaiting_embeddings(client, monkeypatch):
+    import asyncio
+    import agent_memory.api as api
+    started, release = asyncio.Event(), asyncio.Event()
+    parent = {'id': 'parent', 'text': 'The observatory had a violet dome.', 'valid_to': 10}
+    assert (await client.post('/v1/import', json={'memories': [parent]})).status_code == 200
+    storage = api._storage_pool.get('main')
+
+    async def embed(text):
+        started.set()
+        await release.wait()
+        return [1, 0, 0, 0]
+
+    monkeypatch.setattr(api._embedder, 'embed', embed)
+    task = asyncio.create_task(client.post('/v1/import', json={'memories': [
+        {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'},
+    ]}))
+    try:
+        await asyncio.wait_for(started.wait(), 2)
+        storage.store_memory('The observatory has a blue dome.', memory_id='winner',
+                             valid_from=10, supersedes='parent')
+    finally:
+        release.set()
+    assert (await asyncio.wait_for(task, 2)).status_code == 422
+    assert storage.get_memory('child') is None
+    assert storage.get_memory('winner') is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('replacement', [{'valid_to': 20}, {'namespace': 'other'}, {'text': 'The observatory had a blue dome.'}])
+async def test_import_parent_replacement_preserves_retained_child_edges(client, replacement):
+    parent = {'id': 'parent', 'text': 'The observatory had a violet dome.', 'valid_to': 10}
+    child = {'id': 'child', 'text': 'The observatory has a silver dome.', 'valid_from': 10, 'supersedes': 'parent'}
+    assert (await client.post('/v1/import', json={'memories': [parent, child]})).status_code == 200
+    response = await client.post('/v1/import', json={'skip_duplicates': False, 'memories': [{**parent, **replacement}]})
+    assert response.status_code == (200 if 'text' in replacement else 422)
+    rows = {m['id']: m for m in (await client.get('/v1/export')).json()}
+    assert rows['parent']['valid_to'] == rows['child']['valid_from'] == 10
+    assert rows['parent']['namespace'] == rows['child']['namespace'] == 'default'
