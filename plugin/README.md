@@ -35,6 +35,7 @@ Then enable it in `openclaw.json`:
       "noldomem": {
         "enabled": true,
         "hooks": {
+          "allowConversationAccess": true,
           "allowPromptInjection": false,
           "timeoutMs": 5000,
           "timeouts": {
@@ -71,8 +72,14 @@ Restart OpenClaw after installing.
 ## Plugin vs Hook Pack
 
 Use the typed plugin for current-turn automatic recall (`enableAutoRecall`) and
-capture (`enableAutoCapture`). Both remain opt-in. Declarative prompts can recall
-history; trivial acknowledgements skip search. An optional
+capture (`enableAutoCapture`). Both remain opt-in. Automatic recall runs only when `hooks.allowPromptInjection` is also `true`. OpenClaw 2026.9.3
+requires explicit `hooks.allowConversationAccess: true` for non-bundled
+conversation hooks, including `agent_end` and `message_sent`. Without that grant
+the native loader rejects those hook registrations; tools alone can still load.
+The example above enables capture/lifecycle access while retaining the
+prompt-injection prohibition. For automatic recall, deliberately enable both
+`enableAutoRecall` and `hooks.allowPromptInjection` in the selected profile.
+Declarative prompts can recall history; trivial acknowledgements skip search. An optional
 `recallMinSemanticScore` filters automatic context using a model-calibrated floor;
 there is no universal default. Explicit recall remains available in degraded mode.
 

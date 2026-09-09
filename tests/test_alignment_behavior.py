@@ -72,6 +72,42 @@ def test_similar_distinct_statements_keep_separate_provenance(tmp_storage):
     assert tmp_storage.get_memory(new['id'])['source_session'] == 'session-b'
 
 
+def test_openclaw_native_text_derivatives_keep_lower_trust():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const hooks = {}, stores = [];
+registerAutoCapture({on(name, fn) {hooks[name] = fn;}}, {
+  store: async body => {stores.push(body); return {};},
+}, {captureMaxItems: 3, defaultNamespace: 'default'});
+const ctx = {agentId: 'alpha', sessionKey: 'agent:alpha:a'};
+for (const [title, label, modality] of [['Image', 'Description', 'image'], ['Audio', 'Transcript', 'audio'], ['Video', 'Description', 'mixed']]) {
+  const text = `[${title}]\n${label}:\nThe dome is violet.`;
+  await hooks.agent_end({success: true, messages: [{role:'user', content:text}]}, ctx);
+  assert.equal(stores.at(-1).text, text);
+  assert.equal(stores.at(-1).evidence.modality, modality);
+  assert.equal(stores.at(-1).evidence.assertion, 'derived');
+  assert.equal(stores.at(-1).evidence.representation, 'extracted_text');
+}
+assert.equal(stores.length, 3, 'short existing derivatives must not need a remember command');
+''')
+
+
+def test_hermes_native_vision_envelope_is_not_a_reported_user_fact(monkeypatch, tmp_path):
+    from tests.test_hermes_adapter import _configured_provider
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    monkeypatch.setattr(provider._client, 'capture', lambda body: calls.append(body) or {'stored': 1})
+    text = "[The user sent an image~ Here's what I can see:\nThe observatory dome is violet.]"
+    provider.sync_turn(text, 'Understood.', session_id='session-1', messages=[{'role': 'user', 'content': text}])
+    assert len(calls) == 1
+    evidence = calls[0]['messages'][0]['evidence']
+    assert evidence['assertion'] == 'derived'
+    assert evidence['modality'] == 'image'
+    assert evidence['representation'] == 'extracted_text'
+    provider.shutdown()
+
+
 def test_identical_retry_does_not_grow_memory(tmp_storage):
     kwargs = dict(text='The observatory opens at dusk.', vector=[1.0, 0.0, 0.0, 0.0],
                   category='user', importance=0.6, source_session='session-a', source='session_capture')

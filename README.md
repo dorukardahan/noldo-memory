@@ -28,6 +28,10 @@ provenance and conditional multimodal indexing. Hermes offers bounded, persisten
 
 The [dated platform comparison and synthetic measurements](docs/platform-memory-alignment-2026-09-09.md)
 explain the tested versions, native advantages, limitations and integration status.
+
+Python consumers of the Turkish morphology helpers should read the
+[unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search
+path no longer requires Zeyrek/NLTK; lexical normalization is not lemmatization.
 Neither system has proven universal superiority. Avoid two independent writers
 for the same durable fact unless update and deletion propagation are implemented.
 
@@ -215,6 +219,7 @@ timeouts:
     "entries": {
       "noldomem": {
         "hooks": {
+          "allowConversationAccess": true,
           "allowPromptInjection": false,
           "timeoutMs": 5000,
           "timeouts": {
@@ -228,6 +233,11 @@ timeouts:
   }
 }
 ```
+
+On OpenClaw 2026.9.3, conversation hooks require the explicit grant above.
+For typed automatic recall, set both `enableAutoRecall: true` and
+`hooks.allowPromptInjection: true` in the selected profile. See the plugin guide
+for choosing one automatic capture/injection owner.
 
 **4e. Set the API key for hooks and plugin:**
 

@@ -449,12 +449,16 @@ class NoldoMemProvider(MemoryProvider):
                                             and isinstance(part.get("text"), str))
                     if not isinstance(content, str) or not content.strip():
                         continue
+                    # Stable text-only vision enrichment loses its binary block
+                    # before reaching MemoryManager. Preserve the lower trust.
+                    vision_derivative = content.startswith("[The user sent an image~ Here's what I can see:\n")
+                    has_media = has_media or vision_derivative
                     captured.append({
                         "role": role, "text": _truncate(content, 4000),
                         "session": body.get("session_id", ""),
                         "evidence": {"role": role, "assertion": "reported" if role == "user" and not has_media else "derived",
                                      "delivery": "received" if role == "user" else "generated",
-                                     "modality": "mixed" if has_media else "text",
+                                     "modality": "image" if vision_derivative else ("mixed" if has_media else "text"),
                                      "representation": "extracted_text" if has_media else "text"},
                     })
                 if captured:

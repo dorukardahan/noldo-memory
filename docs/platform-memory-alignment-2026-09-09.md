@@ -303,16 +303,34 @@ recall and context assembly. Embedding failure is intentionally injected, so
 this proves the degraded integration path, not semantic model accuracy.
 Native MemoryStore is also exercised through its real file-backed API.
 
-OpenClaw plugin handlers run in Node behavioral tests with a synthetic host API.
-Those tests do not count as a full stable Gateway/loader test. The separate
-`check_openclaw_stable.cjs` checks supplied stable SDK source/dependencies, but
-the current attempt is incomplete because the isolated host dependency set is
-missing required packages. The host also requires a newer Node than the local
-component-test runtime. Do not interpret source inspection or a substitute
-runtime as full integration success.
+The follow-up `runtime_test_api.py` and `check_openclaw_runtime.mjs` use the
+installed stable OpenClaw 2026.9.3 loader and hook runner on its Node 24.19.0,
+with a separate candidate directory, unprivileged temporary HOME/state and real
+temporary HTTP API/DB. The loader source must resolve to the candidate plugin.
+Native current-turn capture, confirmed outgoing text, cross-session automatic
+injection and agent isolation passed. The native conversation-access grant is
+required; without `hooks.allowConversationAccess: true`, non-bundled capture
+hooks do not register. The supported grant is now documented.
+
+Two independently authored image/audio derivative envelopes matching the pinned
+host format also passed capture, semantic recall and context injection. The
+installed formatter is private, so the harness supplies those text envelopes;
+it does not claim to invoke raw OCR/ASR or verify the caption/transcript itself.
+The Hermes real loader/MemoryManager test also passes its native text-only vision
+envelope as derived image evidence and recalls it in another session. Successful
+Hermes voice preprocessing can lose media identity before the provider boundary;
+a quoted string alone cannot prove audio provenance. Generated outgoing Hermes
+text still does not prove channel delivery. Complete binary-attachment coverage
+and generated-answer correctness remain unverified.
+
+These are real native loader/hook/provider integration tests, not a running
+Gateway/model conversation. Existing host installation/configuration is unchanged;
+all temporary host data was removed and the same Gateway process remained ready.
+No age-gate exception, runtime install, saved credential transfer or restart was
+used. The earlier local SDK-only attempt remains an incomplete historical attempt.
 
 The local unified compile/lint/test audit passed after the review fixes
-(489 tests, one optional skip). Python sdist and
+(498 tests, one optional skip, in a clean environment without NLTK/Zeyrek). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).
@@ -324,8 +342,15 @@ Zeyrek's sentence/word tokenizers; this path does not call the listed model
 import/export APIs. That narrower reachability is not a clean dependency audit.
 The advisory database has conflicting fixed-version metadata, so it is not used
 to assert a fix. No audit exception, tokenizer substitution or dependency
-protection override was applied. CI remains blocked on an upstream fix or a
-separately justified dependency change. The configured Codex review identified
+protection override was applied. The follow-up removed the unused-on-the-main-path mandatory dependency after
+an independent Turkish non-regression experiment. The [helper migration](turkish-helper-migration.md)
+explicitly documents the breaking Python helper transition and required next
+major release coordination. Fresh core/development and reranker-extra resolutions
+contain neither Zeyrek nor NLTK; built wheel metadata and a wheel-only runtime
+smoke confirm the same. All freshly resolved core/development pins passed a local
+security audit without exceptions. The old NLTK/joblib CI ignores were removed;
+pre-existing unrelated runner/tooling exceptions were not expanded. Final-head
+CI is still a separate delivery gate. The configured Codex review identified
 revision archival, administrative historical inference, manifest completeness,
 partial-import lineage and admission-side-effect gaps; focused regressions
 accompany the fixes. Final-head CI/review must be checked separately.

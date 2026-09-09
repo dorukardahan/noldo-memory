@@ -80,6 +80,14 @@ function extractUserTextsFromMessages(messages) {
   return texts;
 }
 
+function nativeMediaKind(text) {
+  // Stable host text derivatives, not evidence that a raw attachment was read.
+  // A forged marker can only downgrade trust to derived, never promote it.
+  const kinds = [...text.matchAll(/(?:^|\n)\[(Audio|Image|Video)(?: \d+\/\d+)?\]\n(?:User text:\n[\s\S]*?\n)?(?:Transcript|Description):\n/gu)]
+    .map(match => match[1] === "Video" ? "mixed" : match[1].toLowerCase());
+  return kinds.length ? (new Set(kinds).size === 1 ? kinds[0] : "mixed") : null;
+}
+
 const SECRET_PATTERNS = [
   /((?:["'])?(?:api[_-]?key|token|secret|password|passwd|pwd)(?:["'])?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
@@ -259,17 +267,19 @@ export function registerAutoCapture(api, client, cfg) {
     const media = Array.isArray(blocks) && blocks.some((block) =>
       ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
     const candidates = texts.filter((text) => shouldCapture(text) ||
-      (media && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
+      ((media || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
 
     for (const text of candidates) {
+      const derivativeKind = nativeMediaKind(text);
+      const derived = media || derivativeKind !== null;
       try {
         await client.store({
           text: boundedCaptureText(text),
           agent,
           source: "plugin-auto-capture",
           session_id: ctx.sessionKey || ctx.sessionId,
-          evidence: { role: "user", assertion: media ? "derived" : "reported", delivery: "received",
-            modality: media ? "mixed" : "text", representation: media ? "extracted_text" : "text" },
+          evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
+            modality: derivativeKind || (media ? "mixed" : "text"), representation: derived ? "extracted_text" : "text" },
           namespace: cfg.defaultNamespace,
         });
       } catch (err) {

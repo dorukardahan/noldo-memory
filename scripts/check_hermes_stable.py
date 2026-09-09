@@ -84,6 +84,21 @@ def check(host, repo):
         assert all(row['id'] != rows[0]['id'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
         schemas = manager.get_all_tool_schemas()
         assert any(item['name'] == 'noldomem_recall' for item in schemas)
+        # Hermes' real text-only vision envelope survives the provider boundary.
+        # The caption is synthetic extractor output, not an actual vision call.
+        vision = "[The user sent an image~ Here's what I can see:\nThe Aurora observatory dome is violet.]"
+        manager.sync_all(vision, 'The caption is available.', session_id='session-b', messages=[
+            {'role': 'user', 'content': vision},
+            {'role': 'assistant', 'content': 'The caption is available.'},
+        ])
+        assert manager.flush_pending(timeout=5)
+        media_rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+        media = next(row for row in media_rows if row['text'] == vision)
+        assert media['evidence']['modality'] == 'image'
+        assert media['evidence']['assertion'] == 'derived'
+        manager.on_session_switch('session-c')
+        media_context = manager.prefetch_all('Choose the Aurora observatory dome color', session_id='session-c')
+        assert 'violet' in media_context
         # Exact same public input corpus, native bounded startup snapshot.
         corpus = json.loads((repo / 'tests/fixtures/alignment_cases.json').read_text())
         native = MemoryStore(memory_char_limit=3500)
@@ -112,6 +127,8 @@ def check(host, repo):
                           'native_corpus_coverage': len(corpus['episodes']),
                           'native_context_chars': len(native_context),
                           'native_replace_remove': True, 'scoped_forget_over_http': True, 'duplicate_authority_mirror': 'unsupported; refused',
+                          'synthetic_vision_derivative_across_sessions': True,
+                          'raw_media_extraction': 'not invoked; synthetic extractor output',
                           'generated_answer_accuracy': 'not measured'}, indent=2))
     finally:
         manager.shutdown_all()
