@@ -197,6 +197,11 @@ class SearchResult:
     importance_score: float = 0.0
     rerank_score: float = 0.0
     confidence_tier: str = "LOW"
+    evidence: Optional[Dict[str, Any]] = None
+    source_session: Optional[str] = None
+    valid_from: Optional[float] = None
+    valid_to: Optional[float] = None
+    supersedes: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -215,6 +220,8 @@ class SearchResult:
             "importance_score": round(self.importance_score, 4),
             "rerank_score": round(self.rerank_score, 4),
             "confidence_tier": self.confidence_tier,
+            "evidence": self.evidence, "source_session": self.source_session,
+            "valid_from": self.valid_from, "valid_to": self.valid_to, "supersedes": self.supersedes,
         }
 
 
@@ -354,6 +361,7 @@ class HybridSearch:
                     min_score=min_score,
                     agent=agent,
                     seed_results=snapshot,
+                    cache_generation=self.storage.cache_generation,
                 )
             )
         except RuntimeError:
@@ -370,6 +378,7 @@ class HybridSearch:
         min_score: float,
         agent: str,
         seed_results: List[SearchResult],
+        cache_generation: Optional[int] = None,
     ) -> None:
         if self.bg_reranker is None:
             return
@@ -423,6 +432,8 @@ class HybridSearch:
                 if len(cands) > limit:
                     cands = cands[:limit]
 
+                if cache_generation is not None and self.storage.cache_generation != cache_generation:
+                    return
                 results_json = json.dumps([r.to_dict() for r in cands])
                 self.storage.cache_search_result(
                     query_norm=cache_query_norm,
@@ -456,6 +467,8 @@ class HybridSearch:
         namespace: Optional[str] = None,
         memory_type: Optional[str] = None,
         rerank: bool = True,
+        include_history: bool = False,
+        as_of: Optional[float] = None,
     ) -> List[SearchResult]:
         """Run hybrid search and return fused, ranked results.
 
@@ -467,13 +480,22 @@ class HybridSearch:
         self.last_search_degraded = False
         self.last_search_mode = "full"
 
+        cache_generation = self.storage.cache_generation
+        has_versions = self.storage._get_conn().execute(
+            "SELECT 1 FROM memories WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL LIMIT 1"
+        ).fetchone()
+        cache_allowed = time_range is None and not has_versions
+
         # 1. Query normalization + intent-aware filter selection + cache check
         q_norm = normalize_query(query)
         effective_memory_type = memory_type or _detect_memory_type_intent(q_norm)
         cache_query_norm = _build_cache_query_norm(q_norm, namespace, effective_memory_type)
+        if include_history or as_of is not None:
+            cache_query_norm += f"|history={include_history}|as_of={as_of}"
+        validity, validity_params = self.storage.validity_filter(include_history=include_history, as_of=as_of)
 
         # Skip cache for temporal queries — time_range changes daily
-        if time_range is None:
+        if cache_allowed:
             cached_json = self.storage.get_cached_search_result(
                 query_norm=cache_query_norm, limit_val=limit, min_score=min_score, agent=agent
             )
@@ -508,6 +530,7 @@ class HybridSearch:
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
                 memory_type=db_filter_type,
+                include_history=include_history, as_of=as_of,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
@@ -517,6 +540,7 @@ class HybridSearch:
                 candidate_limit,
                 namespace,
                 memory_type=db_filter_type,
+                include_history=include_history, as_of=as_of,
             )
 
         async def _kg_entity_search() -> List[Dict[str, Any]]:
@@ -588,6 +612,7 @@ class HybridSearch:
                         candidate_limit,
                         namespace,
                         memory_type=db_filter_type,
+                        include_history=include_history, as_of=as_of,
                     ):
                         _add_memory_id(mem.get("id"))
                         if len(seen_memory_ids) >= candidate_limit:
@@ -598,7 +623,8 @@ class HybridSearch:
 
             placeholders = ",".join("?" for _ in memory_ids)
             where_parts = [f"id IN ({placeholders})", "deleted_at IS NULL"]
-            params: List[Any] = list(memory_ids)
+            where_parts.append(validity)
+            params: List[Any] = list(memory_ids) + validity_params
             if namespace is not None:
                 where_parts.append("namespace = ?")
                 params.append(namespace)
@@ -640,7 +666,8 @@ class HybridSearch:
                     "importance >= 0.05",
                     "COALESCE(memory_type, 'other') = ?",
                 ]
-                params: List[Any] = [explicit_type]
+                where_parts.append(validity)
+                params: List[Any] = [explicit_type] + validity_params
                 if namespace is not None:
                     where_parts.append("namespace = ?")
                     params.append(namespace)
@@ -875,6 +902,10 @@ class HybridSearch:
 
             sr = SearchResult(
                 id=mid,
+                evidence=json.loads(cand.get("evidence") or "{}"),
+                source_session=cand.get("source_session"),
+                valid_from=cand.get("valid_from"), valid_to=cand.get("valid_to"),
+                supersedes=cand.get("supersedes"),
                 text=cand.get("text", ""),
                 category=cand.get("category", "other"),
                 importance=cand.get("importance", 0.5),
@@ -968,8 +999,12 @@ class HybridSearch:
             except Exception as exc:
                 logger.debug("Reranker skipped: %s", exc)
 
+        # A write/forget during an awaited embed/rerank invalidates the snapshot.
+        if self.storage.cache_generation != cache_generation:
+            return []
+
         # Two-pass refresh: run heavy quality reranker in background and update cache.
-        if rerank and time_range is None:
+        if rerank and cache_allowed:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
                 cache_query_norm=cache_query_norm,
@@ -996,7 +1031,7 @@ class HybridSearch:
                 pass
 
         # 3. Store Results in Cache (skip for temporal queries)
-        if time_range is None:
+        if cache_allowed:
             try:
                 results_json = json.dumps([r.to_dict() for r in results])
                 self.storage.cache_search_result(

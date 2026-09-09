@@ -72,6 +72,8 @@ class _Response:
 
 
 def _configured_provider(monkeypatch, tmp_path, **config):
+    # These lifecycle/cache tests explicitly exercise the optional local cache.
+    config.setdefault("recall_cache_ttl_seconds", 300.0)
     key_file = tmp_path / "key"
     key_file.write_text("test-key", encoding="utf-8")
     (tmp_path / "noldomem.json").write_text(json.dumps(config), encoding="utf-8")
@@ -124,7 +126,7 @@ def test_provider_exposes_stable_tool_names(monkeypatch, tmp_path):
     provider = NoldoMemProvider()
     names = [schema["name"] for schema in provider.get_tool_schemas()]
 
-    assert names == ["noldomem_recall", "noldomem_store", "noldomem_pin"]
+    assert names == ["noldomem_recall", "noldomem_store", "noldomem_forget", "noldomem_pin"]
     assert provider.is_available() is True
 
 
@@ -1141,7 +1143,7 @@ def test_config_validates_cache_bounds(monkeypatch, tmp_path):
         recall_cache_max_entries=999999,
     )
 
-    assert provider._config.recall_cache_ttl_seconds == 0.1
+    assert provider._config.recall_cache_ttl_seconds == 0.0
     assert provider._config.recall_cache_max_entries == 4096
 
 
@@ -1152,7 +1154,7 @@ def test_config_rejects_non_finite_cache_ttl(monkeypatch, tmp_path):
         recall_cache_ttl_seconds=float("nan"),
     )
 
-    assert provider._config.recall_cache_ttl_seconds == 300.0
+    assert provider._config.recall_cache_ttl_seconds == 0.0
 
 
 def test_recall_cache_honors_configured_ttl(monkeypatch, tmp_path):
@@ -1287,7 +1289,7 @@ def test_availability_check_does_not_hot_reconfigure_initialized_scope(monkeypat
     assert provider._config.namespace == "default"
     assert provider._config.recall_limit == 5
     assert list(provider._cache) == [
-        ("hermes", "default", 5, 3500, "same-session", "same-query")
+        ("hermes", "default", 5, 3500, "same-session", "same-query", None)
     ]
 
 
@@ -1346,7 +1348,7 @@ def test_availability_recheck_cannot_replace_scope_during_recall_validation(
     assert provider._config.namespace == "default"
     assert "('hermes', 'default')" in results[0]
     assert list(provider._cache) == [
-        ("hermes", "default", 5, 3500, "session-1", "same-query")
+        ("hermes", "default", 5, 3500, "session-1", "same-query", None)
     ]
 
 
@@ -1462,7 +1464,7 @@ def test_inflight_old_session_recall_cannot_repopulate_cache_after_switch(monkey
     assert "context-session-2" in context
     assert requested_sessions == ["session-1", "session-2"]
     assert list(provider._cache) == [
-        ("hermes", "default", 5, 3500, "session-2", "same-query")
+        ("hermes", "default", 5, 3500, "session-2", "same-query", None)
     ]
 
 
@@ -1526,6 +1528,7 @@ def test_availability_and_tool_discovery_are_network_free(monkeypatch, tmp_path)
     assert [schema["name"] for schema in provider.get_tool_schemas()] == [
         "noldomem_recall",
         "noldomem_store",
+        "noldomem_forget",
         "noldomem_pin",
     ]
 

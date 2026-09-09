@@ -44,6 +44,7 @@ export function buildClient(cfg) {
     recall: (body) => request("/v1/recall", "POST", body),
     capture: (body) => request("/v1/capture", "POST", body),
     store: (body) => request("/v1/store", "POST", body),
+    forget: (body) => request("/v1/forget", "DELETE", body),
     pin: (body) => request("/v1/pin", "POST", body),
     stats: (agent) =>
       request(`/v1/stats${agent ? `?agent=${encodeURIComponent(agent)}` : ""}`, "GET"),

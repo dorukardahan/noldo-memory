@@ -2,8 +2,8 @@
 
 Endpoints:
     POST   /v1/recall        -- Hybrid search (semantic + BM25 + recency + strength + importance)
-    POST   /v1/capture       -- Batch ingest (write-time semantic merge)
-    POST   /v1/store         -- Store one memory (write-time semantic merge)
+    POST   /v1/capture       -- Batch ingest (exact retry deduplication)
+    POST   /v1/store         -- Store one memory (exact retry deduplication)
     DELETE /v1/forget        -- Delete memory
     GET    /v1/search        -- Interactive search
     GET    /v1/stats         -- Statistics
@@ -24,6 +24,7 @@ Run: ``python -m agent_memory.api``
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import logging
 import re
@@ -54,6 +55,7 @@ from .entities import KnowledgeGraph
 from .pool import StoragePool
 from .reranker import APIReranker, BaseReranker, CrossEncoderReranker
 from .search import HybridSearch, SearchWeights, _lexical_overlap, _rrf_fuse
+from .evidence import Evidence, MemoryValidity, content_text
 from .storage import MemoryStorage
 from .rules import RuleDetector
 from .triggers import score_importance, should_trigger
@@ -431,8 +433,10 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    logger.warning("Validation error: %s (path=%s)", str(exc)[:200], request.url.path)
-    errors = exc.errors()
+    # Pydantic's ctx can contain ValueError objects, and input can contain
+    # private evidence. Return serializable field diagnostics only.
+    errors = [{key: err[key] for key in ("type", "loc", "msg") if key in err} for err in exc.errors()]
+    logger.warning("Validation error: %d fields (path=%s)", len(errors), request.url.path)
     status_code = 422
     error_message = "Validation error"
     if any(err.get("type") == "agent_format" for err in errors):
@@ -487,9 +491,12 @@ class RequestModel(BaseModel):
         return value
 
 class RecallRequest(RequestModel):
+    include_history: Optional[bool] = None
+    as_of: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     query: str = Field(..., min_length=1, max_length=2000)
     limit: int = Field(default=5, ge=1, le=50)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    min_semantic_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     max_tokens: Optional[int] = Field(default=None, ge=100, le=100000,
                                        description="Trim results to fit within this token budget")
     namespace: Optional[str] = Field(default=None, description="Filter by namespace (None = all)")
@@ -513,6 +520,9 @@ class CaptureRequest(RequestModel):
 
 
 class StoreRequest(RequestModel):
+    evidence: Optional[Evidence] = None
+    supersedes: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    valid_from: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     text: str = Field(..., min_length=1, max_length=50000)
     category: str = "other"
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
@@ -579,9 +589,16 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
         namespace=req.namespace,
         memory_type=req.memory_type,
         agent=agent_key,
+        include_history=(req.include_history if req.include_history is not None else bool(re.search(r"\b(previously|used to|historical|önceden|eskiden|önceki)\b", req.query, re.I))),
+        as_of=req.as_of,
     )
 
-    result_dicts = [r.to_dict() for r in results]
+    # An optional, model-calibrated admission floor for automatic injection.
+    # RRF ranks candidates; it is not a relevance probability. Fail closed in
+    # lexical-only degraded mode when the caller explicitly requires semantics.
+    result_dicts = [r.to_dict() for r in results
+                    if req.min_semantic_score is None or
+                    (not search.last_search_degraded and r.semantic_score >= req.min_semantic_score)]
 
     # Apply token budget trimming if requested
     trimmed = False
@@ -638,10 +655,13 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
                 memory_type=req.memory_type,
                 agent=agent_id,
                 rerank=False,
+                include_history=bool(req.include_history), as_of=req.as_of,
             )
             search_modes.append(search.last_search_mode)
             degraded = degraded or search.last_search_degraded
             for r in results:
+                if req.min_semantic_score is not None and (search.last_search_degraded or r.semantic_score < req.min_semantic_score):
+                    continue
                 d = r.to_dict()
                 d["agent"] = agent_id
                 all_results.append(d)
@@ -758,10 +778,23 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     # Pre-filter / normalize
     cleaned: List[Dict[str, Any]] = []
     for msg in req.messages:
-        text = (msg.get("text") or msg.get("content") or "").strip()
+        text = content_text(msg.get("text") or msg.get("content"))
         if len(text) < 3:
             continue
         role = msg.get("role", "user")
+        if role not in {"user", "assistant", "tool"}:
+            continue
+        if not isinstance(msg.get("session", ""), str):
+            raise HTTPException(422, "Capture session must be a string")
+        try:
+            evidence = Evidence.model_validate(msg.get("evidence") or {
+                "assertion": "reported" if role == "user" else "derived",
+                "delivery": "received" if role == "user" else "generated",
+            }).model_copy(update={"role": role}).model_dump(exclude_none=True)
+        except ValueError:
+            raise HTTPException(422, "Invalid capture evidence")
+        if evidence["representation"] == "reference_only":
+            continue
         from agent_memory.ingest import is_low_signal_memory_text as _is_low_signal, normalize_memory_text as _normalize
         text = _normalize(text)
         if _is_low_signal(text):
@@ -771,10 +804,33 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             "role": role,
             "session": msg.get("session", ""),
             "timestamp": msg.get("timestamp", ""),
+            "evidence": evidence,
         })
 
     if not cleaned:
         return {"stored": 0, "merged": 0, "total": len(req.messages)}
+
+    from .ingest import classify_memory_type
+    fresh = []
+    seen = set()
+    duplicate_count = 0
+    for message in cleaned:
+        identity = (message["text"], message["role"], message["session"],
+                    json.dumps(message["evidence"], sort_keys=True, ensure_ascii=False))
+        duplicate = identity in seen or storage.find_duplicate(
+            text=message["text"], category=message["role"], source_session=message["session"],
+            namespace=req.namespace, memory_type=classify_memory_type(message["text"]),
+            source="session_capture", trust_level="user", evidence=message["evidence"],
+        )
+        if duplicate:
+            duplicate_count += 1
+        else:
+            seen.add(identity)
+            fresh.append(message)
+    cleaned = fresh
+    if not cleaned:
+        return {"stored": 0, "merged": duplicate_count, "total": len(req.messages),
+                "agent": StoragePool.normalize_key(req.agent), "namespace": req.namespace}
 
     texts = [m["text"] for m in cleaned]
 
@@ -801,12 +857,12 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             "category": m["role"],
             "importance": importance,
             "source_session": m["session"],
+            "evidence": m["evidence"],
         })
 
-    # Store (write-time semantic merge, per message)
+    # Store distinct assertions; collapse exact provenance-matched retries only.
     stored_n = 0
-    merged_n = 0
-    from .ingest import classify_memory_type
+    merged_n = duplicate_count
 
     for it in items:
         res = storage.merge_or_store(
@@ -818,7 +874,8 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             namespace=req.namespace,
             memory_type=classify_memory_type(it["text"]),
             source="session_capture",
-            trust_level="system",
+            trust_level="user",
+            evidence=it["evidence"],
         )
         if res.get("action") == "merged":
             merged_n += 1
@@ -893,8 +950,6 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if is_low_signal_memory_text(req.text):
         raise HTTPException(400, "Memory text is low-signal transport metadata")
 
-    vector = await _embed_single_for_store(req.text)
-
     # Provenance: use source from request if provided, default to 'api'
     source = getattr(req, 'source', None) or 'api'
     trust_level = 'system' if source in ('hook', 'auto_escalation') else 'user'
@@ -902,6 +957,37 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     resolved_memory_type = req.memory_type if req.memory_type else classify_memory_type(req.text)
     if category == "rule" and req.memory_type is None:
         resolved_memory_type = "rule"
+
+    evidence = req.evidence.model_dump(exclude_none=True) if req.evidence else None
+    if not req.supersedes and req.valid_from is None:
+        duplicate = storage.find_duplicate(
+            text=req.text, namespace=req.namespace, category=category, memory_type=resolved_memory_type,
+            source=source, trust_level=trust_level, source_session=req.session_id, evidence=evidence,
+        )
+        if duplicate:
+            return {"id": duplicate, "stored": False, "merged": True, "similarity": 1.0,
+                    "agent": StoragePool.normalize_key(req.agent)}
+    vector = await _embed_single_for_store(req.text)
+
+    if req.supersedes:
+        if req.evidence and (req.evidence.assertion != "reported" or req.evidence.role != "user"):
+            raise HTTPException(422, "Derived or inferred evidence cannot supersede a reported fact")
+        previous = storage.get_memory(req.supersedes)
+        if previous is None or previous["namespace"] != req.namespace:
+            raise HTTPException(404, "Previous memory not found in this namespace")
+        try:
+            res = storage.revise_memory(
+                req.supersedes, text=req.text, vector=vector,
+                valid_from=req.valid_from if req.valid_from is not None else time.time(),
+                source_session=req.session_id,
+                evidence=req.evidence.model_dump(exclude_none=True) if req.evidence else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc))
+        storage.invalidate_search_cache(agent=req.agent or "main")
+        return {**res, "stored": True, "merged": False, "agent": StoragePool.normalize_key(req.agent)}
+    if req.valid_from is not None:
+        raise HTTPException(422, "valid_from requires an explicit supersedes ID")
 
     res = storage.merge_or_store(
         text=req.text,
@@ -913,6 +999,7 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
         memory_type=resolved_memory_type,
         source=source,
         trust_level=trust_level,
+        evidence=req.evidence.model_dump(exclude_none=True) if req.evidence else None,
     )
 
     # Invalidate search cache
@@ -1209,6 +1296,9 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
            AND vector_rowid IS NOT NULL
            AND COALESCE(pinned, 0) = 0
            AND COALESCE(memory_type, 'other') NOT IN ('lesson', 'rule')
+           AND COALESCE(evidence, '{}') = '{}'
+           AND source_session IS NULL AND supersedes IS NULL
+           AND valid_from IS NULL AND valid_to IS NULL
         """
     ).fetchall()
 
@@ -1366,6 +1456,9 @@ def _consolidate_single(agent_id: str, request: Optional[Request] = None) -> Dic
                AND COALESCE(last_accessed_at, created_at) < ?
                AND COALESCE(pinned, 0) = 0
                AND COALESCE(memory_type, 'other') NOT IN ('lesson', 'rule')
+           AND COALESCE(evidence, '{}') = '{}'
+           AND source_session IS NULL AND supersedes IS NULL
+           AND valid_from IS NULL AND valid_to IS NULL
             """,
             (now, cutoff),
         )
@@ -1904,7 +1997,8 @@ async def export_memories(
         SELECT id, text, category, importance, strength,
                source_session, namespace, memory_type,
                created_at, updated_at, last_accessed_at, deleted_at,
-               pinned, source, trust_level, lesson_status, lesson_scope, resolved_at
+               pinned, source, trust_level, lesson_status, lesson_scope, resolved_at,
+               evidence, valid_from, valid_to, supersedes
           FROM memories {where}
          ORDER BY created_at ASC
         """
@@ -1931,6 +2025,8 @@ async def export_memories(
             "lesson_status": r["lesson_status"],
             "lesson_scope": r["lesson_scope"],
             "resolved_at": r["resolved_at"],
+            "evidence": json.loads(r["evidence"] or "{}"),
+            "valid_from": r["valid_from"], "valid_to": r["valid_to"], "supersedes": r["supersedes"],
         })
 
     logger.info("Exported %d memories for agent=%s", len(result), agent or "main")
@@ -1948,8 +2044,15 @@ class ImportRequest(RequestModel):
     def _validate_memories(cls, value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         for mem in value:
             text = mem.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Memory text must be a string")
             if text is not None and len(str(text)) > 50000:
                 raise PydanticCustomError("memory_text_length", "Memory text exceeds max length (50000)")
+            mem.update(MemoryValidity.model_validate(mem).model_dump())
+            if mem.get("evidence") is not None and mem["evidence"] != {}:
+                mem["evidence"] = Evidence.model_validate(mem["evidence"]).model_dump(exclude_none=True)
+            if mem.get("id") is not None and (not isinstance(mem["id"], str) or not 1 <= len(mem["id"]) <= 100):
+                raise ValueError("Invalid memory ID")
         return value
 
 
@@ -1966,6 +2069,23 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
 
     agent_key = StoragePool.normalize_key(req.agent) if req.agent else None
     storage = _get_storage(agent_key, request=request)
+
+    incoming = {mem["id"]: mem for mem in req.memories if mem.get("id")}
+    if len(incoming) != sum(bool(mem.get("id")) for mem in req.memories):
+        raise HTTPException(422, "Duplicate IDs in import")
+    for mem in req.memories:
+        seen = {mem.get("id")}
+        current = mem
+        while current.get("supersedes"):
+            previous_id = current["supersedes"]
+            if previous_id in seen:
+                raise HTTPException(422, "Cyclic revision lineage")
+            seen.add(previous_id)
+            previous = incoming.get(previous_id) or storage.get_memory(previous_id)
+            if (previous is None or previous.get("namespace", "default") != current.get("namespace", "default")
+                    or current.get("valid_from") is None or previous.get("valid_to") != current["valid_from"]):
+                raise HTTPException(422, "Revision lineage must have matching scope and validity boundaries")
+            current = previous
 
     imported = 0
     skipped = 0
@@ -2034,6 +2154,9 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
             lesson_status=mem.get("lesson_status"),
             lesson_scope=mem.get("lesson_scope"),
             resolved_at=mem.get("resolved_at"),
+            evidence=Evidence.model_validate(mem["evidence"]).model_dump(exclude_none=True) if mem.get("evidence") else None,
+            valid_from=mem.get("valid_from"), valid_to=mem.get("valid_to"),
+            supersedes=mem.get("supersedes"),
             memory_id=mid,
         )
         imported += 1

@@ -6,6 +6,18 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Bind OpenClaw tools and lifecycle capture to trusted agent context; reject missing scope and model-supplied cross-agent overrides.
+- Preserve distinct statements and provenance instead of merging by vector similarity; deduplicate exact retries without growing text.
+- Invalidate in-flight and cached recall after writes, and disable Hermes provider-local caching by default.
+- Keep filtered vector fallback on the same L2 metric as the existing sqlite-vec index.
+
+### Added
+- Explicit memory revisions with validity intervals, historical recall, revision-family forgetting and export/import evidence preservation.
+- Bounded media-derivative evidence metadata, current-turn capture and delivery-aware outgoing OpenClaw text capture.
+- Optional model-calibrated automatic recall admission, synthetic regression/replay tools and dated native/platform comparison.
+
+
 ## [1.27.16] - 2026-07-23
 
 ### Fixed

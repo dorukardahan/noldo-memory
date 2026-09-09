@@ -69,17 +69,27 @@ Restart OpenClaw after installing.
 
 ## Plugin vs Hook Pack
 
-Use both pieces for the full custom-memory workflow:
+Use the typed plugin for current-turn automatic recall (`enableAutoRecall`) and
+capture (`enableAutoCapture`). Both remain opt-in. Declarative prompts can recall
+history; trivial acknowledgements skip search. An optional
+`recallMinSemanticScore` filters automatic context using a model-calibrated floor;
+there is no universal default. Explicit recall remains available in degraded mode.
 
-- `plugin/` gives agents active tools for recall/store/pin.
-- `hooks/` handles lifecycle capture and bootstrap injection, especially
-  `agent:bootstrap`, `message:received`, `message:sent`, and `/new` session
-  transitions.
+The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
+the same typed plugin capture/injection events can duplicate storage, retrieval
+and context. JSONL sync is an archive/legacy path, not a reader for the current
+stable host's canonical SQLite sessions. Do not infer live coverage from its
+successful scan.
 
-Keep `enableAutoRecall=false` unless you explicitly want the native plugin to
-run a recall check before prompt build. The hook pack already handles bootstrap
-recall and is cheaper for normal operation.
+The plugin binds tools to the host's factory context. Missing/mismatched agent
+identity fails closed; a model cannot select another agent through tool arguments.
+Use a distinct scoped API key per agent as the server-side boundary. Subtask
+capture accepts only the same agent's target session. Confirmed `message_sent`
+text is labeled delivered; `agent_end` alone is not delivery proof.
 
-If the agent has an explicit tool allow list, remove OpenClaw's native
-`memory_search` and `memory_get` tools when NoldoMem is the intended memory
-system. Keep `noldomem_recall`, `noldomem_store`, and `noldomem_pin` allowed.
+See [platform evidence](../docs/platform-memory-alignment-2026-09-09.md) for the
+native/coexistence choices and remaining stable-host test limitations.
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.

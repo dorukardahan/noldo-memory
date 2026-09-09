@@ -49,6 +49,7 @@ export default definePluginEntry({
       enableCompactionCapture: rawCfg.enableCompactionCapture ?? true,
       enableSubagentCapture: rawCfg.enableSubagentCapture ?? true,
       recallLimit: rawCfg.recallLimit ?? 5,
+      recallMinSemanticScore: rawCfg.recallMinSemanticScore,
       recallMaxTokens: rawCfg.recallMaxTokens ?? 2000,
       captureMaxItems: rawCfg.captureMaxItems ?? 3,
       requestTimeoutMs: rawCfg.requestTimeoutMs ?? 15000,

@@ -22,6 +22,7 @@
       "enableCompactionCapture": { "type": "boolean", "default": true },
       "enableSubagentCapture": { "type": "boolean", "default": true },
       "recallLimit": { "type": "integer", "minimum": 1, "maximum": 20, "default": 5 },
+      "recallMinSemanticScore": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional admission floor for automatic recall. Calibrate with the configured embedding model; scores are not probabilities. Lexical-only degraded results abstain." },
       "recallMaxTokens": { "type": "integer", "minimum": 100, "maximum": 16000, "default": 2000 },
       "captureMaxItems": { "type": "integer", "minimum": 1, "maximum": 10, "default": 3 },
       "requestTimeoutMs": { "type": "integer", "minimum": 250, "maximum": 60000, "default": 15000 }

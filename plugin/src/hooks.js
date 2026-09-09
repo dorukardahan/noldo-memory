@@ -7,28 +7,15 @@
 
 import {
   looksLikePromptInjection,
-  escapeForPrompt,
   formatRelevantMemoriesContext,
 } from "./sanitize.js";
 
-function resolveAgentId(ctx) {
-  if (typeof ctx?.agentId === "string" && ctx.agentId.trim()) {
-    return ctx.agentId.trim();
-  }
-  const sk = ctx?.sessionKey || "";
-  const match = sk.match(/^agent:([^:]+)/);
-  return match ? match[1] : "main";
-}
+import { resolveAgentId } from "./scope.js";
 
 function extractUserText(prompt) {
-  // The prompt in before_prompt_build contains the full system prompt + user message
-  // We want to extract the user's actual question for recall
-  // Take last 500 chars as a heuristic for the user query portion
-  if (!prompt || prompt.length < 10) return null;
-  // If prompt is short enough, use it directly
-  if (prompt.length <= 500) return prompt;
-  // Otherwise take the tail which is more likely the user's actual input
-  return prompt.slice(-500);
+  // The host supplies the current user prompt separately from system context.
+  if (typeof prompt !== "string") return null;
+  return prompt.trim().slice(0, 1950);
 }
 
 const SKIP_PATTERNS = [
@@ -41,7 +28,8 @@ const SKIP_PATTERNS = [
 ];
 
 function shouldSkipRecall(text) {
-  if (!text || text.length < 10) return true;
+  if (!text || text.length < 3) return true;
+  if (/^(?:hi|hello|hey|ok|okay|yes|no|thanks(?:,? that is all)?|thank you|done|continue|merhaba|tamam|evet|hayır|teşekkürler)[\s!.?,]*$/iu.test(text)) return true;
   return SKIP_PATTERNS.some((p) => p.test(text));
 }
 
@@ -85,23 +73,6 @@ function extractUserTextsFromMessages(messages) {
   return texts;
 }
 
-// Patterns that suggest the user is asking about past context, decisions, or memory
-const RECALL_TRIGGER_PATTERNS = [
-  /\b(hatırla|remember|recall|daha önce|earlier|previously|geçen sefer|last time)\b/i,
-  /\b(karar|decision|kararlaştır|agreed|anlaştık)\b/i,
-  /\b(ne yapmıştık|what did we|nerede kaldık|where were we)\b/i,
-  /\b(tercih|preference|always|her zaman|never|asla)\b/i,
-  /\b(config|credential|deploy|push|commit|migration)\b/i,
-  /\b(lesson|ders|kural|rule|öğren)\b/i,
-  /\b(durum|status|ne oldu|what happened|sorun|problem|issue|bug)\b/i,
-  /\?/, // Questions are good recall candidates
-];
-
-function shouldTriggerRecall(text) {
-  if (!text || text.length < 15) return false;
-  return RECALL_TRIGGER_PATTERNS.some((p) => p.test(text));
-}
-
 const SECRET_PATTERNS = [
   /((?:["'])?(?:api[_-]?key|token|secret|password|passwd|pwd)(?:["'])?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
@@ -120,7 +91,8 @@ const OPERATIONAL_TOOL_PATTERNS = [
 // Canonical ids plus the qualification forms known to be emitted by OpenClaw.
 // This is deliberately explicit: suffix matching suppresses unrelated plugins.
 const NOLDOMEM_TOOL_NAMES = new Set([
-  "noldomem_recall", "noldomem_store", "noldomem_pin",
+  "noldomem_recall", "noldomem_store", "noldomem_pin", "noldomem_forget",
+  "plugin:noldomem_forget", "noldomem/noldomem_forget", "memory.noldomem_forget",
   "plugin:noldomem_recall", "plugin:noldomem_store", "plugin:noldomem_pin",
   "noldomem/noldomem_recall", "noldomem/noldomem_store", "noldomem/noldomem_pin",
   "memory.noldomem_recall", "memory.noldomem_store", "memory.noldomem_pin",
@@ -231,26 +203,18 @@ export function registerAutoRecall(api, client, cfg) {
     const userQuery = extractUserText(event.prompt);
     if (shouldSkipRecall(userQuery)) return;
 
-    // Only trigger recall for messages that look like they need memory context
-    // This avoids 6-7s embedding latency on every single message
-    if (!shouldTriggerRecall(userQuery)) return;
-
     const agent = resolveAgentId(ctx);
+    if (!agent) return;
 
     try {
-      // Use AbortSignal with generous timeout — embedding on CPU takes ~6s
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-
       const data = await client.recall({
         query: userQuery,
         limit: cfg.recallLimit,
         agent,
         namespace: cfg.defaultNamespace,
         max_tokens: cfg.recallMaxTokens,
+        ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });
-
-      clearTimeout(timer);
 
       const results = (data.results || []).filter(
         (r) => !looksLikePromptInjection(r.text || r.content || "")
@@ -261,7 +225,7 @@ export function registerAutoRecall(api, client, cfg) {
       const context = formatRelevantMemoriesContext(
         results.map((r) => ({
           category: r.memory_type || r.category || "other",
-          text: (r.text || r.content || "").slice(0, 500),
+          text: `[id=${r.id} valid_from=${r.valid_from ?? "unknown"} valid_to=${r.valid_to ?? "open"} evidence=${JSON.stringify(r.evidence || {})}] ${(r.text || r.content || "").slice(0, 500)}`,
         }))
       );
 
@@ -280,8 +244,15 @@ export function registerAutoCapture(api, client, cfg) {
     if (!event.success) return;
 
     const agent = resolveAgentId(ctx);
-    const texts = extractUserTextsFromMessages(event.messages);
-    const candidates = texts.filter(shouldCapture).slice(0, cfg.captureMaxItems);
+    if (!agent) return;
+    const messages = Array.isArray(event.messages) ? event.messages : [];
+    const latestUser = messages.findLastIndex((message) => message?.role === "user");
+    const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]]);
+    const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
+    const media = Array.isArray(blocks) && blocks.some((block) =>
+      ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
+    const candidates = texts.filter((text) => shouldCapture(text) ||
+      (media && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
 
     for (const text of candidates) {
       try {
@@ -289,6 +260,9 @@ export function registerAutoCapture(api, client, cfg) {
           text: text.slice(0, 2000),
           agent,
           source: "plugin-auto-capture",
+          session_id: ctx.sessionKey || ctx.sessionId,
+          evidence: { role: "user", assertion: media ? "derived" : "reported", delivery: "received",
+            modality: media ? "mixed" : "text", representation: media ? "extracted_text" : "text" },
           namespace: cfg.defaultNamespace,
         });
       } catch (err) {
@@ -298,6 +272,24 @@ export function registerAutoCapture(api, client, cfg) {
       }
     }
   });
+
+  // agent_end confirms generation, not channel delivery. Only this host event
+  // can label outgoing text as delivered. Media-only payloads remain a host gap.
+  api.on("message_sent", async (event, ctx) => {
+    if (event?.success !== true || typeof event.content !== "string") return;
+    const agent = resolveAgentId(ctx);
+    if (!agent || !shouldCapture(event.content)) return;
+    try {
+      await client.store({
+        text: event.content.slice(0, 2000), agent, source: "plugin-message-sent",
+        namespace: cfg.defaultNamespace, session_id: ctx.sessionKey,
+        category: "assistant", memory_type: "conversation",
+        evidence: { event_id: event.messageId, role: "assistant", assertion: "derived", delivery: "delivered" },
+      });
+    } catch {
+      api.logger?.warn("noldomem: delivered-text capture unavailable");
+    }
+  });
 }
 
 export function registerNativeLifecycleCapture(api, client, cfg) {
@@ -305,6 +297,7 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
     api.on("after_tool_call", async (event, ctx) => {
       if (!shouldCaptureOperationalTool(event)) return;
       const agent = resolveAgentId(ctx);
+      if (!agent) return;
       const params = toCompactText(event?.params, 700);
       const result = event?.error ? toCompactText(event.error, 1000) : toCompactText(event?.result, 1000);
       const text = [
@@ -321,6 +314,8 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
           text: text.slice(0, 2400),
           agent,
           source: "plugin-after-tool-call",
+          session_id: ctx.sessionKey || ctx.sessionId,
+          evidence: { role: "tool", assertion: "derived", delivery: "generated" },
           namespace: cfg.defaultNamespace,
           category: event?.error ? "error" : "tool",
           importance: event?.error ? 0.85 : 0.65,
@@ -336,9 +331,12 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
       const messages = selectCompactionMessages(event?.messages);
       if (messages.length === 0) return;
       const agent = resolveAgentId(ctx);
+      if (!agent) return;
       try {
         await client.capture({
-          messages,
+          messages: messages.map((message) => ({ ...message, session: ctx.sessionKey || ctx.sessionId,
+            evidence: { role: message.role, assertion: message.role === "user" ? "reported" : "derived",
+              delivery: message.role === "user" ? "received" : "generated" } })),
           agent,
           source: "plugin-before-compaction",
           namespace: cfg.defaultNamespace,
@@ -353,6 +351,8 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
     api.on("subagent_ended", async (event, ctx) => {
       if (!event?.outcome || event.outcome === "ok") return;
       const agent = resolveAgentId(ctx);
+      if (!agent) return;
+      if (resolveAgentId({ sessionKey: event.targetSessionKey }) !== agent) return;
       const text = [
         `Subagent ended with outcome: ${event.outcome}`,
         event.targetSessionKey ? `Target session: ${event.targetSessionKey}` : "",
@@ -366,6 +366,8 @@ export function registerNativeLifecycleCapture(api, client, cfg) {
           text: text.slice(0, 2000),
           agent,
           source: "plugin-subagent-ended",
+          session_id: event.targetSessionKey,
+          evidence: { role: "tool", assertion: "derived", delivery: "generated" },
           namespace: cfg.defaultNamespace,
           category: "subagent",
           importance: 0.75,

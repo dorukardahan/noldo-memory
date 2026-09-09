@@ -17,9 +17,9 @@ memory:
 ```
 
 This disables Hermes' native `MEMORY.md` / `USER.md` prompt injection while
-keeping the NoldoMem provider and `session_search` available. Running both
-long-term memory systems at once is possible, but it can create duplicate or
-conflicting facts.
+keeping the NoldoMem provider and `session_search` available. Two independent long-term writers are not a supported synchronized store:
+native replacement/deletion does not identify external records. For small curated
+sets, evaluate native-only first. See the [stable comparison](platform-memory-alignment-2026-09-09.md).
 
 Hermes v2026.5.28 gates `MemoryProvider` tools behind the `memory` toolset when
 an explicit toolset list is configured. If a platform/profile uses
@@ -94,7 +94,7 @@ decisions should remain in the memory text, `category`, `source`, or
 Hermes provider implementations should:
 
 - bound recall by result count and character budget
-- prefetch recall in the background when possible
+- use one bounded current-query prefetch; do not repeat completed-query searches without a reusable cache
 - keep completed-turn storage off the user response path
 - use short HTTP timeouts
 - degrade gracefully when NoldoMem is unavailable
@@ -133,3 +133,7 @@ instead of blocking the reply.
 
 The repository ships a ready adapter at
 [`adapters/hermes/noldomem`](../adapters/hermes/noldomem).
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.

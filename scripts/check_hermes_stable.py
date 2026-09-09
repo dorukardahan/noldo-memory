@@ -1,0 +1,138 @@
+"""Exercise a supplied Hermes source checkout against a temporary real HTTP API.
+
+Runs the real provider discovery/MemoryManager/MemoryStore. It does not start a
+model, gateway, external embedding service, or use a saved credential/profile.
+"""
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+
+def check(host, repo):
+    sys.path[:0] = [str(host), str(repo)]
+    import uvicorn
+    import httpx
+    import agent_memory.api as api
+    from agent_memory.config import Config
+    from agent_memory.pool import StoragePool
+    from agent_memory.search import SearchWeights
+    from agent.memory_manager import MemoryManager
+    from plugins.memory import load_memory_provider
+    from tools.memory_tool import MemoryStore
+
+    profile = Path(os.environ['HERMES_HOME'])
+    plugin = profile / 'plugins' / 'noldomem'
+    shutil.copytree(repo / 'adapters/hermes/noldomem', plugin)
+    provider = load_memory_provider('noldomem', register_skills=False)
+    assert provider is not None, 'real stable provider loader rejected adapter'
+    module = sys.modules[type(provider).__module__]
+    api._storage_pool = StoragePool(str(profile / 'synthetic-db'), dimensions=4)
+    api._config = Config(api_key='')
+    class UnavailableEmbedder:
+        async def embed(self, text):
+            raise ConnectionError("Synthetic offline embedding outage")
+
+        async def embed_batch(self, texts):
+            raise ConnectionError("Synthetic offline embedding outage")
+    api._embedder = UnavailableEmbedder()  # Failure injection, no fabricated vectors.
+    api._search_cache = {}
+    api._search_weights = SearchWeights()
+    api._start_time = time.time()
+    sock = socket.socket()
+    sock.bind(('127.0.0.1', 0))
+    endpoint = 'http://127.0.0.1:' + str(sock.getsockname()[1])
+    server = uvicorn.Server(uvicorn.Config(api.app, lifespan='off', log_level='critical', access_log=False))
+    def serve():
+        try:
+            server.run(sockets=[sock])
+        finally:
+            api._storage_pool.close_all()
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(.01)
+    assert server.started
+    manager = MemoryManager()
+    try:
+        cfg = module.NoldoMemConfig(base_url=endpoint, api_key='YOUR_API_KEY', agent='alpha', sync_turns_enabled=True)
+        provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
+        manager.add_provider(provider)
+        manager.initialize_all('session-a')
+        manager.sync_all('I prefer quiet evening observatory visits.', 'The plan includes quiet evenings.',
+                         session_id='session-a', messages=[
+                             {'role': 'user', 'content': [{'type': 'text', 'text': 'I prefer quiet evening observatory visits.'}]},
+                             {'role': 'assistant', 'content': 'The plan includes quiet evenings.'},
+                         ])
+        assert manager.flush_pending(timeout=5)
+        manager.on_session_switch('session-b')
+        context = manager.prefetch_all('Plan the quiet observatory visit', session_id='session-b')
+        assert 'quiet evening' in context and 'id=' in context
+        rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+        assert {row['evidence']['delivery'] for row in rows} == {'received', 'generated'}
+        assert httpx.get(endpoint + '/v1/export', params={'agent': 'beta'}).json() == []
+        forgotten = json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id': rows[0]['id']}))
+        assert forgotten['data']['deleted']
+        assert all(row['id'] != rows[0]['id'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
+        schemas = manager.get_all_tool_schemas()
+        assert any(item['name'] == 'noldomem_recall' for item in schemas)
+        # Exact same public input corpus, native bounded startup snapshot.
+        corpus = json.loads((repo / 'tests/fixtures/alignment_cases.json').read_text())
+        native = MemoryStore(memory_char_limit=3500)
+        native.load_from_disk()
+        for episode in corpus['episodes']:
+            assert native.add('memory', episode['text'])['success']
+        reopened = MemoryStore(memory_char_limit=3500)
+        reopened.load_from_disk()
+        native_context = reopened.format_for_system_prompt('memory')
+        assert all(episode['text'] in native_context for episode in corpus['episodes'])
+        assert native.replace('memory', corpus['episodes'][0]['text'], 'I prefer morning observatory visits.')['success']
+        assert native.remove('memory', 'I prefer morning observatory visits.')['success']
+        # Separate authorities cannot propagate native replacement/deletion.
+        try:
+            provider.on_memory_write('remove', 'memory', 'I prefer quiet evening observatory visits.')
+        except RuntimeError:
+            mirror_refused = True
+        else:
+            mirror_refused = False
+        assert mirror_refused
+        print(json.dumps({'host_commit': subprocess.check_output(['git', '-C', str(host), 'rev-parse', 'HEAD'], text=True).strip(),
+                          'real_provider_loader': True, 'real_http_capture_recall_injection': True,
+                          'cross_session': True, 'unshared_agent_scope': True,
+                          'embedding_mode': 'degraded lexical; no external calls',
+                          'assistant_delivery': 'generated, not confirmed delivered',
+                          'native_corpus_coverage': len(corpus['episodes']),
+                          'native_context_chars': len(native_context),
+                          'native_replace_remove': True, 'scoped_forget_over_http': True, 'duplicate_authority_mirror': 'unsupported; refused',
+                          'generated_answer_accuracy': 'not measured'}, indent=2))
+    finally:
+        manager.shutdown_all()
+        server.should_exit = True
+        thread.join(5)
+        sock.close()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--host', type=Path, required=True)
+    parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    repo = Path(__file__).resolve().parents[1]
+    if args.child:
+        check(args.host.resolve(), repo)
+    else:
+        with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
+            env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
+                   'HERMES_HOME': scratch, 'TMPDIR': scratch, 'LANG': 'en_US.UTF-8',
+                   'AGENT_MEMORY_DATA_DIR': scratch, 'PYTHONDONTWRITEBYTECODE': '1'}
+            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child'],
+                                    cwd=scratch, env=env)
+            raise SystemExit(result.returncode)

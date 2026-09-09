@@ -6,26 +6,30 @@
 
 > Long-term memory for [OpenClaw](https://github.com/openclaw/openclaw) AI agents. Named after the Noldor — Tolkien's elves renowned for deep knowledge and craft.
 
-NoldoMem replaces OpenClaw's built-in memory with a persistent, decay-aware memory system. Agents remember important things, forget trivial things over time, and learn from their mistakes — just like real memory.
-
-**Built for OpenClaw.** One SQLite file per agent, no cloud DB, no Docker required.
+NoldoMem provides per-agent long-term storage, hybrid retrieval and evidence-aware
+memory through OpenClaw and Hermes adapters. Recall depends on capture coverage,
+the configured embedding model and the host's injection path.
 
 ## Why NoldoMem?
 
-OpenClaw's native memory (`memorySearch`) is basic — keyword search, no decay, no behavioral learning. NoldoMem adds:
+Choose a memory authority for your workload. OpenClaw's stable native memory is
+not keyword-only: it includes hybrid search, recency weighting, consolidation,
+provenance and conditional multimodal indexing. Hermes offers bounded, persistent
+`MEMORY.md` / `USER.md` context plus separate session and procedural tools.
 
-| Feature | OpenClaw Native | NoldoMem |
-|---------|----------------|----------|
-| Search | Keyword only | Hybrid (semantic + BM25 + reranker) |
-| Memory decay | No | Ebbinghaus forgetting curve |
-| Learn from mistakes | No | Lesson memories with behavioral reinforcement |
-| Per-agent isolation | No | Separate SQLite per agent |
-| Memory consolidation | No | Auto-compress old memories |
-| Prompt injection protection | No | Built-in sanitization |
-| Trust/provenance tracking | No | Source + trust_level per memory |
-| Pattern-to-policy | No | 3+ same mistake auto-escalates to rule |
-| External dependencies | None | Embedding API (cloud or local) |
-| Embedding options | Cloud only | Cloud (OpenRouter/OpenAI) or self-hosted |
+| Capability | Host native memory | NoldoMem |
+| --- | --- | --- |
+| Small durable preference set | Direct startup context; no retrieval round trip needed | Selective API recall, with an extra service call |
+| Larger episodic history | Host-specific session search and indexing | Per-agent SQLite, FTS and vector search |
+| Updates and history | Host-specific file edits, transcript/provenance tools | Explicit revision IDs, validity intervals and historical recall |
+| Media | Depends on host/model and available extraction | Existing text derivatives with provenance; no built-in OCR/ASR |
+| Isolation | Requires appropriate host/profile and session permissions | Separate agent DBs, trusted adapter scope and scoped API credentials |
+| Forgetting | Host-specific scope; external copies need separate handling | Deletes the selected revision family and indexes; transcripts remain separate |
+
+The [dated platform comparison and synthetic measurements](docs/platform-memory-alignment-2026-09-09.md)
+explain the tested versions, native advantages, limitations and integration status.
+Neither system has proven universal superiority. Avoid two independent writers
+for the same durable fact unless update and deletion propagation are implemented.
 
 ## Choose your integration
 
@@ -135,24 +139,18 @@ python -m agent_memory
 
 ### Step 4: Configure OpenClaw
 
-**4a. Disable OpenClaw's built-in memory** (important!):
+**4a. Select the memory authority for an isolated profile.**
 
-```json
-{
-  "agents": {
-    "defaults": {
-      "memorySearch": {
-        "enabled": false
-      }
-    }
-  }
-}
-```
+For NoldoMem-owned durable facts, disable the competing native long-term writer,
+promotion and automatic injection paths using the settings supported by your
+OpenClaw version. A legacy `memorySearch.enabled: false` setting alone is not a
+complete authority switch on current stable hosts. Keep session/transcript tools
+and procedural skills when needed, with same-agent visibility. See the
+[stable-host checklist](docs/platform-memory-alignment-2026-09-09.md#host-configuration-boundaries).
 
-If your agents use explicit `tools.allow` lists, remove OpenClaw's native
-`memory_search` and `memory_get` tools from those lists and keep the NoldoMem
-tools instead. Otherwise the model can choose the stale native memory path even
-though `memorySearch.enabled` is false.
+The native-only option needs no NoldoMem plugin. For a NoldoMem profile with an
+explicit tool allowlist, enable its tools as shown below. Do not remove unrelated
+session tools just because their names contain “memory”.
 
 ```json
 {
@@ -160,7 +158,8 @@ though `memorySearch.enabled` is false.
     "alsoAllow": [
       "noldomem_recall",
       "noldomem_store",
-      "noldomem_pin"
+      "noldomem_pin",
+      "noldomem_forget"
     ]
   }
 }
@@ -325,7 +324,8 @@ POST /v1/rule {"text": "Always run tests before commit", "agent": "YOUR_AGENT_ID
 
 ## How Hooks Work
 
-NoldoMem connects to OpenClaw through a native plugin plus 10 lifecycle hooks:
+NoldoMem offers a typed OpenClaw plugin and a legacy lifecycle hook pack. Select
+one automatic capture/injection path per event; enabling both can duplicate work:
 
 - The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`.
 - The hook pack handles lifecycle capture, bootstrap recall, compaction snapshots, and session transitions.
@@ -419,7 +419,7 @@ All endpoints accept `?agent=<id>` for per-agent routing.
 ## Search Architecture
 
 ```
-Query -> Semantic (0.50) -> sqlite-vec cosine KNN
+Query -> Semantic (0.50) -> sqlite-vec L2 KNN (legacy score scale)
       -> Keyword  (0.25) -> FTS5 BM25
       -> Recency  (0.10) -> exp(-0.01 * days)
       -> Strength (0.07) -> Ebbinghaus retention
@@ -568,3 +568,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.

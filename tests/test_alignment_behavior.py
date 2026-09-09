@@ -1,0 +1,164 @@
+"""Synthetic regressions for host scope, implicit recall, and evidence retention."""
+
+import subprocess
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def run_node(script):
+    subprocess.run(
+        ["node", "--input-type=module", "--eval", script], cwd=ROOT,
+        check=True, capture_output=True, text=True,
+    )
+
+
+def test_openclaw_tools_bind_host_factory_scope_and_reject_cross_agent_override():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import { registerTools } from './plugin/src/tools.js';
+const factories = [], requests = [];
+registerTools({registerTool(factory) { factories.push(factory); }}, {
+  recall: async body => { requests.push(body); return {results: []}; },
+}, {recallLimit: 5, recallMaxTokens: 500});
+assert.equal(typeof factories[0], 'function', 'tool context belongs to the factory');
+const tool = factories[0]({agentId: 'alpha', sessionKey: 'agent:alpha:session-a'});
+await tool.execute('call-1', {query: 'Plan the observatory visit'}, new AbortController().signal);
+assert.equal(requests[0].agent, 'alpha');
+await tool.execute('call-2', {query: 'Plan the observatory visit', agent: 'beta'});
+assert.ok(requests.every(body => body.agent === 'alpha'));
+assert.equal(factories[0]({}), null, 'missing identity must not fall back to another agent');
+''')
+
+
+def test_openclaw_implicit_recall_and_latest_turn_capture():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import { registerAutoRecall, registerAutoCapture } from './plugin/src/hooks.js';
+const hooks = {}, recalls = [], stores = [];
+const api = {on(name, callback) {hooks[name] = callback;}};
+const client = {
+  recall: async body => {recalls.push(body); return {results: []};},
+  store: async body => {stores.push(body); return {};},
+};
+const cfg = {recallLimit: 5, recallMaxTokens: 500, captureMaxItems: 3, defaultNamespace: 'default'};
+registerAutoRecall(api, client, cfg);
+registerAutoCapture(api, client, cfg);
+const ctx = {agentId: 'alpha', sessionKey: 'agent:alpha:session-a'};
+await hooks.before_prompt_build({prompt: 'Plan the observatory visit around the quiet hours', messages: []}, ctx);
+assert.equal(recalls.length, 1, 'declarative contextual request needs no recall command');
+await hooks.before_prompt_build({prompt: 'Thanks, that is all.', messages: []}, ctx);
+assert.equal(recalls.length, 1, 'acknowledgement should not search');
+await hooks.agent_end({success: true, messages: [
+ {role: 'user', content: 'I prefer morning visits to the observatory.'},
+ {role: 'assistant', content: 'Understood.'},
+ {role: 'user', content: 'I now prefer evening visits to the observatory.'},
+ {role: 'assistant', content: 'Understood.'},
+]}, ctx);
+assert.equal(stores.length, 1, 'history replay must not recapture old user turns');
+assert.match(stores[0].text, /now prefer evening/);
+assert.equal(stores[0].session_id, ctx.sessionKey);
+''')
+
+
+def test_similar_distinct_statements_keep_separate_provenance(tmp_storage):
+    common = dict(vector=[1.0, 0.0, 0.0, 0.0], category='user', importance=0.8,
+                  namespace='default', memory_type='preference', source='session_capture')
+    old = tmp_storage.merge_or_store(text='I prefer morning observatory visits.', source_session='session-a', **common)
+    new = tmp_storage.merge_or_store(text='I now prefer evening observatory visits.', source_session='session-b', **common)
+    assert new['id'] != old['id'], 'similarity does not establish sameness or temporal validity'
+    assert tmp_storage.get_memory(old['id'])['source_session'] == 'session-a'
+    assert tmp_storage.get_memory(new['id'])['source_session'] == 'session-b'
+
+
+def test_identical_retry_does_not_grow_memory(tmp_storage):
+    kwargs = dict(text='The observatory opens at dusk.', vector=[1.0, 0.0, 0.0, 0.0],
+                  category='user', importance=0.6, source_session='session-a', source='session_capture')
+    first = tmp_storage.merge_or_store(**kwargs)
+    again = tmp_storage.merge_or_store(**kwargs)
+    assert again['id'] == first['id']
+    assert tmp_storage.get_memory(first['id'])['text'] == kwargs['text']
+
+
+def test_hermes_write_invalidates_prefetched_context(monkeypatch, tmp_path):
+    from tests.test_hermes_adapter import _configured_provider
+    provider = _configured_provider(monkeypatch, tmp_path)
+    state = {'text': 'The observatory visits are in the morning.'}
+    monkeypatch.setattr(provider._client, 'recall', lambda body: {'results': [{'text': state['text']}]})
+    monkeypatch.setattr(provider._client, 'store', lambda body: state.update(text=body['text']) or {'stored': True})
+    assert 'morning' in provider.prefetch('Plan the observatory visit')
+    provider.handle_tool_call('noldomem_store', {'text': 'The observatory visits are now in the evening.'})
+    assert 'evening' in provider.prefetch('Plan the observatory visit')
+    provider.shutdown()
+
+
+def test_vector_fallback_preserves_index_metric_and_scope(tmp_storage):
+    import numpy as np
+    for scope, vector in [('default', [.7, .7, 0, 0]), ('other', [1, 0, 0, 0])]:
+        tmp_storage.store_memory('A synthetic observatory event.', vector=vector, namespace=scope)
+    indexed = tmp_storage.search_vectors([1, 0, 0, 0], namespace='default')
+    fallback = tmp_storage._search_filtered_vectors_bruteforce(
+        conn=tmp_storage._get_conn(), query_vector=np.array([1, 0, 0, 0], dtype=np.float32),
+        min_score=0, limit=10, namespace='default', memory_type=None)
+    assert [(r['id'], r['score']) for r in indexed] == [(r['id'], r['score']) for r in fallback]
+
+
+def test_forget_does_not_follow_invalid_cross_namespace_lineage(tmp_storage):
+    protected = tmp_storage.store_memory('The second workspace uses a silver dome.', namespace='other')
+    requested = tmp_storage.store_memory('The first workspace uses a violet dome.', supersedes=protected)
+    assert tmp_storage.delete_memory(requested)
+    assert tmp_storage.get_memory(protected) is not None
+
+
+def test_fts_widens_without_starving_namespace_or_validity(tmp_storage):
+    for i in range(150):
+        tmp_storage.store_memory('violet observatory', namespace='other')
+    for i in range(150):
+        tmp_storage.store_memory('violet observatory', namespace='default', valid_to=10)
+    expected = tmp_storage.store_memory('A violet observatory dome.', namespace='default')
+    results = tmp_storage.search_text('violet observatory', namespace='default', limit=1)
+    assert [row['id'] for row in results] == [expected]
+    assert all(row['valid_to'] is None for row in results)
+
+
+def test_openclaw_forget_uses_trusted_agent_scope():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerTools} from './plugin/src/tools.js';
+const factories = [], calls = [];
+registerTools({registerTool(factory) { factories.push(factory); }}, {
+  forget: async body => {calls.push(body); return {deleted: true};},
+}, {});
+const tool = factories.map(factory => factory({agentId: 'alpha'})).find(tool => tool.name === 'noldomem_forget');
+await tool.execute('call', {memory_id: 'synthetic-id', agent: 'beta'});
+assert.deepEqual(calls, [{id: 'synthetic-id', agent: 'alpha'}]);
+''')
+
+
+def test_hermes_forget_invalidates_local_context(monkeypatch, tmp_path):
+    import json
+    from tests.test_hermes_adapter import _configured_provider
+    provider = _configured_provider(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(provider._client, 'forget', lambda body: calls.append(body) or {'deleted': True})
+    generation = provider._write_generation
+    result = json.loads(provider.handle_tool_call('noldomem_forget', {'memory_id': 'synthetic-id', 'agent': 'beta'}))
+    assert result['data']['deleted']
+    assert calls[0]['agent'] == provider._config.agent
+    assert calls[0]['id'] == 'synthetic-id'
+    assert provider._write_generation > generation
+    provider.shutdown()
+
+
+def test_hermes_cache_identity_includes_admission_floor(monkeypatch, tmp_path):
+    from tests.test_hermes_adapter import _configured_provider
+    provider = _configured_provider(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(provider._client, 'recall', lambda body: calls.append(body) or {'results': [{'text': 'A synthetic dome.'}]})
+    provider.prefetch('Plan the observatory visit')
+    provider._config.recall_min_semantic_score = .5
+    provider.prefetch('Plan the observatory visit')
+    assert len(calls) == 2
+    assert calls[1]['min_semantic_score'] == .5
+    provider.shutdown()
