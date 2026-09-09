@@ -15,9 +15,10 @@ const VALID_RECALL_MEMORY_TYPES = new Set([
 ]);
 
 import { resolveAgentId } from "./scope.js";
+import { hasSafeRecallMetadata } from "./sanitize.js";
 
 function formatRecallResults(data) {
-  const results = data.results || [];
+  const results = (data.results || []).filter(hasSafeRecallMetadata);
   if (results.length === 0) return "No relevant memories found.";
 
   return results

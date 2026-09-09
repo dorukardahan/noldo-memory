@@ -167,6 +167,11 @@ host event + trusted agent/session scope
 | Duplicate/async events | Exact provenance-matched retries deduplicate before embeddings; in-flight cache generations fence writes/forget | Unkeyed replay after deletion is not a forgotten-source admission system |
 | Same-agent subtasks | Trusted scope plus child source session | Cross-agent target session is refused; no preference-sharing pool |
 
+OpenClaw screens raw evidence values, record IDs and type labels before JSON
+escaping in both automatic and explicit recall. Its existing automatic text
+screening and untrusted-data envelope remain. Hermes renders only selected
+provenance fields and applies the stable host sanitizer to the assembled line.
+
 Assertions `reported`, `derived` and `inferred` describe the supplied evidence,
 not cryptographic proof of authorship. Text is still untrusted input. A caption
 or assistant draft is never automatically elevated to a confirmed user update.
@@ -205,7 +210,9 @@ migrated or reindexed.
 `DELETE /v1/forget` and scoped `noldomem_forget` delete the connected revision
 family, FTS/vector entries and linked temporal facts, invalidating caches.
 Historical recall includes closed/current versions, excluding future starts unless
-an explicit `as_of` selects that time.
+an explicit `as_of` selects that time. One request-start clock snapshot governs
+all search lanes. Explicit `as_of` suppresses the query-derived ingestion-date
+filter, so a fact learned later can still be found at its valid time.
 Query-based forgetting also searches closed/future revisions, so an old-only
 phrase can identify the family. Forgetting does not erase source transcripts, previously emitted context, backups, native
 memory or arbitrary re-imported copies. Native/OpenClaw session-level forgotten
@@ -303,7 +310,7 @@ component-test runtime. Do not interpret source inspection or a substitute
 runtime as full integration success.
 
 The local unified compile/lint/test audit passed after the review fixes
-(485 tests, one optional skip). Python sdist and
+(489 tests, one optional skip). Python sdist and
 wheel build succeeded in a separate pinned build environment.
 On PR #34's initial head `9e7d2dc`, CI tests/lint and build succeeded. The security
 audit failed on `nltk==3.10.3`, [PYSEC-2026-3740](https://github.com/pypa/advisory-database/blob/main/vulns/nltk/PYSEC-2026-3740.yaml).

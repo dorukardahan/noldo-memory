@@ -482,3 +482,56 @@ async def test_history_excludes_scheduled_future_but_forget_can_find_it(client):
     assert [r['id'] for r in scheduled] == [new]
     assert (await client.request('DELETE', '/v1/forget', json={'query': 'silver'})).json()['deleted']
     assert (await client.get('/v1/export')).json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('scope', ['alpha', 'all'])
+async def test_as_of_uses_validity_instead_of_ingestion_date_words(client, scope):
+    import time
+    now = time.time()
+    old = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'The observatory had a violet dome.',
+    })).json()['id']
+    new = (await client.post('/v1/store', json={
+        'agent': 'alpha', 'text': 'The observatory has a silver dome.',
+        'supersedes': old, 'valid_from': now - 2 * 86400,
+    })).json()['id']
+    result = (await client.post('/v1/recall', json={
+        'agent': scope, 'query': 'yesterday observatory dome', 'as_of': now - 86400,
+    })).json()
+    assert [r['id'] for r in result['results']] == [new]
+    assert 'time_range' not in result
+
+
+@pytest.mark.asyncio
+async def test_all_search_lanes_share_one_validity_time_across_embedding_await(tmp_storage, monkeypatch):
+    import asyncio
+    import agent_memory.search as search_module
+    from types import SimpleNamespace
+    from agent_memory.search import HybridSearch
+    clock = {'now': 100.0}
+    # Replace each module's time reference, not the process/event-loop clock.
+    fake_time = SimpleNamespace(time=lambda: clock['now'], perf_counter=__import__('time').perf_counter)
+    monkeypatch.setattr(search_module, 'time', fake_time)
+    monkeypatch.setattr('agent_memory.storage.time', fake_time)
+    old = tmp_storage.store_memory('The observatory had a violet dome.', vector=[1, 0, 0, 0])
+    new = tmp_storage.revise_memory(old, text='The observatory has a silver dome.',
+                                    vector=[1, 0, 0, 0], valid_from=101)['id']
+    keyword_finished = asyncio.Event()
+    original = tmp_storage.search_text
+
+    def keyword(*args, **kwargs):
+        result = original(*args, **kwargs)
+        keyword_finished.set()
+        return result
+
+    class Embedder:
+        async def embed(self, text):
+            await keyword_finished.wait()
+            clock['now'] = 102.0
+            return [1, 0, 0, 0]
+
+    monkeypatch.setattr(tmp_storage, 'search_text', keyword)
+    results = await HybridSearch(tmp_storage, Embedder()).search('observatory dome', rerank=False)
+    assert [r.id for r in results] == [old]
+    assert new not in {r.id for r in results}

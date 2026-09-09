@@ -581,7 +581,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
 
     # Temporal-aware search: parse time expressions from query
     time_range = None
-    temporal = parse_temporal(req.query)
+    temporal = parse_temporal(req.query) if req.as_of is None else None
     if temporal is not None:
         time_range = (temporal[0].timestamp(), temporal[1].timestamp())
 
@@ -652,7 +652,7 @@ async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
 
     # Temporal-aware cross-agent search
     time_range = None
-    temporal = parse_temporal(req.query)
+    temporal = parse_temporal(req.query) if req.as_of is None else None
     if temporal is not None:
         time_range = (temporal[0].timestamp(), temporal[1].timestamp())
 

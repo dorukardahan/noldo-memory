@@ -7,6 +7,7 @@
 
 import {
   looksLikePromptInjection,
+  hasSafeRecallMetadata,
   formatRelevantMemoriesContext,
 } from "./sanitize.js";
 
@@ -222,8 +223,8 @@ export function registerAutoRecall(api, client, cfg) {
         ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });
 
-      const results = (data.results || []).filter(
-        (r) => !looksLikePromptInjection(r.text || r.content || "")
+      const results = (data.results || []).filter((r) =>
+        hasSafeRecallMetadata(r) && !looksLikePromptInjection(r.text || r.content || "")
       );
 
       if (results.length === 0) return;

@@ -488,6 +488,7 @@ class HybridSearch:
         are still used.
         """
         # Status belongs to this call, not the shared per-agent search object.
+        validity_time = time.time()  # One clock snapshot across every awaited lane.
         degraded = use_semantic and self.embedder is None
         search_mode = "keyword_only" if degraded else "full"
 
@@ -510,7 +511,7 @@ class HybridSearch:
         cache_query_norm = _build_cache_query_norm(q_norm, namespace, effective_memory_type)
         if include_history or as_of is not None:
             cache_query_norm += f"|history={include_history}|as_of={as_of}"
-        validity, validity_params = self.storage.validity_filter(include_history=include_history, as_of=as_of)
+        validity, validity_params = self.storage.validity_filter(include_history=include_history, as_of=as_of, validity_time=validity_time)
 
         # Skip cache for temporal queries — time_range changes daily
         if cache_allowed:
@@ -549,7 +550,7 @@ class HybridSearch:
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
                 memory_type=db_filter_type,
-                include_history=include_history, as_of=as_of,
+                include_history=include_history, as_of=as_of, validity_time=validity_time,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
@@ -559,7 +560,7 @@ class HybridSearch:
                 candidate_limit,
                 namespace,
                 memory_type=db_filter_type,
-                include_history=include_history, as_of=as_of,
+                include_history=include_history, as_of=as_of, validity_time=validity_time,
             )
 
         async def _kg_entity_search() -> List[Dict[str, Any]]:
@@ -631,7 +632,7 @@ class HybridSearch:
                         candidate_limit,
                         namespace,
                         memory_type=db_filter_type,
-                        include_history=include_history, as_of=as_of,
+                        include_history=include_history, as_of=as_of, validity_time=validity_time,
                     ):
                         _add_memory_id(mem.get("id"))
                         if len(seen_memory_ids) >= candidate_limit:

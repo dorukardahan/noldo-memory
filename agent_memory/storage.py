@@ -1017,12 +1017,12 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def validity_filter(*, include_history=False, as_of=None, prefix="", include_future=False):
+    def validity_filter(*, include_history=False, as_of=None, prefix="", include_future=False, validity_time=None):
         if include_history and as_of is None:
             if include_future:  # Scoped forgetting must also find scheduled text.
                 return "1=1", []
-            return f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?)", [time.time()]
-        moment = time.time() if as_of is None else as_of
+            return f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?)", [time.time() if validity_time is None else validity_time]
+        moment = (time.time() if validity_time is None else validity_time) if as_of is None else as_of
         return (f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?) AND "
                 f"({prefix}valid_to IS NULL OR {prefix}valid_to > ?)", [moment, moment])
 
@@ -1035,6 +1035,7 @@ class MemoryStorage:
         memory_type: Optional[str] = None,
         include_history: bool = False,
         as_of: Optional[float] = None,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """Nearest-neighbour search via sqlite-vec's existing default L2 index.
 
@@ -1044,7 +1045,7 @@ class MemoryStorage:
         conn = self._get_conn()
         blob = np.array(query_vector, dtype=np.float32).tobytes()
         requested_limit = max(1, int(limit))
-        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of)
+        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of, validity_time=validity_time)
         has_versions = conn.execute("SELECT 1 FROM memories WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL LIMIT 1").fetchone()
         has_metadata_filter = namespace is not None or memory_type is not None or bool(has_versions)
 
@@ -1139,7 +1140,7 @@ class MemoryStorage:
                         limit=requested_limit,
                         namespace=namespace,
                         memory_type=memory_type,
-                        include_history=include_history, as_of=as_of,
+                        include_history=include_history, as_of=as_of, validity_time=validity_time,
                     )
                     if fallback:
                         return fallback
@@ -1158,6 +1159,7 @@ class MemoryStorage:
         memory_type: Optional[str],
         include_history: bool = False,
         as_of: Optional[float] = None,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         where_parts = [
             "m.vector_rowid IS NOT NULL",
@@ -1165,7 +1167,7 @@ class MemoryStorage:
             "m.importance >= 0.05",
         ]
         params: List[Any] = []
-        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.")
+        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", validity_time=validity_time)
         where_parts.append(validity)
         params.extend(validity_params)
         if namespace is not None:
@@ -1216,13 +1218,14 @@ class MemoryStorage:
         self, query: str, limit: int = 10, namespace: Optional[str] = None,
         memory_type: Optional[str] = None, *, include_history: bool = False,
         as_of: Optional[float] = None, include_future: bool = False,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         """FTS5 search with scope and validity applied BEFORE the candidate limit."""
         tokens = re.findall(r"[\w]+(?:[.-][\w]+)*", query, flags=re.UNICODE)
         safe_query = " OR ".join(f'"{tok}"' for tok in tokens if tok.strip())
         if not safe_query:
             return []
-        validity, values = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", include_future=include_future)
+        validity, values = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", include_future=include_future, validity_time=validity_time)
         where = ["memory_fts MATCH ?", "m.deleted_at IS NULL", "m.importance >= 0.05", validity]
         params = [safe_query] + values
         if namespace is not None:
