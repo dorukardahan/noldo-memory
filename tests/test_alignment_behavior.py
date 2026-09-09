@@ -108,6 +108,34 @@ def test_hermes_native_vision_envelope_is_not_a_reported_user_fact(monkeypatch, 
     provider.shutdown()
 
 
+def test_openclaw_empty_audio_does_not_become_remembered_content():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const hooks = {}, stores = [];
+registerAutoCapture({on(name, fn) {hooks[name] = fn;}}, {
+  store: async body => {stores.push(body); return {};},
+}, {captureMaxItems: 3});
+const ctx = {agentId:'alpha', sessionKey:'agent:alpha:a'};
+const failure = '[Voice note could not be transcribed because the audio attachment was too small]';
+async function capture(text) {
+  await hooks.agent_end({success:true, messages:[{role:'user',content:text}]}, ctx);
+}
+await capture(`[Audio]\nTranscript:\n${failure}`);
+assert.equal(stores.length, 0);
+await capture(`[Audio]\nUser text:\nI prefer evening observatory visits.\nTranscript:\n${failure}`);
+assert.equal(stores.at(-1).text, 'I prefer evening observatory visits.');
+assert.equal(stores.at(-1).evidence.assertion, 'reported');
+await capture(`[Audio 1/2]\nTranscript:\n${failure}\n\n[Audio 2/2]\nTranscript:\nThe dome is violet.`);
+assert.equal(stores.at(-1).evidence.assertion, 'derived');
+assert.equal(stores.at(-1).text, '[Audio 2/2]\nTranscript:\nThe dome is violet.');
+// Genuine quoted speech is not the exact host failure sentinel.
+await capture('[Audio]\nTranscript:\n"The voice note could not be transcribed", said the curator.');
+assert.match(stores.at(-1).text, /said the curator/);
+assert.equal(stores.length, 3);
+''')
+
+
 def test_identical_retry_does_not_grow_memory(tmp_storage):
     kwargs = dict(text='The observatory opens at dusk.', vector=[1.0, 0.0, 0.0, 0.0],
                   category='user', importance=0.6, source_session='session-a', source='session_capture')

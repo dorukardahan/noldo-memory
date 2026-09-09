@@ -316,6 +316,9 @@ Two independently authored image/audio derivative envelopes matching the pinned
 host format also passed capture, semantic recall and context injection. The
 installed formatter is private, so the harness supplies those text envelopes;
 it does not claim to invoke raw OCR/ASR or verify the caption/transcript itself.
+The stable host's exact empty-audio failure sentinel is excluded from capture;
+separate user text and other successful media sections are retained. This is
+tested through both the handler and the installed native hook runner.
 The Hermes real loader/MemoryManager test also passes its native text-only vision
 envelope as derived image evidence and recalls it in another session. Successful
 Hermes voice preprocessing can lose media identity before the provider boundary;

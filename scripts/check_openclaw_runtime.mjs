@@ -51,6 +51,10 @@ console.log(JSON.stringify({plugin_status: plugin.status,
 const corpus = JSON.parse(fs.readFileSync(path.join(candidate, 'tests/fixtures/alignment_cases.json'), 'utf8'));
 const episode = corpus.episodes[0];
 const ctx = {agentId: 'alpha', sessionKey: 'agent:alpha:synthetic-a'};
+await hooks.runAgentEnd({success: true, messages: [{role: 'user', content:
+  '[Audio]\nTranscript:\n[Voice note could not be transcribed because the audio attachment was too small]'}]}, ctx);
+const failedMediaRows = await (await fetch(endpoint + '/v1/export?agent=alpha')).json();
+assert.equal(failedMediaRows.length, 0, 'Native empty-audio placeholder was captured');
 await hooks.runAgentEnd({success: true, messages: [{role: 'user', content: episode.text}]}, ctx);
 const captured = await (await fetch(endpoint + '/v1/export?agent=alpha')).json();
 assert(captured.some(r => r.text === episode.text), 'Native agent_end did not capture the current turn');
@@ -83,5 +87,5 @@ for (const item of media.cases) {
 console.log(JSON.stringify({host_version: pkg.version, node: process.version,
   candidate_native_loader: true, native_hook_runner: true, real_http: true,
   cross_session_implicit_injection: true, received_and_delivered_text: true,
-  agent_isolation: true, synthetic_host_format_media_derivatives: media.cases.length,
+  agent_isolation: true, empty_audio_abstention: true, synthetic_host_format_media_derivatives: media.cases.length,
   raw_media_extraction: 'not invoked; synthetic extractor output', generated_answers: 'not measured'}));

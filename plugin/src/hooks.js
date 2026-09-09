@@ -88,6 +88,15 @@ function nativeMediaKind(text) {
   return kinds.length ? (new Set(kinds).size === 1 ? kinds[0] : "mixed") : null;
 }
 
+function omitEmptyAudioPlaceholder(text) {
+  // Exact stable-host failure output is not a transcript. Preserve separately
+  // supplied user text and other successful media sections in the same turn.
+  return text.replace(
+    /(?:^|\n)\[Audio(?: \d+\/\d+)?\]\n(?:User text:\n([\s\S]*?)\n)?Transcript:\n\[Voice note could not be transcribed because the audio attachment was too small\](?=\s*$|\n\n\[)/gu,
+    (_match, userText) => userText ? `\n${userText}\n` : "",
+  ).trim();
+}
+
 const SECRET_PATTERNS = [
   /((?:["'])?(?:api[_-]?key|token|secret|password|passwd|pwd)(?:["'])?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)/gi,
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
@@ -262,7 +271,8 @@ export function registerAutoCapture(api, client, cfg) {
     if (!agent) return;
     const messages = Array.isArray(event.messages) ? event.messages : [];
     const latestUser = messages.findLastIndex((message) => message?.role === "user");
-    const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]]);
+    const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
+      .map(omitEmptyAudioPlaceholder);
     const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
     const media = Array.isArray(blocks) && blocks.some((block) =>
       ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));

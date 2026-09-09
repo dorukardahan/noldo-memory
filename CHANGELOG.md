@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
 
 ### Fixed
+- Exclude OpenClaw's empty-audio failure placeholder from capture while retaining separately supplied user text and successful media sections.
 - Document OpenClaw 2026.9.3's required conversation-access grant for native capture hooks; verify the candidate with the installed native loader and hook runner in an isolated profile.
 - Use one validity timestamp per search, keep explicit as-of queries independent from ingestion-date phrases, and screen recalled metadata before OpenClaw prompt formatting.
 - Exclude scheduled future revisions from ordinary history recall while retaining them for explicit forgetting; capture long messages within the existing text bound.
