@@ -28,7 +28,8 @@ store. Keep `session_search` enabled if you still want transcript search.
 Hermes v0.19 injects external `MemoryProvider` tools only when the effective
 toolsets are unset or include `memory`. If your platform/profile uses an
 explicit toolset list, keep `memory` enabled and verify that `noldomem_recall`,
-`noldomem_store`, and `noldomem_pin` appear in the live tool surface. Builds
+`noldomem_store`, `noldomem_pin`, `noldomem_forget`, and
+`noldomem_relearn_source` appear in the live tool surface. Builds
 that expose `memory.external_tools_enabled_when_memory_toolset_disabled` may
 use that explicit compatibility option instead. Use a distinct `agent` value
 for each Hermes identity rather than sharing the legacy `hermes` scope.
@@ -67,6 +68,8 @@ The provider exposes:
 - `noldomem_recall`
 - `noldomem_store`
 - `noldomem_pin`
+- `noldomem_forget`
+- `noldomem_relearn_source`
 
 The provider also tracks Hermes session rotations. Store calls include the
 current Hermes `session_id`, and NoldoMem preserves that value as
@@ -196,3 +199,6 @@ skills separately; a native-only curated memory can be preferable for small sets
 `noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
 request. It deletes that assertion and its revision family in the current agent
 scope; original transcripts and other stores remain separate.
+
+For source-session granularity, opaque relearning receipts and legacy limits, see
+[source replay protection](../../../docs/forgetting-sources.md).

@@ -159,6 +159,9 @@ class NoldoMemHTTPClient:
     def store(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/store", body)
 
+    def relearn_source(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        return self.post("/v1/relearn-source", body)
+
     def forget(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/forget", body, method="DELETE")
 
@@ -538,8 +541,13 @@ class NoldoMemProvider(MemoryProvider):
             },
             {
                 "name": "noldomem_forget",
-                "description": "On an explicit user forgetting request, delete a memory and its connected previous versions. Original transcripts and other stores are separate.",
+                "description": "On an explicit user forgetting request, delete a memory and its connected previous versions. Further ingestion from identified source sessions is blocked until explicit relearning. Original transcripts and other stores are separate.",
                 "parameters": {"type": "object", "properties": {"memory_id": {"type": "string"}}, "required": ["memory_id"]},
+            },
+            {
+                "name": "noldomem_relearn_source",
+                "description": "Only on an explicit user request to learn again from a forgotten source session, unblock that exact session. Never use automatically after a rejected capture. Does not restore deleted content.",
+                "parameters": {"type": "object", "properties": {"session_id": {"type": "string"}, "source_key": {"type": "string", "description": "Opaque key from the forgetting receipt; provide this OR session_id."}}, "additionalProperties": False},
             },
             {
                 "name": "noldomem_pin",
@@ -619,6 +627,23 @@ class NoldoMemProvider(MemoryProvider):
                     if client is None:
                         return self._network_unavailable_error(lifecycle_generation)
                     data = client.store(body)
+                    self._invalidate_after_write()
+                    if not self._network_result_allowed(client, lifecycle_generation):
+                        return self._network_unavailable_error(lifecycle_generation)
+                    return json.dumps({"success": True, "data": data}, ensure_ascii=False)
+
+            if tool_name == "noldomem_relearn_source":
+                selector = {key: args[key] for key in ("session_id", "source_key") if key in args}
+                if len(selector) != 1:
+                    return self._json_error("Provide the original session_id OR a source_key from the forgetting receipt")
+                request = self._base_body_snapshot(expected_generation=admission_generation)
+                if request is None:
+                    return self._network_unavailable_error(admission_generation)
+                base_body, lifecycle_generation = request
+                with self._network_operation(expected_generation=lifecycle_generation) as client:
+                    if client is None:
+                        return self._network_unavailable_error(lifecycle_generation)
+                    data = client.relearn_source({"agent": base_body["agent"], **selector, "confirm": True})
                     self._invalidate_after_write()
                     if not self._network_result_allowed(client, lifecycle_generation):
                         return self._network_unavailable_error(lifecycle_generation)

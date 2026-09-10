@@ -79,9 +79,24 @@ def check(host, repo):
         rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
         assert {row['evidence']['delivery'] for row in rows} == {'received', 'generated'}
         assert httpx.get(endpoint + '/v1/export', params={'agent': 'beta'}).json() == []
-        forgotten = json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id': rows[0]['id']}))
+        forgotten_row = next(row for row in rows if row['text'] == 'I prefer quiet evening observatory visits.')
+        forgotten = json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id': forgotten_row['id']}))
         assert forgotten['data']['deleted']
-        assert all(row['id'] != rows[0]['id'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
+        assert all(row['id'] != forgotten_row['id'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
+        manager.sync_all('I prefer quiet evening observatory visits.', 'The plan includes quiet evenings.',
+                         session_id='session-a', messages=[
+                             {'role': 'user', 'content': 'I prefer quiet evening observatory visits.'},
+                         ])
+        assert manager.flush_pending(timeout=5)
+        assert not any(row['text'] == forgotten_row['text'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
+        relearned = json.loads(manager.handle_tool_call('noldomem_relearn_source', {'source_key': forgotten['data']['source_keys'][0]}))
+        assert relearned['data'] == {'cleared': True, 'restored': False}
+        manager.sync_all('I prefer quiet evening observatory visits.', 'The plan includes quiet evenings.',
+                         session_id='session-a', messages=[
+                             {'role': 'user', 'content': 'I prefer quiet evening observatory visits.'},
+                         ])
+        assert manager.flush_pending(timeout=5)
+        assert any(row['text'] == forgotten_row['text'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
         schemas = manager.get_all_tool_schemas()
         assert any(item['name'] == 'noldomem_recall' for item in schemas)
         # Hermes' real text-only vision envelope survives the provider boundary.

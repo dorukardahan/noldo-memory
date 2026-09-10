@@ -56,7 +56,7 @@ from .pool import StoragePool
 from .reranker import APIReranker, BaseReranker, CrossEncoderReranker
 from .search import HybridSearch, SearchWeights, _lexical_overlap, _rrf_fuse
 from .evidence import Evidence, MemoryValidity, content_text
-from .storage import MemoryStorage
+from .storage import MemoryStorage, ForgottenSourceError
 from .rules import RuleDetector
 from .triggers import score_importance, should_trigger
 from .turkish import parse_temporal
@@ -783,6 +783,31 @@ async def _rerank_cross_agent_results(query: str, results: List[Dict[str, Any]])
     return results
 
 
+@app.exception_handler(ForgottenSourceError)
+async def forgotten_source_handler(request: Request, exc: ForgottenSourceError):
+    return JSONResponse(status_code=409, content={"detail": "Source session was forgotten; explicit relearning is required"})
+
+
+class RelearnRequest(RequestModel):
+    agent: Optional[str] = None
+    session_id: Optional[str] = Field(default=None, min_length=1, max_length=2000)
+    source_key: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    confirm: Literal[True]
+
+
+@app.post("/v1/relearn-source")
+async def relearn_source(req: RelearnRequest, request: Request):
+    """Authorize future ingestion of one source only after an explicit user request."""
+    if req.agent == "all":
+        raise HTTPException(400, "Specify one agent")
+    storage = _get_storage(req.agent, request=request)
+    try:
+        cleared = storage.relearn_source(req.session_id, source_key=req.source_key)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"cleared": cleared, "restored": False}
+
+
 @app.post("/v1/capture")
 async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     """Ingest a batch of messages into memory.
@@ -833,7 +858,11 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     fresh = []
     seen = set()
     duplicate_count = 0
+    blocked_count = 0
     for message in cleaned:
+        if storage.source_is_forgotten(message["session"]):
+            blocked_count += 1
+            continue
         identity = (message["text"], message["role"], message["session"],
                     json.dumps(message["evidence"], sort_keys=True, ensure_ascii=False))
         duplicate = identity in seen or storage.find_duplicate(
@@ -848,7 +877,7 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             fresh.append(message)
     cleaned = fresh
     if not cleaned:
-        return {"stored": 0, "merged": duplicate_count, "total": len(req.messages),
+        return {"stored": 0, "merged": duplicate_count, "blocked": blocked_count, "total": len(req.messages),
                 "agent": StoragePool.normalize_key(req.agent), "namespace": req.namespace}
 
     texts = [m["text"] for m in cleaned]
@@ -876,6 +905,7 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             "category": m["role"],
             "importance": importance,
             "source_session": m["session"],
+            "timestamp": m.get("timestamp", ""),
             "evidence": m["evidence"],
         })
 
@@ -883,29 +913,36 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     stored_n = 0
     merged_n = duplicate_count
 
+    admitted = []
     for it in items:
-        res = storage.merge_or_store(
-            text=it["text"],
-            vector=it.get("vector"),
-            category=it.get("category", "other"),
-            importance=float(it.get("importance", 0.5)),
-            source_session=it.get("source_session"),
-            namespace=req.namespace,
-            memory_type=classify_memory_type(it["text"]),
-            source="session_capture",
-            trust_level="user",
-            evidence=it["evidence"],
-        )
+        try:
+            res = storage.merge_or_store(
+                text=it["text"],
+                vector=it.get("vector"),
+                category=it.get("category", "other"),
+                importance=float(it.get("importance", 0.5)),
+                source_session=it.get("source_session"),
+                namespace=req.namespace,
+                memory_type=classify_memory_type(it["text"]),
+                source="session_capture",
+                trust_level="user",
+                evidence=it["evidence"],
+            )
+        except ForgottenSourceError:
+            blocked_count += 1
+            continue
+        admitted.append((it, res["id"]))
         if res.get("action") == "merged":
             merged_n += 1
         else:
             stored_n += 1
 
-    # Knowledge graph (best-effort)
+    # Only admitted rows can create derived context. The graph writer rechecks
+    # existence under the same SQLite write lock as all of its derived writes.
     kg = _get_kg(req.agent)
-    for m in cleaned:
+    for it, memory_id in admitted:
         try:
-            kg.process_text(m["text"], timestamp=m.get("timestamp", ""))
+            kg.process_text(it["text"], timestamp=it.get("timestamp", ""), source_memory_id=memory_id)
         except Exception:
             pass
 
@@ -915,6 +952,7 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
     agent_key = StoragePool.normalize_key(req.agent)
     return {
         "stored": stored_n,
+        "blocked": blocked_count,
         "merged": merged_n,
         "total": len(req.messages),
         "agent": agent_key,
@@ -977,6 +1015,8 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if category == "rule" and req.memory_type is None:
         resolved_memory_type = "rule"
 
+    if storage.source_is_forgotten(req.session_id):
+        raise ForgottenSourceError()
     evidence = req.evidence.model_dump(exclude_none=True) if req.evidence else None
     if not req.supersedes and req.valid_from is None:
         duplicate = storage.find_duplicate(
@@ -1049,6 +1089,8 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if is_low_signal_memory_text(req.text):
         raise HTTPException(400, "Memory text is low-signal transport metadata")
 
+    if storage.source_is_forgotten(req.session_id):
+        raise ForgottenSourceError()
     vector = await _embed_single_for_store(req.text)
 
     res = storage.merge_or_store(
@@ -1105,19 +1147,23 @@ async def forget(req: ForgetRequest, request: Request) -> Dict[str, Any]:
     storage = _get_storage(req.agent, request=request)
 
     if req.id:
-        deleted = storage.delete_memory(req.id)
-        if deleted:
+        receipt = storage.forget_memory(req.id)
+        if receipt["deleted"]:
+            if _embedder is not None and hasattr(_embedder, "clear_cache"):
+                _embedder.clear_cache()
             storage.invalidate_search_cache(agent=req.agent or "main")
-        return {"deleted": deleted, "id": req.id}
+        return {**receipt, "id": req.id}
 
     if req.query:
         results = storage.search_text(req.query, limit=1, include_history=True, include_future=True)
         if results:
             mid = results[0]["id"]
-            deleted = storage.delete_memory(mid)
-            if deleted:
+            receipt = storage.forget_memory(mid)
+            if receipt["deleted"]:
+                if _embedder is not None and hasattr(_embedder, "clear_cache"):
+                    _embedder.clear_cache()
                 storage.invalidate_search_cache(agent=req.agent or "main")
-            return {"deleted": deleted, "id": mid}
+            return {**receipt, "id": mid}
         return {"deleted": False, "reason": "no match found"}
 
     raise HTTPException(400, "Provide 'id' or 'query'")
@@ -2178,6 +2224,9 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                 skipped += 1
                 continue
 
+        if storage.source_is_forgotten(mem.get("source_session")):
+            raise ForgottenSourceError()
+
         # Normalize BEFORE embedding so vector matches stored text
         text = _normalize_imp(text)
         if _is_low_signal_imp(text):
@@ -2249,6 +2298,8 @@ async def import_memories(req: ImportRequest, request: Request) -> Dict[str, Any
                     _commit=False,
                 )
                 imported += 1
+    except ForgottenSourceError:
+        raise
     except (ValueError, TypeError, sqlite3.IntegrityError):
         raise HTTPException(422, "Import could not be applied atomically") from None
 

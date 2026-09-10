@@ -164,7 +164,7 @@ host event + trusted agent/session scope
 | Outgoing media | API can preserve a supplied delivery/extraction assertion | Pinned outgoing hook does not expose the full attachment payload. No proof of end-to-end delivered media capture |
 | Expiring/missing attachments | Derivative remains usable with original reference stripped of query/fragment | Does not recover lost content; reference-only input does not invent facts |
 | Long text | Capture heuristics inspect the bounded prefix; successful outgoing delivery and full-text injection guards still apply | Text beyond the existing 2000 UTF-16-unit bound is not retained; truncation does not split a surrogate pair |
-| Duplicate/async events | Exact provenance-matched retries deduplicate before embeddings; in-flight cache generations fence writes/forget | Unkeyed replay after deletion is not a forgotten-source admission system |
+| Duplicate/async events | Exact provenance-matched retries deduplicate before embeddings; in-flight cache generations fence writes/forget | Identified source sessions now have [replay admission](forgetting-sources.md); unkeyed legacy sources remain unprotected |
 | Same-agent subtasks | Trusted scope plus child source session | Cross-agent target session is refused; no preference-sharing pool |
 
 OpenClaw screens raw evidence values, record IDs and type labels before JSON
@@ -217,8 +217,9 @@ all search lanes. Explicit `as_of` suppresses the query-derived ingestion-date
 filter, so a fact learned later can still be found at its valid time.
 Query-based forgetting also searches closed/future revisions, so an old-only
 phrase can identify the family. Forgetting does not erase source transcripts, previously emitted context, backups, native
-memory or arbitrary re-imported copies. Native/OpenClaw session-level forgotten
-admission is a stronger capability in that specific respect.
+memory or arbitrary copies with stripped/changed source identity. Identified
+source-session replay now has [explicit admission protection](forgetting-sources.md);
+unidentified legacy data remains a limitation.
 
 ## Measurements and decisions
 
@@ -365,3 +366,12 @@ the synthetic Hermes harness and reranker isolation test, both with literal
 `YOUR_API_KEY` placeholders. Existing
 heuristic matches are not a clean-scan certificate. No private corpus, production
 paths, account identities, credentials or operational logs were added.
+
+### Source replay follow-up (2026-09-10)
+
+The earlier purge-only limitation is superseded for identified source sessions by
+[source admission and explicit relearning](forgetting-sources.md). New derived
+graph writes now carry memory provenance for deletion. This does not erase host
+transcripts, retrospectively identify old unlinked graph data, or add raw-media
+and full native inference evidence. The research cutoff and eight-call model
+evidence remain unchanged.

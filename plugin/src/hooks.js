@@ -116,6 +116,8 @@ const OPERATIONAL_TOOL_PATTERNS = [
 // This is deliberately explicit: suffix matching suppresses unrelated plugins.
 const NOLDOMEM_TOOL_NAMES = new Set([
   "noldomem_recall", "noldomem_store", "noldomem_pin", "noldomem_forget",
+  "noldomem_relearn_source", "plugin:noldomem_relearn_source",
+  "noldomem/noldomem_relearn_source", "memory.noldomem_relearn_source",
   "plugin:noldomem_forget", "noldomem/noldomem_forget", "memory.noldomem_forget",
   "plugin:noldomem_recall", "plugin:noldomem_store", "plugin:noldomem_pin",
   "noldomem/noldomem_recall", "noldomem/noldomem_store", "noldomem/noldomem_pin",

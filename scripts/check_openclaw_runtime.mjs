@@ -84,8 +84,28 @@ for (const item of media.cases) {
   assert.equal(row?.evidence.modality, item.modality);
   assert.equal(row?.evidence.assertion, 'derived');
 }
+// Native tool factories and actual capture/injection, without a model call.
+const tools = registry.tools.flatMap(t => t.factory(ctx) || []);
+const forgottenId = captured.find(r => r.text === episode.text).id;
+const forget = tools.find(t => t.name === 'noldomem_forget');
+const receipt = (await forget.execute('synthetic-forget', {memory_id: forgottenId})).details;
+assert(receipt.deleted);
+// Remove the independently delivered copy too, so no retained source explains recall.
+for (const row of await (await fetch(endpoint + '/v1/export?agent=alpha')).json()) {
+  if (row.text === episode.text) assert((await forget.execute('synthetic-forget-copy', {memory_id: row.id})).details.deleted);
+}
+await hooks.runAgentEnd({success: true, messages: [{role: 'user', content: episode.text}]}, ctx);
+assert(!(await (await fetch(endpoint + '/v1/export?agent=alpha')).json()).some(r => r.text === episode.text));
+const afterForget = await hooks.runBeforePromptBuild({prompt: episode.query, messages: []},
+  {agentId: 'alpha', sessionKey: 'agent:alpha:synthetic-fresh'});
+assert(!afterForget?.prependContext?.includes(episode.text));
+const relearn = tools.find(t => t.name === 'noldomem_relearn_source');
+assert.deepEqual((await relearn.execute('synthetic-relearn', {source_key: receipt.source_keys[0]})).details,
+  {cleared: true, restored: false});
+await hooks.runAgentEnd({success: true, messages: [{role: 'user', content: episode.text}]}, ctx);
+assert((await (await fetch(endpoint + '/v1/export?agent=alpha')).json()).some(r => r.text === episode.text));
 console.log(JSON.stringify({host_version: pkg.version, node: process.version,
   candidate_native_loader: true, native_hook_runner: true, real_http: true,
   cross_session_implicit_injection: true, received_and_delivered_text: true,
-  agent_isolation: true, empty_audio_abstention: true, synthetic_host_format_media_derivatives: media.cases.length,
+  agent_isolation: true, source_replay_blocked: true, explicit_relearning: true, empty_audio_abstention: true, synthetic_host_format_media_derivatives: media.cases.length,
   raw_media_extraction: 'not invoked; synthetic extractor output', generated_answers: 'not measured'}));

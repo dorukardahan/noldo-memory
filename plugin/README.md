@@ -6,6 +6,7 @@ This native OpenClaw plugin exposes NoldoMem as agent tools:
 - `noldomem_store` - store important facts, preferences, decisions, and lessons
 - `noldomem_pin` - protect critical memories from decay and cleanup
 - `noldomem_forget` - delete an assertion and its connected revision history
+- `noldomem_relearn_source` - explicitly unblock one forgotten source for future ingestion
 - native typed hooks for operational tool capture, compaction capture, and
   subagent failure capture
 
@@ -101,3 +102,6 @@ native/coexistence choices and remaining stable-host test limitations.
 `noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
 request. It deletes that assertion and its revision family in the current agent
 scope; original transcripts and other stores remain separate.
+
+For source-session granularity, opaque relearning receipts and legacy limits, see
+[source replay protection](../docs/forgetting-sources.md).

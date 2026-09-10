@@ -768,6 +768,7 @@ async def ingest_sessions(
                     knowledge_graph.process_text(
                         chunk.text,
                         source=chunk.session_id,
+                        source_memory_id=chunk.md5,
                         timestamp=chunk.timestamp,
                     )
                 except Exception as exc:

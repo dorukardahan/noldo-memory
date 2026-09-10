@@ -113,13 +113,13 @@ does not recover the modality already lost by native voice preprocessing.
 | Raw image/audio/document extraction | Not validated by synthetic descriptions; NoldoMem does not decode bytes itself | Keep using existing host extractors. A separate bounded raw-media test would be needed; no new OCR/ASR service is justified here |
 | Full outgoing attachment content and delivery | Generated files or paths do not prove what reached the user | The pinned [OpenClaw `message_sent` contract](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/plugins/hook-message.types.ts#L209) exposes delivered text/success but no attachment content list. Preserve confirmed text; complete attachment correlation needs a supported richer host event, including concurrent-turn identity |
 | Hermes audio provenance | A successful transcript can look exactly like user-typed quoted text, so the adapter cannot safely infer audio origin | The pinned [voice enrichment](https://github.com/NousResearch/hermes-agent/blob/2237be355906fbe6065ce1815711eee52b2d646e/gateway/run_inbound.py#L1935) removes the distinguishing wrapper. Pass structured origin evidence through the host/provider boundary; do not label every quotation as audio |
-| Replay after forgetting | **Required behavior still incomplete**: both native bridges deleted beta's record, then recapturing the same source recreated it | Add source-scoped deletion admission only with a clear source identity and relearning contract. A retained text fingerprint would retain some metadata and can block a legitimate repeated statement when stable event identity is missing; this is a retention/product decision, not a test assertion to loosen |
+| Replay after forgetting | The earlier model-run candidate reproduced reappearance on both hosts. A subsequent [source-session admission fix](forgetting-sources.md) blocks that replay and provides explicit relearning, verified without more model calls | Reliable source-session identity is required. Unidentified legacy sources and unlinked legacy graph rows remain unprotected; no content fingerprints are retained |
 | Full host inference and delivery loops | Loader/hook/MemoryManager plus external inference do not prove every native client, extraction, retry or channel path | Keep that distinction explicit; do not convert these eight requests into a claim of complete two-host E2E coverage |
 
 The recommendation remains one durable authority with agent-isolated storage.
 NoldoMem plus supported native context/session helpers has useful evidence for
 these episodic/versioned paths. Native memory remains a valid option for small
-curated context; OpenClaw's native forgotten-source admission is stronger than
-NoldoMem's current record purge. Unsupported synchronized dual writers are not
+curated context. NoldoMem now has explicit source-session admission; this does
+not establish parity with every native deletion or transcript behavior. Unsupported synchronized dual writers are not
 recommended. The owned temporary profiles were removed; the same installed Gateway process remained ready. No production memory arrangement was changed, and the complete
 original goal is not marked achieved while the required boundaries above remain.

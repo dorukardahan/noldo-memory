@@ -25,7 +25,8 @@ Hermes v2026.5.28 gates `MemoryProvider` tools behind the `memory` toolset when
 an explicit toolset list is configured. If a platform/profile uses
 `platform_toolsets` or another explicit `enabled_toolsets` path, make sure the
 effective toolsets still include `memory`; otherwise `noldomem_recall`,
-`noldomem_store`, and `noldomem_pin` will not be injected. If you need to hide
+`noldomem_store`, `noldomem_pin`, `noldomem_forget`, and
+`noldomem_relearn_source` will not be injected. If you need to hide
 Hermes' built-in file-backed `memory` tool, verify the live tool surface after
 changing toolsets instead of assuming the external provider remains visible.
 
@@ -114,6 +115,8 @@ tools:
 - `noldomem_recall`
 - `noldomem_store`
 - `noldomem_pin`
+- `noldomem_forget`
+- `noldomem_relearn_source`
 
 Shared names make NoldoMem recognizable across runtimes.
 
@@ -142,3 +145,6 @@ The repository ships a ready adapter at
 `noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
 request. It deletes that assertion and its revision family in the current agent
 scope; original transcripts and other stores remain separate.
+
+For explicit forgetting and relearning, see [source replay protection](forgetting-sources.md).
+The source-session block is agent-local; unkeyed legacy data has no replay guarantee.

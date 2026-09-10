@@ -163,7 +163,8 @@ session tools just because their names contain “memory”.
       "noldomem_recall",
       "noldomem_store",
       "noldomem_pin",
-      "noldomem_forget"
+      "noldomem_forget",
+      "noldomem_relearn_source"
     ]
   }
 }
@@ -201,7 +202,7 @@ openclaw plugins install -l "$(pwd)/plugin"
 ```
 
 The plugin gives agents explicit `noldomem_recall`, `noldomem_store`,
-`noldomem_pin`, and `noldomem_forget` tools. Select either its typed hooks or
+`noldomem_pin`, `noldomem_forget`, and `noldomem_relearn_source` tools. Select either its typed hooks or
 the legacy hook pack for each automatic capture/injection event. The package declares its runtime entrypoint for
 the OpenClaw 2026.5.2+ plugin installer path. See
 [`plugin/README.md`](./plugin/README.md).
@@ -293,7 +294,7 @@ the public HTTP API. Hermes Agent has a native `MemoryProvider` adapter in
 runtime guidance lives in
 [`docs/external-runtime-adapters.md`](./docs/external-runtime-adapters.md).
 For Hermes v2026.5.28+, verify that the effective toolsets still expose
-`noldomem_recall`, `noldomem_store`, `noldomem_pin`, and `noldomem_forget`; external
+`noldomem_recall`, `noldomem_store`, `noldomem_pin`, `noldomem_forget`, and `noldomem_relearn_source`; external
 `MemoryProvider` tools are gated by the `memory` toolset when explicit toolsets
 are configured.
 
@@ -337,7 +338,7 @@ POST /v1/rule {"text": "Always run tests before commit", "agent": "YOUR_AGENT_ID
 NoldoMem offers a typed OpenClaw plugin and a legacy lifecycle hook pack. Select
 one automatic capture/injection path per event; enabling both can duplicate work:
 
-- The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`, `noldomem_forget`.
+- The native plugin exposes agent tools: `noldomem_recall`, `noldomem_store`, `noldomem_pin`, `noldomem_forget`, `noldomem_relearn_source`.
 - The hook pack handles lifecycle capture, bootstrap recall, compaction snapshots, and session transitions.
 
 | Hook | When | What It Does |
@@ -407,7 +408,8 @@ Agent Session
 | `/v1/recall` | POST | Yes | Hybrid search |
 | `/v1/capture` | POST | Yes | Batch ingest (max 200 messages) |
 | `/v1/rule` | POST | Yes | Store rule (importance=1.0) |
-| `/v1/forget` | DELETE | Yes | Soft-delete |
+| `/v1/forget` | DELETE | Yes | Delete revision family and block identified source replay |
+| `/v1/relearn-source` | POST | Yes | Explicitly unblock one source for future ingestion |
 | `/v1/pin` | POST | Yes | Pin (protect from decay) |
 | `/v1/unpin` | POST | Yes | Unpin |
 | `/v1/decay` | POST | Yes | Run Ebbinghaus decay |
@@ -582,3 +584,8 @@ MIT
 `noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
 request. It deletes that assertion and its revision family in the current agent
 scope; original transcripts and other stores remain separate.
+
+Identified source sessions are blocked after forgetting until an explicit user
+request authorizes `noldomem_relearn_source`. A new independent session is not
+blocked by text similarity. See [source identity, relearning receipts and legacy
+limits](docs/forgetting-sources.md).

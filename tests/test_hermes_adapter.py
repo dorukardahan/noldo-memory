@@ -126,7 +126,7 @@ def test_provider_exposes_stable_tool_names(monkeypatch, tmp_path):
     provider = NoldoMemProvider()
     names = [schema["name"] for schema in provider.get_tool_schemas()]
 
-    assert names == ["noldomem_recall", "noldomem_store", "noldomem_forget", "noldomem_pin"]
+    assert names == ["noldomem_recall", "noldomem_store", "noldomem_forget", "noldomem_relearn_source", "noldomem_pin"]
     assert provider.is_available() is True
 
 
@@ -1529,6 +1529,7 @@ def test_availability_and_tool_discovery_are_network_free(monkeypatch, tmp_path)
         "noldomem_recall",
         "noldomem_store",
         "noldomem_forget",
+        "noldomem_relearn_source",
         "noldomem_pin",
     ]
 

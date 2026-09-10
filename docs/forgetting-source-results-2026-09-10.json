@@ -1,0 +1,66 @@
+{
+  "verified_date": "2026-09-10",
+  "baseline_head": "0e0822a82df7d754d5b3575a58bf97b4a0c6de00",
+  "scope": "synthetic, temporary API/DB; no deployment or model calls",
+  "new_model_requests": 0,
+  "prior_model_request_budget_used": 8,
+  "local_tests": {
+    "passed": 519,
+    "skipped": 1,
+    "python": "3.13.7",
+    "post_review_api_checks_passed": 51
+  },
+  "build": {
+    "sdist": true,
+    "wheel": true,
+    "nltk_or_zeyrek_requirements": false
+  },
+  "security_audit": {
+    "existing_complete_hash_pinned_dependency_set": true,
+    "exceptions": 0,
+    "known_vulnerabilities": 0
+  },
+  "hermes": {
+    "stable_commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "native_provider_loader": true,
+    "native_memory_manager": true,
+    "real_http": true,
+    "blocked_replay": true,
+    "explicit_receipt_relearning": true,
+    "embedding": "offline lexical fallback",
+    "adapter_sha256": "e36932b6d297014f63c056f7603a08e6048bb0a09b2e263ff14d83396c91eaa8"
+  },
+  "openclaw": {
+    "version": "2026.9.3",
+    "node": "24.19.0",
+    "test_python": "3.12.3",
+    "candidate_loader": true,
+    "native_hook_runner": true,
+    "native_tool_factories": true,
+    "real_http": true,
+    "blocked_replay": true,
+    "explicit_receipt_relearning": true,
+    "post_forget_injection_absent": true,
+    "source_sha256": {
+      "agent_memory/storage.py": "0437c8e0fd35e4afd63cc81158fafab8f16b10eac944a8825af9a59abcb28277",
+      "agent_memory/api.py": "43ab9dde5f8c3e09b9d943c6bc33e6c62fcc4ea46acc9ab5b972f02047076ee6",
+      "agent_memory/entities.py": "c10ce3202ea2fde7129f56622ba0956ab741417ac99f64472fc63d489ddcfb43",
+      "plugin/src/hooks.js": "e235ef7378d6477b5e563ecf3bb5af1228a9be228802ab1150ac075083d50825",
+      "plugin/src/tools.js": "0159c3e83ebaf65e71648417f47491450667c3c9cba8b28c796aefd1bfa879a6",
+      "scripts/check_openclaw_runtime.mjs": "69d3104da7b8a6a75576c14b5d62d23e96b9ee3893040f6ab428e7c872ad6103"
+    },
+    "temporary_area_removed": true,
+    "gateway_process_unchanged_ready": true
+  },
+  "post_native_api_diff": "Preserve the existing extraction timestamp and reject blocked-source store retries before duplicate lookup; verified by 51 API/source regression tests. Native source hashes above identify the actual tested bytes.",
+  "not_claimed": [
+    "new model answers",
+    "raw media extraction",
+    "full outgoing attachment delivery",
+    "Hermes audio provenance already removed by host",
+    "full native model/channel loop",
+    "legacy unidentified source replay prevention",
+    "legacy unlinked graph erasure",
+    "general speedup"
+  ]
+}
