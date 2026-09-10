@@ -29,6 +29,7 @@ from .metrics import collector
 from .reranker import BaseReranker
 from .storage import MemoryStorage
 from .triggers import get_confidence_tier
+from .turkish import TURKISH_STOPWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,18 @@ def _tokenize_for_rerank(text: str) -> set[str]:
     """
     toks = re.findall(r"[\wçğıöşüÇĞİÖŞÜ]+", (text or "").lower(), re.UNICODE)
     return {t for t in toks if len(t) >= 3}
+
+
+def _content_terms(text: str) -> set[str]:
+    return _tokenize_for_rerank(text) - TURKISH_STOPWORDS - {
+        "our", "your", "their", "what", "which", "where", "when", "how",
+    }
+
+
+def _has_content_match(terms: set[str], text: str) -> bool:
+    normalized = normalize_query(text)
+    # Keep substring matching for inflected words supported by trigram FTS.
+    return any(term in normalized for term in terms)
 
 
 def _lexical_overlap(query: str, text: str) -> float:
@@ -538,6 +551,7 @@ class HybridSearch:
         semantic_ids: List[str] = []
         keyword_ids: List[str] = []
         all_candidates: Dict[str, Dict[str, Any]] = {}
+        grounded_kg_ids: Set[str] = set()
 
         # Only hard-filter at DB level when caller explicitly passed memory_type.
         # Inferred types use soft-boost in RRF, not DB-level exclusion.
@@ -612,6 +626,7 @@ class HybridSearch:
                     (eid, candidate_limit),
                 ).fetchall():
                     _add_memory_id(row["source_memory_id"])
+                    grounded_kg_ids.add(row["source_memory_id"])
 
                 rel_rows = conn.execute(
                     "SELECT context FROM relationships WHERE source_id = ? OR target_id = ? ORDER BY confidence DESC, created_at DESC LIMIT ?",
@@ -635,6 +650,10 @@ class HybridSearch:
                         include_history=include_history, as_of=as_of, validity_time=validity_time,
                     ):
                         _add_memory_id(mem.get("id"))
+                        # A graph fallback is still an FTS query. An article
+                        # inside the entity name is not a relationship proof.
+                        if _has_content_match(_content_terms(phrase), mem.get("text", "")):
+                            grounded_kg_ids.add(mem["id"])
                         if len(seen_memory_ids) >= candidate_limit:
                             break
 
@@ -789,6 +808,19 @@ class HybridSearch:
             mid = r["id"]
             if mid not in all_candidates:
                 all_candidates[mid] = r
+
+        if degraded:
+            # Trigram FTS can match only an article or a pronoun inside an
+            # unrelated word (e.g. "our" in "flour"). Without semantic evidence,
+            # those keyword-only candidates must not gain authority from recency
+            # or strength. Keep actual KG/type evidence and Turkish inflections.
+            content_terms = _content_terms(q_norm)
+            independently_linked = grounded_kg_ids | {r["id"] for r in metadata_results}
+            all_candidates = {
+                mid: cand for mid, cand in all_candidates.items()
+                if mid in independently_linked or _has_content_match(content_terms, cand.get("text", ""))
+            }
+            keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
 
         if not all_candidates:
             return finish([])

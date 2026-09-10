@@ -1,6 +1,6 @@
 # Platform memory alignment evidence
 
-Status: implementation and isolated validation in progress; full host/PR validation pending.
+Status: scoped implementation and native memory integration validation delivered in PR #34; full functional acceptance remains incomplete. See the [September 10 bounded model observations](model-acceptance-2026-09-10.md).
 Research cutoff: 2026-09-09T08:17:03Z (Asia/Singapore: 16:17:03).
 Only public sources and independently constructed synthetic examples are used.
 
@@ -281,7 +281,7 @@ to avoid future validity-boundary staleness, a deliberate performance cost.
 | --- | --- |
 | Implement | Trusted OpenClaw tool factories; implicit prompt gate; current-turn capture; evidence and validity; exact retry dedup; write fences; scoped forgetting; FTS admission and L2 parity |
 | No-op | Existing per-agent DB design, host worker ownership, reranker deployment, decay curve, model/embedding dimensions |
-| Defer | Automatic graph enrichment, binary OCR/ASR pipeline, automatic semantic supersession, forgotten-source replay admission, synchronized dual-authority mode |
+| Defer | Automatic graph enrichment, binary OCR/ASR pipeline, guaranteed automatic semantic supersession, forgotten-source replay admission, synchronized dual-authority mode |
 | Unknown | Generated-answer correctness, full delivered-media extraction, production host identity/configuration, real OpenClaw Gateway integration and complete response latency |
 
 ## Reproducing the isolated checks
@@ -324,7 +324,7 @@ envelope as derived image evidence and recalls it in another session. Successful
 Hermes voice preprocessing can lose media identity before the provider boundary;
 a quoted string alone cannot prove audio provenance. Generated outgoing Hermes
 text still does not prove channel delivery. Complete binary-attachment coverage
-and generated-answer correctness remain unverified.
+remain unverified. This was the September 9 checkpoint; the [September 10 follow-up](model-acceptance-2026-09-10.md) adds eight bounded generated-answer/tool-selection observations, with explicit remaining limits.
 
 These are real native loader/hook/provider integration tests, not a running
 Gateway/model conversation. Existing host installation/configuration is unchanged;

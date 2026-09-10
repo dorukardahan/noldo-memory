@@ -55,7 +55,7 @@ def run(args):
     assert server.started
     try:
         env = {key: os.environ[key] for key in ['HOME', 'TMPDIR', 'PATH', 'OPENCLAW_STATE_DIR']}
-        result = subprocess.run([str(args.node), str(args.candidate / 'scripts/check_openclaw_runtime.mjs'),
+        result = subprocess.run([str(args.node), str(args.candidate / ('scripts/model_openclaw_bridge.mjs' if args.model_bridge else 'scripts/check_openclaw_runtime.mjs')),
                                  str(args.host), str(args.candidate), endpoint], env=env, timeout=90)
         return result.returncode
     finally:
@@ -66,6 +66,7 @@ def run(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model-bridge', action='store_true', help='Run the synthetic stdin bridge, without a model call.')
     for name in ['node', 'host', 'candidate']:
         parser.add_argument('--' + name, type=Path, required=True)
     raise SystemExit(run(parser.parse_args()))

@@ -24,7 +24,7 @@ provenance and conditional multimodal indexing. Hermes offers bounded, persisten
 | Updates and history | Host-specific file edits, transcript/provenance tools | Explicit revision IDs, validity intervals and historical recall |
 | Media | Depends on host/model and available extraction | Existing text derivatives with provenance; no built-in OCR/ASR |
 | Isolation | Requires appropriate host/profile and session permissions | Separate agent DBs, trusted adapter scope and scoped API credentials |
-| Forgetting | Host-specific scope; external copies need separate handling | Deletes the selected revision family and indexes; transcripts remain separate |
+| Forgetting | Host-specific scope; external copies need separate handling | Deletes the selected revision family and indexes; separate source replay can recreate it |
 
 The [dated platform comparison and synthetic measurements](docs/platform-memory-alignment-2026-09-09.md)
 explain the tested versions, native advantages, limitations and integration status.
