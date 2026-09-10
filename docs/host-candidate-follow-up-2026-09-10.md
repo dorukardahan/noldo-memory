@@ -51,6 +51,7 @@ observation is still missing.
 | NoldoMem lint/build/dependency audit | Ruff and sdist/wheel build passed; existing hash-locked package resolution reports no known vulnerabilities. No NLTK/Zeyrek dependency or optional extra was restored. |
 | Hermes dependency audit | Not clean: unchanged dev pins httpcore2 2.7.0 and httpx2 2.7.0 report six PYSEC findings, 2026-3844 through 2026-3849. No exception or dependency-policy relaxation was added. |
 | Hermes local PDF bytes | A newly generated text-layer PDF was extracted by real `tools.read_extract.extract_document_bytes` with firecrawl-anydoc 0.2.4, without model/network access. This is decoder evidence, not capture or answer evidence; image-only PDF OCR and raw audio were not tested. |
+| OpenClaw local PDF bytes | Installed 2026.9.3 under its verified Node 24.19.0 extracted the synthetic booking sentence through native `extractFileContentFromBuffer` and the bundled document extractor. A separate textless vector page returned one image and no text derivative. No OCR/model/network fetch ran; the isolated temporary profile was removed. [Receipt](host-pdf-results-2026-09-10.json). |
 | OpenClaw integration | Earlier real installed-stable loader/hook/capture/recall/injection evidence reused. No changed OpenClaw candidate or new full inference loop was tested. |
 
 Hermes exact-head CI runs are `action_required` pending maintainer approval of
@@ -107,7 +108,7 @@ The remaining boundaries are separate:
 - Complete outgoing attachment evidence awaits the existing OpenClaw maintainer
   decision and eventual implementation; text-only delivery remains supported.
 - Raw image/audio recognition and actual external attachment delivery have not
-  been validated. A text-layer PDF decoder check does not close those gates.
+  been validated. Text-layer PDF decoding in both hosts and OpenClaw visual-page rendering do not close those gates.
 - Full native learning/correction/current-history/answer acceptance remains open;
   existing retrieval/injection observations cannot substitute for it.
 - Source-less legacy memories and unlinked old graph records cannot gain invented
@@ -119,3 +120,16 @@ after a supported native transport carries the memory context/tools and exposes
 an enforceable actual-request cap. Raw media/channel acceptance would separately
 need one synthetic image, audio clip and document plus one controlled attachment
 send/partial-failure route; it is not authorized by that model allowance.
+
+## Reproducing the installed OpenClaw PDF boundary
+
+Run `scripts/check_openclaw_pdf.mjs HOST_PACKAGE_DIRECTORY` with the Node runtime
+belonging to that installed 2026.9.3 package, an empty temporary `HOME`, and
+`OPENCLAW_STATE_DIR` beneath that HOME. Do not point it at a production profile.
+The script uses a supplied package, generates both PDFs independently, loads the
+real installed extractor, and makes no package installation or model request.
+It enables the bundled document extractor only in an in-memory test configuration.
+The first page contains the booking sentence; the second contains only a colored
+rectangle. The second result is rendered pixels, not recognition of their meaning.
+This intentionally stops before NoldoMem capture and answer generation; the
+previous preprocessed-hook injection tests remain separate evidence.
