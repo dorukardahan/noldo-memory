@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit
 
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -61,6 +62,41 @@ def _without_failed_voice_prefix(text: str) -> str:
     while match := _FAILED_VOICE_PREFIX.match(text):
         text = text[match.end():].lstrip("\r\n")
     return text
+
+
+def _audio_capture_parts(message, content):
+    """Consume optional host STT evidence; old stable rows retain their text path."""
+    metadata = message.get("display_metadata")
+    records = metadata.get("audio_transcriptions") if isinstance(metadata, dict) else None
+    if not isinstance(records, list):
+        return content, []
+    clips = []
+    for record in records:
+        if not isinstance(record, dict) or record.get("kind") != "audio_transcript" or record.get("status") != "transcribed":
+            continue
+        transcript = record.get("transcript")
+        if not isinstance(transcript, str) or not transcript.strip():
+            continue
+        quoted = f'"{transcript}"'
+        if quoted not in content:
+            continue  # Do not capture detached metadata as a new conversation fact.
+        content = content.replace(quoted, "", 1).strip()
+        evidence = {"role": "user", "assertion": "derived", "delivery": "received",
+                    "modality": "audio", "representation": "extracted_text"}
+        event_id = record.get("source_message_id")
+        evidence["event_id"] = event_id if isinstance(event_id, str) and len(event_id) <= 200 else None
+        reference = record.get("source_path")
+        if isinstance(reference, str) and len(reference) <= 1000 and not any(c in reference for c in "\r\n"):
+            try:
+                parts = urlsplit(reference)
+                if parts.scheme in {"http", "https"} and parts.hostname and not (parts.username or parts.password):
+                    evidence["reference"] = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+                elif not parts.scheme:
+                    evidence["reference"] = reference
+            except ValueError:
+                pass
+        clips.append({"role": "user", "text": _truncate(transcript, 4000), "evidence": evidence})
+    return _without_failed_voice_prefix(content), clips
 
 
 VALID_MEMORY_TYPES = {"fact", "preference", "rule", "conversation", "lesson", "other"}
@@ -476,28 +512,34 @@ class NoldoMemProvider(MemoryProvider):
                         content = _without_failed_voice_prefix(content)
                         if not content.strip():
                             continue
+                    audio_parts = []
+                    if role == "user":
+                        content, audio_parts = _audio_capture_parts(message, content)
                     # Stable text-only vision enrichment loses its binary block
                     # before reaching MemoryManager. Preserve the lower trust.
                     vision_derivative = content.startswith("[The user sent an image~ Here's what I can see:\n")
                     has_media = has_media or vision_derivative
-                    captured.append({
+                    parts = audio_parts + ([{
                         "role": role, "text": _truncate(content, 4000),
                         "session": body.get("session_id", ""),
                         "evidence": {"role": role, "assertion": "reported" if role == "user" and not has_media else "derived",
                                      "delivery": "received" if role == "user" else "generated",
                                      "modality": "image" if vision_derivative else ("mixed" if has_media else "text"),
                                      "representation": "extracted_text" if has_media else "text"},
-                    })
+                    }] if content.strip() else [])
                     # Stable Hermes passes these on the actual user row. They
                     # identify/time the event, but do not prove an audio origin.
-                    evidence = captured[-1]["evidence"]
-                    event_id = message.get("platform_message_id")
-                    if isinstance(event_id, str) and len(event_id) <= 200:
-                        evidence["event_id"] = event_id
-                    timestamp = message.get("timestamp")
-                    if (isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool)
-                            and math.isfinite(timestamp) and timestamp >= 0):
-                        evidence["observed_at"] = timestamp
+                    for part in parts:
+                        part["session"] = body.get("session_id", "")
+                        evidence = part["evidence"]
+                        event_id = message.get("platform_message_id")
+                        if "event_id" not in evidence and isinstance(event_id, str) and len(event_id) <= 200:
+                            evidence["event_id"] = event_id
+                        timestamp = message.get("timestamp")
+                        if (isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool)
+                                and math.isfinite(timestamp) and timestamp >= 0):
+                            evidence["observed_at"] = timestamp
+                        captured.append(part)
                 if captured:
                     with self._network_operation(expected_generation=lifecycle_generation) as client:
                         if client is not None:

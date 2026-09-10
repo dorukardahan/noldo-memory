@@ -3,7 +3,7 @@
 This is a narrow follow-up to the [platform comparison](platform-memory-alignment-2026-09-09.md)
 and [eight-request acceptance run](model-acceptance-2026-09-10.md), not a new research baseline.
 PR #34 started this follow-up at `1ab313184b7e1dbaf2d9debae5341bd5662978ef`, clean, with successful CI.
-No host source, production profile, memory, credential, embedding model or service was changed.
+At that checkpoint no host source was changed. The later authorized candidate work is recorded in [the follow-up](host-candidate-follow-up-2026-09-10.md); production profiles, memory, credentials, embedding models and services remain unchanged.
 
 ## Versions and source verification
 
@@ -123,7 +123,7 @@ forwarded by `gateway/run_turn.py` into the existing `persist_user_display_metad
 Include clip identity, derivative kind and success/uncertainty, through normal and pending/fallback paths;
 do not change prompt text. NoldoMem can consume that extra field without a new service. Compatibility
 risk: providers/exporters must tolerate optional metadata and keep it out of authoritative instructions.
-No Hermes files were changed and no issue/PR/message was sent.
+At this checkpoint no Hermes files or upstream discussions were changed. The later [candidate follow-up](host-candidate-follow-up-2026-09-10.md) supersedes that implementation status, not the stable-version boundary.
 
 ## OpenClaw: outgoing intent is not a settled attachment receipt
 
@@ -159,7 +159,7 @@ The narrow host proposal is an additive settled-media receipt in `deliver-core.t
 source reference and stable message/run/session correlation, including partial and replayed delivery.
 Do not attach the pre-send list wholesale or make signed URLs public. Existing text fields must remain
 compatible. This is needed for **complete native outgoing attachment attribution**, not for remembering
-already supplied outgoing text. No OpenClaw source or issue/PR was changed.
+already supplied outgoing text. The later [candidate follow-up](host-candidate-follow-up-2026-09-10.md) records the existing upstream design gate; OpenClaw source remains unchanged.
 
 ## Migration and remaining acceptance
 
@@ -174,7 +174,7 @@ The new path reuses text the host already produced. Raw extraction quality, nati
 text derivative, complete outbound file delivery and a full model loop remain separate. The previous
 eight actual model requests are still the entire spent budget; timeouts are not new success evidence.
 
-A single bounded follow-up model plan, **not authorized or executed here**, is at most **10 actual
+A single bounded follow-up model plan, **subsequently authorized but not yet executed**, is at most **10 actual
 requests, five per host**, using temporary profiles and existing access: (1) learn a synthetic event
 and preference; (2) choose revision from a natural correction; (3) acknowledge after the tool result;
 (4) in a fresh session choose a history lookup from a combined current/past/event question;

@@ -208,3 +208,19 @@ of saving them as user facts. Written text after the prefix remains eligible for
 capture. This does not restore audio provenance from successful plain quoted
 transcripts or prove raw speech recognition quality. See the
 [behavioral evidence](../../../docs/model-acceptance-2026-09-10.md).
+
+### Optional gateway audio evidence (host candidate)
+
+[Hermes draft PR #107369](https://github.com/NousResearch/hermes-agent/pull/107369)
+adds `display_metadata.audio_transcriptions`; it is not in the pinned v2026.9.7
+stable release. When supplied, the adapter captures successful clips separately
+as received, derived audio text, retaining the original clip message ID and
+available reference. A transcript must also occur in the actual message text;
+failed, empty or detached metadata is not promoted to a fact. Typed captions
+remain separate text. Signed URL query/fragment components are discarded.
+
+Without these fields, existing stable text capture continues; a plain quotation
+cannot prove its audio origin. Unknown confidence stays unknown. This does not
+backfill old sources, decode audio, or establish outgoing attachment delivery.
+The candidate provider/API/DB and forgetting checks are recorded in
+[the host follow-up](../../../docs/host-candidate-follow-up-2026-09-10.md).

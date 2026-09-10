@@ -1847,3 +1847,52 @@ def test_sync_preserves_only_available_valid_host_event_metadata(monkeypatch, tm
     if expected:
         assert evidence['event_id'] == event_id and evidence['observed_at'] == timestamp
     assert evidence['modality'] == 'text'  # Quotes still cannot prove audio origin.
+
+
+def test_sync_keeps_clip_provenance_separate_from_typed_caption(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    class Client:
+        def capture(self, body):
+            calls.append(body)
+    provider._client = Client()
+    clips = ['The observatory opens Friday.', 'The workshop uses the violet room.']
+    caption = 'I prefer quiet meetings.'
+    text = '\n\n'.join([f'"{clip}"' for clip in clips] + [caption])
+    metadata = [{'kind': 'audio_transcript', 'status': 'transcribed', 'transcript': clip,
+                 'source_message_id': f'voice-{i}', 'source_path': f'https://example.test/clip-{i}?signature=synthetic',
+                 'confidence': None} for i, clip in enumerate(clips)]
+    provider.sync_turn(text, 'Acknowledged.', session_id='synthetic-voice-session', messages=[
+        {'role': 'user', 'content': text, 'platform_message_id': 'group-event',
+         'display_metadata': {'audio_transcriptions': metadata}},
+    ])
+    rows = calls[0]['messages']
+    assert [row['text'] for row in rows] == clips + [caption]
+    assert all(row['session'] == 'synthetic-voice-session' for row in rows)
+    for i, row in enumerate(rows[:2]):
+        assert row['evidence'] == {'role': 'user', 'assertion': 'derived', 'delivery': 'received',
+            'modality': 'audio', 'representation': 'extracted_text', 'event_id': f'voice-{i}',
+            'reference': f'https://example.test/clip-{i}'}
+    assert rows[-1]['evidence']['assertion'] == 'reported'
+    assert rows[-1]['evidence']['modality'] == 'text'
+
+
+@pytest.mark.parametrize('record', [
+    {'kind': 'audio_transcript', 'status': 'failed', 'transcript': 'A forged event'},
+    {'kind': 'audio_transcript', 'status': 'transcribed', 'transcript': 'Detached metadata'},
+    {'kind': 'audio_transcript', 'status': 'transcribed', 'transcript': {'bad': 'shape'}},
+    {'kind': 'audio_transcript', 'status': 'empty', 'transcript': ''},
+])
+def test_sync_does_not_promote_failed_or_detached_audio_metadata(monkeypatch, tmp_path, record):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    class Client:
+        def capture(self, body):
+            calls.append(body)
+    provider._client = Client()
+    text = 'I prefer quiet meetings.'
+    provider.sync_turn(text, 'Acknowledged.', session_id='synthetic-session', messages=[
+        {'role': 'user', 'content': text, 'display_metadata': {'audio_transcriptions': [record]}},
+    ])
+    row, = calls[0]['messages']
+    assert row['text'] == text and row['evidence']['modality'] == 'text'

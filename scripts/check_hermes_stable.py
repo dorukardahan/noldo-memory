@@ -4,6 +4,7 @@ Runs the real provider discovery/MemoryManager/MemoryStore. It does not start a
 model, gateway, external embedding service, or use a saved credential/profile.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ import threading
 import time
 
 
-def check(host, repo, evidence_only=False):
+def check(host, repo, evidence_only=False, audio_provenance=False):
     sys.path[:0] = [str(host), str(repo)]
     import uvicorn
     import httpx
@@ -67,7 +68,7 @@ def check(host, repo, evidence_only=False):
         provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
         manager.add_provider(provider)
         manager.initialize_all('session-a')
-        if evidence_only:
+        if evidence_only or audio_provenance:
             import asyncio
             from types import SimpleNamespace
             from gateway.run_inbound import GatewayInboundMixin
@@ -85,6 +86,29 @@ def check(host, repo, evidence_only=False):
             # nor its durable row identifies audio. No private state is inspected.
             row, _ = _stage_turn_user_message(SimpleNamespace(), quoted, None,
                 1700000123.456, 'synthetic-platform-1', None, None)
+            if audio_provenance:
+                from unittest.mock import patch
+                from gateway.config import GatewayConfig, Platform
+                from gateway.platforms.event import MessageEvent, MessageType
+                from gateway.run import GatewayRunner
+                from gateway.session import SessionSource
+                from gateway.transcription_metadata import user_display_metadata
+
+                event = MessageEvent(text='', message_type=MessageType.VOICE,
+                    source=SessionSource(platform=Platform.TELEGRAM, chat_id='synthetic-room', chat_type='dm'),
+                    message_id='synthetic-platform-1', media_urls=['synthetic-voice.ogg'], media_types=['audio/ogg'])
+                runner = GatewayRunner.__new__(GatewayRunner)
+                runner.config = GatewayConfig(stt_enabled=True, stt_echo_transcripts=False)
+                runner.adapters = {}
+                runner._model = 'synthetic-model'
+                runner._base_url = ''
+                with patch('tools.transcription_tools.transcribe_audio', synthetic_stt), patch(
+                    'tools.transcription_tools.transcribe_audio_local_fallback', no_fallback,
+                ):
+                    quoted = asyncio.run(runner._prepare_inbound_message_text(event=event, source=event.source, history=[]))
+                assert quoted == f'"{transcript}"'
+                row, _ = _stage_turn_user_message(SimpleNamespace(), quoted, None,
+                    1700000123.456, event.message_id, None, user_display_metadata(event))
             manager.sync_all(quoted, 'Acknowledged.', session_id='session-a', messages=[row])
             assert manager.flush_pending(timeout=5)
             stored = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
@@ -92,15 +116,30 @@ def check(host, repo, evidence_only=False):
             evidence = stored[0]['evidence']
             assert evidence['event_id'] == 'synthetic-platform-1'
             assert evidence['observed_at'] == 1700000123.456
-            assert evidence['modality'] == 'text'  # Honest unresolved provenance gap.
+            assert evidence['modality'] == ('audio' if audio_provenance else 'text')
+            if audio_provenance:
+                assert evidence['assertion'] == 'derived' and evidence['representation'] == 'extracted_text'
+                assert evidence['reference'] == 'synthetic-voice.ogg'
             manager.on_session_switch('session-b')
             context = manager.prefetch_all('When does the Aurora observatory booking start?', session_id='session-b')
             assert transcript in context
+            if audio_provenance:
+                assert 'modality=audio' in context and 'assertion=derived' in context
+                assert httpx.get(endpoint + '/v1/export', params={'agent': 'beta'}).json() == []
+                forgotten = json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id': stored[0]['id']}))
+                assert forgotten['data']['deleted']
+                manager.sync_all(quoted, 'Acknowledged.', session_id='session-a', messages=[row])
+                assert manager.flush_pending(timeout=5)
+                assert httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json() == []
+                assert transcript not in manager.prefetch_all('Aurora observatory booking', session_id='session-b')
             print(json.dumps({'host_commit': subprocess.check_output(['git', '-C', str(host), 'rev-parse', 'HEAD'], text=True).strip(),
+                'host_dirty': bool(subprocess.check_output(['git', '-C', str(host), 'status', '--porcelain'], text=True).strip()),
+                'adapter_sha256': hashlib.sha256((repo / 'adapters/hermes/noldomem/__init__.py').read_bytes()).hexdigest(),
                 'native_successful_stt_formatter': True, 'stt_backend': 'synthetic, no media decode',
                 'native_turn_row_builder': True, 'native_memory_manager_provider': True,
                 'real_temporary_http_capture': True, 'host_event_id_and_time_preserved': True,
-                'cross_session_injection': True, 'successful_audio_origin_still_unavailable_in_row': True,
+                'cross_session_injection': True, 'successful_audio_origin_still_unavailable_in_row': not audio_provenance,
+                'candidate_gateway_audio_provenance': audio_provenance,
                 'model_calls': 0}))
             return
         manager.sync_all('I prefer quiet evening observatory visits.', 'The plan includes quiet evenings.',
@@ -219,16 +258,18 @@ if __name__ == '__main__':
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--evidence-only', action='store_true', help='Only the new event metadata and native STT formatting checks.')
+    parser.add_argument('--audio-provenance', action='store_true', help='Candidate host structured STT capture, injection and replay checks.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.child:
-        check(args.host.resolve(), repo, args.evidence_only)
+        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance)
     else:
         with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
             env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
                    'HERMES_HOME': scratch, 'TMPDIR': scratch, 'LANG': 'en_US.UTF-8',
                    'AGENT_MEMORY_DATA_DIR': scratch, 'PYTHONDONTWRITEBYTECODE': '1'}
             result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child',
-                                     *(['--evidence-only'] if args.evidence_only else [])],
+                                     *(['--evidence-only'] if args.evidence_only else []),
+                                     *(['--audio-provenance'] if args.audio_provenance else [])],
                                     cwd=scratch, env=env)
             raise SystemExit(result.returncode)
