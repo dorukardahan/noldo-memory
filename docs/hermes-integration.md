@@ -63,7 +63,12 @@ Example store request:
 ```
 
 `session_id` is optional. When supplied, NoldoMem stores it as
-`source_session` for provenance.
+`source_session` for provenance. Automatic recall retains supplied media
+`modality`, `representation`, `observed_at` and `confidence` alongside assertion
+and delivery labels, within the existing context budget. Labels are constrained
+and numeric metadata must be finite and valid; absent legacy fields are omitted.
+This does not infer media origin from ordinary quotations or restore metadata
+that the host discarded before invoking the provider.
 
 Example pin request:
 

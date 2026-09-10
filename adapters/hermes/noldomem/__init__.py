@@ -900,6 +900,23 @@ class NoldoMemProvider(MemoryProvider):
             source = item.get("evidence") or {}
             validity = f" valid_from={item.get('valid_from')} valid_to={item.get('valid_to')}"
             provenance = f" role={source.get('role', 'unknown')} assertion={source.get('assertion', 'unknown')} delivery={source.get('delivery', 'unknown')}"
+            # Preserve available media origin without copying free-form fields
+            # into the prompt or inferring origin from quoted user text.
+            for key, allowed in (
+                ("modality", {"text", "image", "audio", "document", "link", "mixed"}),
+                ("representation", {"text", "extracted_text", "reference_only"}),
+            ):
+                if key not in source:
+                    continue  # Do not spend context budget on absent legacy fields.
+                value = source.get(key)
+                label = value if isinstance(value, str) and value in allowed else "unknown"
+                provenance += f" {key}={label}"
+            for key in ("confidence", "observed_at"):
+                value = source.get(key)
+                if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                        and math.isfinite(value) and value >= 0
+                        and (key != "confidence" or value <= 1)):
+                    provenance += f" {key}={value}"
             details = f"id={item['id']} {validity}{provenance} " if item.get("id") else ""
             line = sanitize_context(f"- [{details}{memory_type}{score_text}] {text}")
             remaining = output_limit - used - 1

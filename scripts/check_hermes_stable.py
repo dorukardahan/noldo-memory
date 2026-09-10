@@ -99,6 +99,7 @@ def check(host, repo):
         manager.on_session_switch('session-c')
         media_context = manager.prefetch_all('Choose the Aurora observatory dome color', session_id='session-c')
         assert 'violet' in media_context
+        assert 'modality=image' in media_context and 'representation=extracted_text' in media_context
         # Exact same public input corpus, native bounded startup snapshot.
         corpus = json.loads((repo / 'tests/fixtures/alignment_cases.json').read_text())
         native = MemoryStore(memory_char_limit=3500)
@@ -128,6 +129,7 @@ def check(host, repo):
                           'native_context_chars': len(native_context),
                           'native_replace_remove': True, 'scoped_forget_over_http': True, 'duplicate_authority_mirror': 'unsupported; refused',
                           'synthetic_vision_derivative_across_sessions': True,
+                          'structured_media_origin_in_context': True,
                           'raw_media_extraction': 'not invoked; synthetic extractor output',
                           'generated_answer_accuracy': 'not measured'}, indent=2))
     finally:

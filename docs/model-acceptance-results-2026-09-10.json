@@ -1113,5 +1113,21 @@
     "remote_owned_test_area_removed": true,
     "gateway_same_process_ready": true,
     "local_synthetic_profile_removed": true
+  },
+  "post_model_formatter_fix": {
+    "file": "adapters/hermes/noldomem/__init__.py",
+    "sha256": "0140de0fb0d15ff4ad17f24d0a721a072ec2347366c4ee4eb4ebc289e7ee1021",
+    "supplied_fields": [
+      "modality",
+      "representation",
+      "observed_at",
+      "confidence"
+    ],
+    "native_hermes_memory_manager_context_passed": true,
+    "adapter_tests_passed": 75,
+    "adapter_tests_skipped": 1,
+    "focused_malformed_and_legacy_cases_passed": 6,
+    "model_requests": 0,
+    "host_audio_origin_recovery": false
   }
 }

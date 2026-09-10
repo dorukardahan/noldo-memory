@@ -88,6 +88,24 @@ sdist and wheel build passed. The final source change then passed the 73 focused
 checks above, plus a direct-graph/namespace regression (11 search tests passed). Exact-head CI is reported on the PR; no security exception was
 added. Dependency resolution/removal evidence from September 9 remains applicable.
 
+## Additional provider-boundary repair
+
+A subsequent source check found a separate NoldoMem-side loss: Hermes automatic
+formatting discarded `modality`, `representation`, `observed_at` and `confidence`
+even when the API supplied them. A failing formatter regression reproduced it.
+The adapter now carries these supplied fields using bounded enum labels and
+finite, range-checked numeric values. Zero confidence is preserved; absent legacy
+labels add no overhead, and the existing total character bound still applies.
+No arbitrary reference/event string is newly promoted into prompt text.
+
+The Hermes adapter suite passed (75 tests, one optional skip); six focused cases
+also checked malformed metadata and legacy omission. The real pinned Hermes
+loader/MemoryManager/temporary HTTP path retained `modality=image` and
+`representation=extracted_text` in another session's context. No model request
+was made for this follow-up, so the eight answer observations above still apply
+to the earlier product head. This repairs available metadata propagation; it
+does not recover the modality already lost by native voice preprocessing.
+
 ## Remaining product boundaries
 
 | Boundary | Impact on the original goal | Narrow supported direction |
