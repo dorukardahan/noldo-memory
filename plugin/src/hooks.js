@@ -266,41 +266,45 @@ export function registerAutoRecall(api, client, cfg) {
 }
 
 export function registerAutoCapture(api, client, cfg) {
-  api.on("agent_end", async (event, ctx) => {
-    if (!event.success) return;
+  if (cfg.autoCaptureSource === "preprocessed") {
+    registerPreprocessedCapture(api, client, cfg);
+  } else {
+    api.on("agent_end", async (event, ctx) => {
+      if (!event.success) return;
 
-    const agent = resolveAgentId(ctx);
-    if (!agent) return;
-    const messages = Array.isArray(event.messages) ? event.messages : [];
-    const latestUser = messages.findLastIndex((message) => message?.role === "user");
-    const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
-      .map(omitEmptyAudioPlaceholder);
-    const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
-    const media = Array.isArray(blocks) && blocks.some((block) =>
-      ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
-    const candidates = texts.filter((text) => shouldCapture(text) ||
-      ((media || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
+      const agent = resolveAgentId(ctx);
+      if (!agent) return;
+      const messages = Array.isArray(event.messages) ? event.messages : [];
+      const latestUser = messages.findLastIndex((message) => message?.role === "user");
+      const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
+        .map(omitEmptyAudioPlaceholder);
+      const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
+      const media = Array.isArray(blocks) && blocks.some((block) =>
+        ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
+      const candidates = texts.filter((text) => shouldCapture(text) ||
+        ((media || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
 
-    for (const text of candidates) {
-      const derivativeKind = nativeMediaKind(text);
-      const derived = media || derivativeKind !== null;
-      try {
-        await client.store({
-          text: boundedCaptureText(text),
-          agent,
-          source: "plugin-auto-capture",
-          session_id: ctx.sessionKey || ctx.sessionId,
-          evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
-            modality: derivativeKind || (media ? "mixed" : "text"), representation: derived ? "extracted_text" : "text" },
-          namespace: cfg.defaultNamespace,
-        });
-      } catch (err) {
-        console.warn(
-          `[noldomem-plugin] auto-capture failed: ${err.message || err}`
-        );
+      for (const text of candidates) {
+        const derivativeKind = nativeMediaKind(text);
+        const derived = media || derivativeKind !== null;
+        try {
+          await client.store({
+            text: boundedCaptureText(text),
+            agent,
+            source: "plugin-auto-capture",
+            session_id: ctx.sessionKey || ctx.sessionId,
+            evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
+              modality: derivativeKind || (media ? "mixed" : "text"), representation: derived ? "extracted_text" : "text" },
+            namespace: cfg.defaultNamespace,
+          });
+        } catch (err) {
+          console.warn(
+            `[noldomem-plugin] auto-capture failed: ${err.message || err}`
+          );
+        }
       }
-    }
-  });
+    });
+  }
 
   // agent_end confirms generation, not channel delivery. Only this host event
   // can label outgoing text as delivered. Media-only payloads remain a host gap.
@@ -319,6 +323,91 @@ export function registerAutoCapture(api, client, cfg) {
       api.logger?.warn("noldomem: delivered-text capture unavailable");
     }
   });
+}
+
+function registerPreprocessedCapture(api, client, cfg) {
+  // Internal hooks do not inherit the typed conversation-access gate. Enforce
+  // the same explicit grant here instead of using this API to bypass it.
+  if (api.config?.plugins?.entries?.noldomem?.hooks?.allowConversationAccess !== true ||
+      api.config?.hooks?.internal?.enabled === false || typeof api.registerHook !== "function") {
+    api.logger?.warn("noldomem: preprocessed capture requires internal hooks and explicit conversation access");
+    return;
+  }
+  api.registerHook("message:preprocessed", async (event) => {
+    if (event?.type !== "message" || event.action !== "preprocessed") return;
+    const agent = resolveAgentId({ sessionKey: event.sessionKey });
+    if (!agent) return;
+    const ctx = event.context || {};
+    const transcript = typeof ctx.transcript === "string" ? ctx.transcript.trim() : "";
+    const body = typeof ctx.bodyForAgent === "string" && ctx.bodyForAgent.trim()
+      ? ctx.bodyForAgent : transcript || (typeof ctx.body === "string" ? ctx.body : "");
+    const prepared = preprocessedFileText(omitEmptyAudioPlaceholder(
+      transcript && !body.includes(transcript) ? `${body}\n${transcript}` : body));
+    const text = prepared.text;
+    const kinds = new Set([nativeMediaKind(text), transcript ? "audio" : null,
+      prepared.extracted ? "document" : null].filter(Boolean));
+    const derivativeKind = kinds.size > 1 ? "mixed" : [...kinds][0];
+    if (!shouldCapture(text) && !(derivativeKind && text.length >= 15 &&
+        !shouldSkipRecall(text) && !looksLikePromptInjection(text))) return;
+    // Only the staged single-source fact is attributable to this derivative.
+    // Pending/original URLs and multi-attachment lists are never guessed or fetched.
+    const media = !ctx.mediaStagingPending && Array.isArray(ctx.media) ? ctx.media : [];
+    const evidence = {
+      // Prepared text may also contain unlabelled host link-understanding output.
+      // Never promote that composite into a direct user assertion.
+      role: "user", assertion: "derived", delivery: "received",
+      modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text",
+    };
+    if (typeof ctx.messageId === "string" && ctx.messageId.length <= 200) evidence.event_id = ctx.messageId;
+    // FinalizedMsgContext timestamps are milliseconds; do not synthesize a missing event time.
+    if (typeof ctx.timestamp === "number" && Number.isFinite(ctx.timestamp) && ctx.timestamp >= 0) {
+      evidence.observed_at = ctx.timestamp / 1000;
+    }
+    if (derivativeKind && media.length === 1 &&
+        (media[0]?.kind === derivativeKind || (derivativeKind === "document" && media[0]?.kind === "file") ||
+         (typeof media[0]?.contentType === "string" &&
+          media[0].contentType.startsWith(`${derivativeKind}/`)))) {
+      const reference = safeMediaReference(media[0]?.url || media[0]?.path);
+      if (reference) evidence.reference = reference;
+    }
+    try {
+      await client.store({ text: boundedCaptureText(text), agent,
+        source: "plugin-preprocessed", session_id: event.sessionKey,
+        namespace: cfg.defaultNamespace, evidence });
+    } catch {
+      api.logger?.warn("noldomem: preprocessed capture unavailable");
+    }
+  }, { name: "noldomem-preprocessed-capture", description: "Capture existing inbound text derivatives with source evidence" });
+}
+
+function preprocessedFileText(body) {
+  let extracted = false;
+  const text = body.replace(/<file name="[^"\n]*"(?: mime="[^"\n]*")?>\n([\s\S]*?)\n<\/file>/gu,
+    (_block, content) => {
+      // Only successful extraction has the host's matching untrusted envelope.
+      // Failure/path-only/rendered-image markers are not document contents.
+      const match = content.match(/^<<<EXTERNAL_UNTRUSTED_CONTENT id="([a-f0-9]{16})">>>\nSource: [^\n]+\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>$/u);
+      if (!match) return "";
+      extracted = true;
+      // Remove random wrapper IDs for stable deduplication, not the trust boundary:
+      // the extracted text is still screened, stored as derived and injected untrusted.
+      return match[2];
+    }).trim();
+  return { text, extracted };
+}
+
+function safeMediaReference(value) {
+  if (typeof value !== "string" || value.length > 1000 || /[\r\n]/u.test(value)) return null;
+  if (/^https?:\/\//iu.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.username || url.password) return null;
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    } catch { return null; }
+  }
+  return /^[a-z][a-z\d+.-]*:/iu.test(value) ? null : value;
 }
 
 export function registerNativeLifecycleCapture(api, client, cfg) {

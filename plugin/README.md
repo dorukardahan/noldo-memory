@@ -84,6 +84,24 @@ Declarative prompts can recall history; trivial acknowledgements skip search. An
 `recallMinSemanticScore` filters automatic context using a model-calibrated floor;
 there is no universal default. Explicit recall remains available in degraded mode.
 
+For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
+with `autoCaptureSource: "preprocessed"` selects the official
+`message:preprocessed` event **instead of** inbound `agent_end`. Internal hooks
+must be enabled and the explicit conversation-access grant above is required.
+This mode captures accepted inbound prepared text without waiting for a successful
+model completion. It keeps available event IDs/times and audio/file derivative
+origin; successful file extraction wrappers are normalized without promoting their
+contents into instructions. Unlabelled prepared text stays `derived` because the
+host may have appended link-understanding output. A typed caption is not labelled
+as image extraction. Missing, pending and multi-file references are not guessed.
+
+The default `autoCaptureSource: "agent_end"` preserves existing behavior, including
+CLI turns. The `preprocessed` mode does not cover CLI-only ingress; choose the
+capture surface for the profile deliberately. `message_sent` still observes
+confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
+provider call or background join cache is introduced. See the
+[verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md).
+
 The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
 the same typed plugin capture/injection events can duplicate storage, retrieval
 and context. JSONL sync is an archive/legacy path, not a reader for the current

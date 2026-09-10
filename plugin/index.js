@@ -45,6 +45,7 @@ export default definePluginEntry({
       defaultNamespace: rawCfg.defaultNamespace || "default",
       enableAutoRecall: rawCfg.enableAutoRecall ?? false,
       enableAutoCapture: rawCfg.enableAutoCapture ?? false,
+      autoCaptureSource: rawCfg.autoCaptureSource ?? "agent_end",
       enableOperationalCapture: rawCfg.enableOperationalCapture ?? true,
       enableCompactionCapture: rawCfg.enableCompactionCapture ?? true,
       enableSubagentCapture: rawCfg.enableSubagentCapture ?? true,
@@ -72,7 +73,7 @@ export default definePluginEntry({
     // Optional: auto-capture after each turn
     if (cfg.enableAutoCapture) {
       registerAutoCapture(api, client, cfg);
-      api.logger.info("noldomem: auto-capture enabled (agent_end)");
+      api.logger.info(`noldomem: auto-capture configured (${cfg.autoCaptureSource})`);
     }
 
     registerNativeLifecycleCapture(api, client, cfg);

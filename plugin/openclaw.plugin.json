@@ -18,6 +18,7 @@
       "defaultNamespace": { "type": "string", "default": "default" },
       "enableAutoRecall": { "type": "boolean", "default": false },
       "enableAutoCapture": { "type": "boolean", "default": false },
+      "autoCaptureSource": { "type": "string", "enum": ["agent_end", "preprocessed"], "default": "agent_end", "description": "Choose one inbound capture path. preprocessed uses the stable Gateway message hook and requires explicit conversation access; it does not capture CLI turns." },
       "enableOperationalCapture": { "type": "boolean", "default": true },
       "enableCompactionCapture": { "type": "boolean", "default": true },
       "enableSubagentCapture": { "type": "boolean", "default": true },

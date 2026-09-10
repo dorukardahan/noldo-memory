@@ -123,3 +123,5 @@ unchanged and were not repeated.
 
 [Verification receipt and tested source digests](forgetting-source-results-2026-09-10.json)
 separate the native-tested bytes from the final small API parity corrections.
+
+The [later host-surface trace](host-evidence-boundaries-2026-09-10.md) narrows the media limitations and adds another supported capture path. Its source-session IDs use this same replay gate; no tombstone format or legacy-data guarantee changed.

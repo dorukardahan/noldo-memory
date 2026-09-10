@@ -34,7 +34,7 @@ def run(args):
             pass
     api._config = Config(api_key='', embed_worker_enabled=False)
     api._storage_pool = StoragePool(str(Path.home() / 'synthetic-db'), dimensions=1024)
-    api._embedder = None if args.lexical_comparison else RecordedEmbedder()
+    api._embedder = None if args.lexical_comparison or args.evidence_check else RecordedEmbedder()
     api._search_cache, api._kg_cache = {}, {}
     api._search_weights = SearchWeights()
     api._start_time = time.time()
@@ -55,7 +55,8 @@ def run(args):
     assert server.started
     try:
         env = {key: os.environ[key] for key in ['HOME', 'TMPDIR', 'PATH', 'OPENCLAW_STATE_DIR']}
-        script = ('scripts/compare_openclaw_native.mjs' if args.lexical_comparison else
+        script = ('scripts/check_openclaw_evidence.mjs' if args.evidence_check else
+                  'scripts/compare_openclaw_native.mjs' if args.lexical_comparison else
                   'scripts/model_openclaw_bridge.mjs' if args.model_bridge else 'scripts/check_openclaw_runtime.mjs')
         result = subprocess.run([str(args.node), str(args.candidate / script),
                                  str(args.host), str(args.candidate), endpoint], env=env, timeout=90)
@@ -69,6 +70,7 @@ def run(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lexical-comparison', action='store_true', help='Compare native and NoldoMem FTS without embeddings or models.')
+    parser.add_argument('--evidence-check', action='store_true', help='Check native preprocessing evidence without models or embeddings.')
     parser.add_argument('--model-bridge', action='store_true', help='Run the synthetic stdin bridge, without a model call.')
     for name in ['node', 'host', 'candidate']:
         parser.add_argument('--' + name, type=Path, required=True)

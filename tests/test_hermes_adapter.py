@@ -1820,3 +1820,30 @@ def test_failed_voice_prefix_keeps_independent_text_and_plain_quotes(note):
     assert _without_failed_voice_prefix('"The dome is violet."') == '"The dome is violet."'
     assert _without_failed_voice_prefix('I was shown: ' + note) == 'I was shown: ' + note
     assert _without_failed_voice_prefix('"' + note + '"') == '"' + note + '"'
+
+
+@pytest.mark.parametrize('timestamp,event_id,expected', [
+    (1700000123.456, 'synthetic-message-1', True),
+    (None, None, False),
+    (float('nan'), 'x' * 201, False),
+    (True, 123, False),
+])
+def test_sync_preserves_only_available_valid_host_event_metadata(monkeypatch, tmp_path, timestamp, event_id, expected):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+
+    class Client:
+        def capture(self, body):
+            calls.append(body)
+
+    provider._client = Client()
+    text = '"The Aurora observatory booking starts on Friday."'
+    provider.sync_turn(text, 'Acknowledged.', session_id='synthetic-source', messages=[
+        {'role': 'user', 'content': text, 'timestamp': timestamp, 'platform_message_id': event_id},
+    ])
+    evidence = calls[0]['messages'][0]['evidence']
+    assert ('event_id' in evidence) is expected
+    assert ('observed_at' in evidence) is expected
+    if expected:
+        assert evidence['event_id'] == event_id and evidence['observed_at'] == timestamp
+    assert evidence['modality'] == 'text'  # Quotes still cannot prove audio origin.

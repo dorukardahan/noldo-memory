@@ -16,7 +16,7 @@ import threading
 import time
 
 
-def check(host, repo):
+def check(host, repo, evidence_only=False):
     sys.path[:0] = [str(host), str(repo)]
     import uvicorn
     import httpx
@@ -67,6 +67,42 @@ def check(host, repo):
         provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
         manager.add_provider(provider)
         manager.initialize_all('session-a')
+        if evidence_only:
+            import asyncio
+            from types import SimpleNamespace
+            from gateway.run_inbound import GatewayInboundMixin
+            from agent.turn_context import _stage_turn_user_message
+
+            transcript = 'The Aurora observatory booking starts at 19:30 on Friday.'
+            def synthetic_stt(*args):
+                return {'success': True, 'transcript': transcript}
+            def no_fallback(*args):
+                raise AssertionError('Successful STT must not call fallback')
+            original, quoted = asyncio.run(GatewayInboundMixin()._transcribe_one_clip(
+                'synthetic-voice.ogg', synthetic_stt, no_fallback))
+            assert original == transcript and quoted == f'"{transcript}"'
+            # Execute the real host row builder: neither the returned quoted text
+            # nor its durable row identifies audio. No private state is inspected.
+            row, _ = _stage_turn_user_message(SimpleNamespace(), quoted, None,
+                1700000123.456, 'synthetic-platform-1', None, None)
+            manager.sync_all(quoted, 'Acknowledged.', session_id='session-a', messages=[row])
+            assert manager.flush_pending(timeout=5)
+            stored = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+            assert len(stored) == 1
+            evidence = stored[0]['evidence']
+            assert evidence['event_id'] == 'synthetic-platform-1'
+            assert evidence['observed_at'] == 1700000123.456
+            assert evidence['modality'] == 'text'  # Honest unresolved provenance gap.
+            manager.on_session_switch('session-b')
+            context = manager.prefetch_all('When does the Aurora observatory booking start?', session_id='session-b')
+            assert transcript in context
+            print(json.dumps({'host_commit': subprocess.check_output(['git', '-C', str(host), 'rev-parse', 'HEAD'], text=True).strip(),
+                'native_successful_stt_formatter': True, 'stt_backend': 'synthetic, no media decode',
+                'native_turn_row_builder': True, 'native_memory_manager_provider': True,
+                'real_temporary_http_capture': True, 'host_event_id_and_time_preserved': True,
+                'cross_session_injection': True, 'successful_audio_origin_still_unavailable_in_row': True,
+                'model_calls': 0}))
+            return
         manager.sync_all('I prefer quiet evening observatory visits.', 'The plan includes quiet evenings.',
                          session_id='session-a', messages=[
                              {'role': 'user', 'content': [{'type': 'text', 'text': 'I prefer quiet evening observatory visits.'}]},
@@ -182,15 +218,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', type=Path, required=True)
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--evidence-only', action='store_true', help='Only the new event metadata and native STT formatting checks.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.child:
-        check(args.host.resolve(), repo)
+        check(args.host.resolve(), repo, args.evidence_only)
     else:
         with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
             env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
                    'HERMES_HOME': scratch, 'TMPDIR': scratch, 'LANG': 'en_US.UTF-8',
                    'AGENT_MEMORY_DATA_DIR': scratch, 'PYTHONDONTWRITEBYTECODE': '1'}
-            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child'],
+            result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child',
+                                     *(['--evidence-only'] if args.evidence_only else [])],
                                     cwd=scratch, env=env)
             raise SystemExit(result.returncode)

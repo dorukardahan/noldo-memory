@@ -488,6 +488,16 @@ class NoldoMemProvider(MemoryProvider):
                                      "modality": "image" if vision_derivative else ("mixed" if has_media else "text"),
                                      "representation": "extracted_text" if has_media else "text"},
                     })
+                    # Stable Hermes passes these on the actual user row. They
+                    # identify/time the event, but do not prove an audio origin.
+                    evidence = captured[-1]["evidence"]
+                    event_id = message.get("platform_message_id")
+                    if isinstance(event_id, str) and len(event_id) <= 200:
+                        evidence["event_id"] = event_id
+                    timestamp = message.get("timestamp")
+                    if (isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool)
+                            and math.isfinite(timestamp) and timestamp >= 0):
+                        evidence["observed_at"] = timestamp
                 if captured:
                     with self._network_operation(expected_generation=lifecycle_generation) as client:
                         if client is not None:

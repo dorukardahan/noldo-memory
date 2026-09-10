@@ -417,3 +417,7 @@ retrieval, automatic conversation capture, full native inference, promoted
 trigger injection, multimodal decoding or synchronized coexistence. The earlier
 supported recommendation remains one durable authority plus native helpers;
 these samples do not establish NoldoMem or native as a universal winner.
+
+## Narrow host-surface follow-up (2026-09-10)
+
+[Source and behavior evidence](host-evidence-boundaries-2026-09-10.md) separates unused supported APIs, actual lost metadata, raw-extraction limits and model-budget gaps. OpenClaw can use its existing preprocessing hook; Hermes already supplies row identity/time. The remaining host proposals concern complete successful-clip and settled outgoing-attachment attribution, not all memory behavior. The architecture recommendation and previous quality/performance measurements are unchanged.
