@@ -112,7 +112,7 @@ selective search have different costs, which are kept separate below.
 | NoldoMem only | 7/8 expected records retrieved; same with calibrated 0.50 admission; other agent absent; API revision/history/forget tests pass | Selective evidence with explicit versions and media provenance, but one indirect image case is missed. One HTTP recall plus an embedding on cache miss; no generated-answer success rate |
 | Controlled coexistence | Hermes native session search/skills remain separate from external provider; OpenClaw session tools and procedural skills are independently configurable | Supported pattern is one durable authority plus host helpers. It is not synchronized dual long-term storage. Do not mirror the same facts into two writers |
 | Two durable writers | Native replacement/deletion cannot address external IDs; adapter refuses unsupported operations | Reject as a recommended mode. Native additions can still mirror for legacy compatibility; using that path creates a second copy that must be managed separately. Duplicate injection costs up to native block plus NoldoMem context |
-| OpenClaw native only | Pinned source documents native search, promoted trigger recall, dreaming, session search and conditional image/audio indexing | Full Gateway/reader experiment not completed. Native cannot be scored as inferior from an unexecuted path |
+| OpenClaw native only | Real installed native loader/index manager now evaluated below: FTS-only 6/8 target records in the first five; NoldoMem FTS-only 7/8, both 0/4 unrelated results | Native curated reader tested; full Gateway/model loop, semantic-native search and promoted-trigger injection remain separate unverified paths. No general ranking follows from this small lexical comparison |
 
 Recommendation: native-only is the simplest supported choice for a small curated
 preference set that fits its budget. For evidence-rich episodic history and
@@ -375,3 +375,45 @@ graph writes now carry memory provenance for deletion. This does not erase host
 transcripts, retrospectively identify old unlinked graph data, or add raw-media
 and full native inference evidence. The research cutoff and eight-call model
 evidence remain unchanged.
+
+### Installed OpenClaw native lexical comparison (2026-09-10)
+
+[Raw samples and tested source digests](openclaw-native-lexical-results-2026-09-10.json)
+close the previously unexecuted native curated-reader path. The installed
+2026.9.3 Memory Core plugin was loaded through the actual loader, which bound its
+real keyed SQLite state service. Its native `MemoryIndexManager` indexed eight
+synthetic Markdown entries. NoldoMem stored the identical texts through its
+public HTTP API. Separate synthetic agent workspaces/DBs contained a conflicting
+record. All state was temporary; the same Gateway process stayed ready and the
+owned test area was removed.
+
+The pinned [native provider lifecycle](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/memory-core/src/memory/manager-provider-lifecycle.ts#L89)
+explicitly supports `provider: "none"` as FTS-only. Both systems used no embedding,
+reranking or model calls, a zero minimum score and a five-result cap. Native
+vector search was disabled only in this isolated profile. Eight related and
+four unrelated queries from the original corpus were each issued twice. Native
+watchers, session indexing and live profile loading were disabled. An external
+fetch guard observed no attempted external requests.
+
+| System | Target in first five | Unrelated nonempty | First-query median / max | Repeated-query median / max |
+| --- | --- | --- | --- | --- |
+| OpenClaw native FTS | 6/8 | 0/4 | 12.318 / 29.747 ms | 8.724 / 17.286 ms |
+| NoldoMem FTS | 7/8 | 0/4 | 53.861 / 332.327 ms | 37.606 / 74.544 ms |
+
+Both passes had the same coverage. Both missed the indirect peaceful-trip
+preference; native also missed the reservation-change target within five
+results. Neither returned the other agent's conflicting record, and a separate
+native beta query confirmed that record really was indexed. Native was faster
+in this small run, but its measurement is in-process while NoldoMem includes
+loopback HTTP. Each latency column has only 12 heterogeneous query samples;
+there is no reliable p95, general speedup claim or evidence of model-answer
+accuracy. Repeated queries do not prove a particular cache hit. The first direct
+manager startup lacked the native keyed-state binding and failed before scoring;
+loading Memory Core through the official loader corrected that harness error.
+
+This comparison adds a real native-reader baseline without redoing completed
+research or spending more model calls. It does not measure native semantic
+retrieval, automatic conversation capture, full native inference, promoted
+trigger injection, multimodal decoding or synchronized coexistence. The earlier
+supported recommendation remains one durable authority plus native helpers;
+these samples do not establish NoldoMem or native as a universal winner.
