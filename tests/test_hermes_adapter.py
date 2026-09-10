@@ -1806,3 +1806,17 @@ def test_new_media_labels_do_not_admit_untrusted_metadata(modality, representati
         assert 'modality=audio' in context
     else:
         assert 'modality=unknown' in context
+
+
+@pytest.mark.parametrize('note', [
+    '[The user sent a voice message but it came through empty or inaudible — speech-to-text returned no words. Do not guess at the content; ask the user to resend or type it out.]',
+    '[voice message could not be transcribed]',
+    '[voice message could not be transcribed automatically; the audio is available at: /synthetic/clip.ogg]',
+])
+def test_failed_voice_prefix_keeps_independent_text_and_plain_quotes(note):
+    from noldomem import _without_failed_voice_prefix
+    assert _without_failed_voice_prefix(note) == ''
+    assert _without_failed_voice_prefix(note + '\n\n' + note + '\n\nThe dome is violet.') == 'The dome is violet.'
+    assert _without_failed_voice_prefix('"The dome is violet."') == '"The dome is violet."'
+    assert _without_failed_voice_prefix('I was shown: ' + note) == 'I was shown: ' + note
+    assert _without_failed_voice_prefix('"' + note + '"') == '"' + note + '"'

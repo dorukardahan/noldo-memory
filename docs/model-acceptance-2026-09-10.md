@@ -106,6 +106,32 @@ was made for this follow-up, so the eight answer observations above still apply
 to the earlier product head. This repairs available metadata propagation; it
 does not recover the modality already lost by native voice preprocessing.
 
+## Hermes failed-voice capture follow-up (2026-09-10)
+
+The candidate at `2f00fa259e83bcc916e134f5e4c84e00ba824df3` persisted
+Hermes' empty/inaudible voice sentinel as reported user text. An added assertion
+in `scripts/check_hermes_stable.py` failed through the real pinned provider
+loader, MemoryManager and temporary HTTP API/DB before the repair.
+
+The adapter now removes only the three reserved leading failure-note forms in
+[pinned voice enrichment](https://github.com/NousResearch/hermes-agent/blob/2237be355906fbe6065ce1815711eee52b2d646e/gateway/run_inbound.py#L1920):
+empty/inaudible STT output, unavailable transcription module, and a failed
+transcription with a source-file reference. A turn with no surviving user text
+is not captured. Separately supplied text after the host's paragraph separator
+is preserved. Ordinary quotes and mentions inside other text are unchanged;
+plain successful transcripts still carry no recoverable audio-origin signal.
+An unquoted, exact reserved prefix typed manually is indistinguishable from the
+host envelope at this boundary; this is not a general audio classifier.
+
+After the repair, 78 adapter tests passed with one optional skip, and the real
+Hermes loader/MemoryManager/API check passed both sentinel rejection and retained
+typed text, alongside its existing recall, provenance and source-replay checks.
+The test supplies synthetic host-format text; it does not invoke STT or decode
+raw audio. New model requests: zero. The unchanged OpenClaw and dependency
+checks from the preceding head remain separate evidence.
+
+Adapter SHA-256: `ec0562c03f6558bdcfc80e14081119c36afb639abf8a9483e64d76277632e44a`.
+
 ## Remaining product boundaries
 
 | Boundary | Impact on the original goal | Narrow supported direction |

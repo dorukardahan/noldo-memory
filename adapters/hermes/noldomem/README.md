@@ -202,3 +202,9 @@ scope; original transcripts and other stores remain separate.
 
 For source-session granularity, opaque relearning receipts and legacy limits, see
 [source replay protection](../../../docs/forgetting-sources.md).
+
+The provider skips the pinned Hermes empty/failed-transcription prefixes instead
+of saving them as user facts. Written text after the prefix remains eligible for
+capture. This does not restore audio provenance from successful plain quoted
+transcripts or prove raw speech recognition quality. See the
+[behavioral evidence](../../../docs/model-acceptance-2026-09-10.md).

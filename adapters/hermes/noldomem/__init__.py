@@ -44,6 +44,25 @@ except Exception:  # pragma: no cover - Hermes supplies this at runtime
         return _FENCE_TAG_RE.sub("", text)
 
 
+# Hermes v2026.9.7 gateway/run_inbound.py emits these reserved prefixes on
+# failed STT. They contain no transcript. Do not infer audio from plain quotes.
+_FAILED_VOICE_PREFIX = re.compile(
+    r"\A(?:"
+    r"\[The user sent a voice message but it came through empty or inaudible — "
+    r"speech-to-text returned no words\. Do not guess at the content; ask the user "
+    r"to resend or type it out\.\]"
+    r"|\[voice message could not be transcribed\]"
+    r"|\[voice message could not be transcribed automatically; the audio is available at: [^\r\n]+\]"
+    r")(?=\r?\n\r?\n|$)"
+)
+
+
+def _without_failed_voice_prefix(text: str) -> str:
+    while match := _FAILED_VOICE_PREFIX.match(text):
+        text = text[match.end():].lstrip("\r\n")
+    return text
+
+
 VALID_MEMORY_TYPES = {"fact", "preference", "rule", "conversation", "lesson", "other"}
 DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 # NoldoMem API rejects recall queries longer than 2000 chars (HTTP 422).
@@ -419,6 +438,7 @@ class NoldoMemProvider(MemoryProvider):
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "",
                   messages: Optional[List[Dict[str, Any]]] = None) -> None:
+        user_content = _without_failed_voice_prefix(user_content)
         with self._tracked_operation(require_client=False) as (admitted, _, admission_generation):
             if not admitted or not (
                 self._initialized and self._writes_enabled and user_content and assistant_content
@@ -452,6 +472,10 @@ class NoldoMemProvider(MemoryProvider):
                                             and isinstance(part.get("text"), str))
                     if not isinstance(content, str) or not content.strip():
                         continue
+                    if role == "user":
+                        content = _without_failed_voice_prefix(content)
+                        if not content.strip():
+                            continue
                     # Stable text-only vision enrichment loses its binary block
                     # before reaching MemoryManager. Preserve the lower trust.
                     vision_derivative = content.startswith("[The user sent an image~ Here's what I can see:\n")

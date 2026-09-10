@@ -115,6 +115,28 @@ def check(host, repo):
         media_context = manager.prefetch_all('Choose the Aurora observatory dome color', session_id='session-c')
         assert 'violet' in media_context
         assert 'modality=image' in media_context and 'representation=extracted_text' in media_context
+        # Pinned host failure output is not a spoken user fact. No STT call.
+        empty_voice = ('[The user sent a voice message but it came through '
+                       'empty or inaudible — speech-to-text returned no '
+                       'words. Do not guess at the content; ask the user '
+                       'to resend or type it out.]')
+        before_empty = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+        manager.sync_all(empty_voice, 'Please resend the clip.', session_id='voice-failure', messages=[
+            {'role': 'user', 'content': empty_voice},
+            {'role': 'assistant', 'content': 'Please resend the clip.'},
+        ])
+        assert manager.flush_pending(timeout=5)
+        after_empty = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+        assert after_empty == before_empty, 'Host empty-audio placeholder became persistent memory'
+        typed = 'The synthetic observatory opens on Saturday.'
+        manager.sync_all(empty_voice + '\n\n' + typed, 'The date is noted.', session_id='voice-mixed', messages=[
+            {'role': 'user', 'content': empty_voice + '\n\n' + typed},
+            {'role': 'assistant', 'content': 'The date is noted.'},
+        ])
+        assert manager.flush_pending(timeout=5)
+        mixed_rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+        assert any(row['text'] == typed and row['evidence']['assertion'] == 'reported' for row in mixed_rows)
+        assert not any('speech-to-text returned no words' in row['text'] for row in mixed_rows)
         # Exact same public input corpus, native bounded startup snapshot.
         corpus = json.loads((repo / 'tests/fixtures/alignment_cases.json').read_text())
         native = MemoryStore(memory_char_limit=3500)
@@ -145,6 +167,8 @@ def check(host, repo):
                           'native_replace_remove': True, 'scoped_forget_over_http': True, 'duplicate_authority_mirror': 'unsupported; refused',
                           'synthetic_vision_derivative_across_sessions': True,
                           'structured_media_origin_in_context': True,
+                          'empty_voice_failure_not_captured': True,
+                          'typed_text_alongside_failed_voice_preserved': True,
                           'raw_media_extraction': 'not invoked; synthetic extractor output',
                           'generated_answer_accuracy': 'not measured'}, indent=2))
     finally:
