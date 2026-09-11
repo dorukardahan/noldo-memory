@@ -117,6 +117,18 @@ not a claim that every possible native configuration lacks such a limit.
 No paid test was started to discover that limit after the fact. No alternate paid
 provider, live agent or production memory was used.
 
+The built-in OpenClaw runtime has a separate `retry.provider.maxRetries` control:
+`createEmbeddedRunFailoverRetryController` uses it for transient recovery. It must
+not be confused with a total inference limit. A local Node 22.23.1 probe imported
+the pinned stable [`run/retry-budget.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/agents/embedded-agent-runner/run/retry-budget.ts)
+directly with native type stripping. With `createRunRetryBudget(1)`, six successive
+`beginRunAttempt` / `recordRunRetry(..., "progress_continuation")` pairs remained
+admissible: `attemptsDispatched=6`, `attemptsCounted=0`. Those were synthetic calls
+to the actual accounting functions, with zero model/network requests, not six
+native agent turns. This eliminates repurposing that recovery counter as the
+acceptance request cap; it does not test a different paid provider or close the
+native model-loop acceptance gap.
+
 ## What remains
 
 The existing five-request-per-host learning/correction/fresh-session/current-history/
