@@ -24,6 +24,9 @@ Other selected files differ; their row-builder/hook-dispatch functions were also
 not a claim that every installed downstream code path ran. Installation identities and paths
 are deliberately excluded from this public report. Two other installation versions were not
 resolvable through the selected service metadata; no private runtime files were searched.
+The later [native-runtime preflight](native-runtime-preflight-2026-09-11.md) resolves
+that version/transport uncertainty through native status and selected source-byte
+comparison; it does not add a model or channel test.
 
 Main was sampled once: Hermes `16a408534c4c2364e8e8f14ea7cef82aa80b4505`, OpenClaw
 `fdc92faed369bb9fca64e17ed7a3354088d11839`. Hermes' hook catalog and OpenClaw's sent-message emitter

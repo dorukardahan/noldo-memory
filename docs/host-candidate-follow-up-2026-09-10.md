@@ -64,6 +64,11 @@ review quota remains unavailable, not clean.
 
 ## Native inference preflight and remaining acceptance
 
+The [September 11 native-runtime preflight](native-runtime-preflight-2026-09-11.md)
+supersedes the access/backend interpretation below. The app-server observation is
+specific to that optional backend; it does not describe the verified primary
+Hermes routes or prove that deployed memory is broken. No third bridge is planned.
+
 The new allowance is at most ten actual requests, at most five per host, including
 all tool continuations, retries and ambiguous timeouts. **Zero new model requests
 have been sent.** The earlier eight remain observations through the explicitly
@@ -87,8 +92,8 @@ memory tool schemas. A synthetic transport recorder invoked that real function:
 a supplied message sidecar did not reach the transport. No subprocess or model
 ran in this boundary test. The runtime's `api_calls=1` accounting is per native
 turn, so it cannot itself enforce a five-wire-request budget across Codex tools.
-Fixing the native external-memory/tool bridge is broader than the authorized
-voice metadata patch and must not be disguised as a test-only context rewrite.
+This observation prevents substituting that test backend as native memory proof;
+it does not make a bridge change necessary for other Hermes transports.
 
 Normal native Codex CLI 0.153.4 reported an existing ChatGPT login. This does not
 prove that a separately isolated Hermes/OpenClaw profile has usable credentials.
