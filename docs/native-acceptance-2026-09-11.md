@@ -101,13 +101,53 @@ answers do not prove arbitrary stale-transcript suppression.
 
 ## Remaining acceptance
 
-OpenClaw 2026.9.3 / Node 24.19.0 started **zero** application turns and consumed
-zero model-test seconds in this run. A selected native route was unavailable in
-read-only preflight. That check did not establish an isolated execution with
-available approved access. No profile state, provider or auth policy was changed
-to force a test. This says nothing
-about the health of all gateway routes. Existing native loader/hook/API/DB tests
-remain valid; they are not full native model-loop evidence.
+OpenClaw 2026.9.3 / Node 24.19.0 subsequently started **one of five** permitted
+application turns, using 5.91 seconds of the 600-second host budget. The existing
+Hermes counts are unchanged. The [OpenClaw receipt](openclaw-native-attempt-2026-09-11.json)
+records the failed turn; four application turns remain, without a budget reset.
+The independently reported access canary is not this test or memory acceptance.
+
+The candidate native loader, tools, `before_prompt_build` and `agent_end` hooks
+passed preflight with a synthetic config. The real `agentExecCommand` then ran
+with `baseConfig` supplied in memory, temporary workspace/state, candidate plugin,
+separate temporary API/SQLite DB and a narrow memory-tool allowlist. The selected
+route was OpenAI / `gpt-5.6-sol`, native Codex runtime, stdio, agent-scoped home.
+No production config snapshot was passed into the run. The native entry point
+scoped saved-access resolution internally; the harness never read credentials.
+
+The native envelope returned `status=error`, `kind=exception` and
+`Explicit auth order for openai has no usable profiles.` It reported no model,
+provider, answer or token usage; zero memory tools ran and no primary-agent memory
+record was captured. The wrapper process exited normally after returning that
+error envelope, which is **not** a successful native turn. Physical requests remain
+unknown; application-turn counts are not physical request counts.
+
+This is a distinct isolation/auth-ownership boundary, not a repeated cooldown
+claim or evidence that the normal Gateway route is broken. Stable
+[`agentExecCommand`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/commands/agent-exec.ts)
+calls `withAuthProfileStoreAgentDir` after repointing run state. In
+[`auth-profiles/store.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/agents/auth-profiles/store.ts),
+that function retains only portable static credentials from the shared store to
+avoid creating a second OAuth refresh owner. The installed public bundle has the
+same filter; its artifact digest is in the receipt. The upstream
+[`agent-exec.auth.test.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/commands/agent-exec.auth.test.ts)
+explicitly expects shared OAuth to be absent even when `copyToAgents=true`.
+This is source/test-contract evidence, not a claim that this upstream test suite
+was rerun locally. `selectProviderModelAuthSources` in
+[`provider-model-route-auth.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/agents/provider-model-route-auth.ts)
+emits the observed rejection when the explicit profile order resolves empty or
+unavailable. No ownership filter was bypassed or auth snapshot copied to a new store.
+
+The remaining learning, correction, fresh-session current/history and abstention
+checks are unexecuted on OpenClaw's full native loop. Existing loader/hook/API/DB
+proof remains separate. The narrow next option requiring authorization is a
+fresh, official OAuth sign-in to a temporary **agent-local** test store using the
+existing account, followed by the remaining bounded turns. It must not copy or
+migrate a shared credential, alter production auth, or substitute a paid route.
+The installed `models auth login --provider openai --agent <test-agent>` supports
+explicit agent targeting; it was not invoked here. No host bridge or new account
+is proposed. This option still needs isolated access validation before another
+model turn; it is not a promise that signing in alone completes acceptance.
 
 Hermes audio origin remains an unreleased
 [draft host contribution](https://github.com/NousResearch/hermes-agent/pull/107369),

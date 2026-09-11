@@ -1,0 +1,53 @@
+{
+  "date": "2026-09-11",
+  "candidate": "7a6558ebc554bcb385f4ffb08332e3233bf77652",
+  "host": "OpenClaw 2026.9.3",
+  "stable_source_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "node": "24.19.0",
+  "configured_provider": "openai",
+  "configured_model": "gpt-5.6-sol",
+  "configured_runtime": "codex",
+  "configured_transport": "stdio",
+  "configured_home_scope": "agent",
+  "entrypoint": "agentExecCommand",
+  "application_turns_started": 1,
+  "application_turns_remaining": 4,
+  "host_wall_seconds": 5.906240866985172,
+  "per_turn_limit_seconds": 120,
+  "host_limit_seconds": 600,
+  "physical_requests": "unknown",
+  "coordination_canary_included": false,
+  "candidate_loader_preflight": {
+    "candidate_loaded": true,
+    "native_entrypoint": true,
+    "synthetic_config": true,
+    "model_turns": 0
+  },
+  "turns": [
+    {
+      "number": 1,
+      "prompt": "The Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "wall_seconds": 5.905367978848517,
+      "native_status": "error",
+      "native_error_kind": "exception",
+      "native_error_message": "Explicit auth order for openai has no usable profiles.",
+      "reported_provider": null,
+      "reported_model": null,
+      "tool_calls": 0,
+      "memory_record_count": 0,
+      "answer": null,
+      "token_usage": "unavailable"
+    }
+  ],
+  "installed_auth_scope": {
+    "artifact": "store-BoS0S7yl.mjs",
+    "artifact_sha256": "13d113fb4787f8de9123d8554bed60ae08863044c222deafc8932f3de142fbbf",
+    "function": "withAuthProfileStoreAgentDir",
+    "filters_shared_profiles_to_portable_static": true
+  },
+  "cleanup": {
+    "temporary_api_stopped": true,
+    "temporary_area_removed": true,
+    "production_pids_unchanged": true
+  }
+}
