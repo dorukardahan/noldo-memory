@@ -140,14 +140,15 @@ unavailable. No ownership filter was bypassed or auth snapshot copied to a new s
 
 The remaining learning, correction, fresh-session current/history and abstention
 checks are unexecuted on OpenClaw's full native loop. Existing loader/hook/API/DB
-proof remains separate. The narrow next option requiring authorization is a
-fresh, official OAuth sign-in to a temporary **agent-local** test store using the
-existing account, followed by the remaining bounded turns. It must not copy or
-migrate a shared credential, alter production auth, or substitute a paid route.
-The installed `models auth login --provider openai --agent <test-agent>` supports
-explicit agent targeting; it was not invoked here. No host bridge or new account
-is proposed. This option still needs isolated access validation before another
-model turn; it is not a promise that signing in alone completes acceptance.
+proof remains separate. A subsequent [Gateway isolation trace and proposed
+OAuth plan](openclaw-gateway-isolation-2026-09-11.md) distinguishes active-Gateway
+session persistence from disposable exec state. Merely adding `--agent` to login
+does not isolate its config writes or Gateway refresh. The plan requires a fresh
+state/config/home, a non-main synthetic auth owner and an unused Gateway target;
+provider-side effects cannot be guaranteed absent. No login or revoke was run,
+and no additional application turn was started. Four turns and 594.09 seconds
+remain, with a 120-second limit per turn. Authorization for that concrete login
+plan and a successful isolated access preflight are still required.
 
 Hermes audio origin remains an unreleased
 [draft host contribution](https://github.com/NousResearch/hermes-agent/pull/107369),
