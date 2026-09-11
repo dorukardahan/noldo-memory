@@ -182,7 +182,11 @@ an isolated HTTP API and temporary native MemoryStore. See the
 [comparison](../../../docs/platform-memory-alignment-2026-09-09.md).
 
 `sync_turn(..., messages=...)` preserves text blocks from the latest turn and
-labels assistant/tool output generated, never delivery-confirmed. It does not
+labels assistant/tool output generated, never delivery-confirmed. Results of
+NoldoMem tools are excluded by their tool-call identity/name so recalled memory
+does not recursively become a new source; external tool derivatives remain
+capturable. Existing captured quotations and unidentified legacy tool results are
+not retroactively removed. It does not
 fetch attachments or transcribe media. `recall_min_semantic_score` is an optional
 JSON-config admission floor for automatic prefetch; calibrate it for the actual
 embedding model. Explicit recall tools do not inherit that floor.

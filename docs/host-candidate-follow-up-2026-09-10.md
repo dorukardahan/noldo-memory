@@ -1,5 +1,9 @@
 # Host candidate follow-up, 2026-09-10
 
+Later evidence: [native acceptance on September 11](native-acceptance-2026-09-11.md).
+The preflight/request-limit observations below are historical; the old unused
+0/10 allowance was superseded by bounded application turns.
+
 This continues the existing comparison and acceptance record. It does not replace the
 September 9 research cutoff or treat a draft host change as a stable feature.
 NoldoMem started clean at `c2a643df05479bb7636c6dd9e94f7bb7947d43a2` with green PR #34 CI.

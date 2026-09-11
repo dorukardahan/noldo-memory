@@ -1,5 +1,9 @@
 # Native runtime preflight, 2026-09-11
 
+Later evidence: [native acceptance on September 11](native-acceptance-2026-09-11.md).
+The preflight/request-limit observations below are historical; the old unused
+0/10 allowance was superseded by bounded application turns.
+
 This corrects the backend interpretation in the [September 10 follow-up](host-candidate-follow-up-2026-09-10.md).
 It adds no host bridge, auth adapter, provider substitution or production change.
 The ten-request follow-up allowance remains **0 used: Hermes 0/5, OpenClaw 0/5**.
@@ -83,7 +87,11 @@ It prevents starting the planned run under its automatic-retries-disabled rule;
 it does not establish a production memory defect or authorize another host patch.
 
 The native global-auth fallback in `hermes_cli/auth.py` can separate a profile's
-state from existing native access without copying credentials. A fresh profile
+state from existing native access without copying credentials. This requires the
+normal named-profile layout: a custom `HERMES_HOME` outside that layout becomes
+its own global root in `hermes_constants.get_default_hermes_root()`. The later
+acceptance used the official new-profile command without cloning or switching
+the active profile; an arbitrary temporary directory did not see saved access. A fresh profile
 without an auth store exits the fork-healing path before its lock/write in
 `hermes_cli/auth_oauth_grants.py`. Consequently, the earlier general concern about
 status/healing is not proof that native profile reuse is impossible. Actual OAuth

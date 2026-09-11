@@ -1849,6 +1849,45 @@ def test_sync_preserves_only_available_valid_host_event_metadata(monkeypatch, tm
     assert evidence['modality'] == 'text'  # Quotes still cannot prove audio origin.
 
 
+@pytest.mark.parametrize('tool_name', [
+    'noldomem_recall', 'noldomem_store', 'noldomem_forget',
+    'noldomem_relearn_source', 'noldomem_pin',
+])
+@pytest.mark.parametrize('named_result', [False, True])
+def test_sync_excludes_memory_tool_echoes_but_keeps_external_observations(
+    monkeypatch, tmp_path, tool_name, named_result,
+):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    class Client:
+        def capture(self, body):
+            calls.append(body)
+    provider._client = Client()
+    result = {'role': 'tool', 'content': 'Old memory result must not become a new source.'}
+    if named_result:
+        result['name'] = tool_name
+    else:
+        result['tool_call_id'] = 'memory-call'
+    messages = [
+        {'role': 'user', 'content': 'Check the observatory booking.'},
+        {'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'memory-call', 'function': {'name': tool_name}},
+            {'id': 'document-call', 'function': {'name': 'read_document'}},
+        ]},
+        result,
+        {'role': 'tool', 'tool_call_id': 'document-call', 'content': 'The observatory dome is violet.'},
+        {'role': 'assistant', 'content': 'The dome is violet.'},
+    ]
+    for _ in range(2):  # Transcript replay must make the same admission decision.
+        provider.sync_turn(messages[0]['content'], messages[-1]['content'], messages=messages)
+    assert len(calls) == 2
+    for body in calls:
+        assert [row['text'] for row in body['messages']] == [
+            'Check the observatory booking.', 'The observatory dome is violet.', 'The dome is violet.',
+        ]
+        assert body['messages'][1]['evidence']['assertion'] == 'derived'
+
+
 def test_sync_keeps_clip_provenance_separate_from_typed_caption(monkeypatch, tmp_path):
     provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
     calls = []

@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
 
 ### Fixed
+- Exclude Hermes NoldoMem tool results from turn capture, preventing recursive copies of recalled or forgotten memory while retaining external tool derivatives. Existing transcript quotations and legacy copies are not retroactively rewritten.
 - Consume optional structured audio evidence from Hermes draft PR #107369 as derived per-clip records, preserving typed captions and original identities without changing old stable behavior. This host field is not yet released.
 - Preserve available Hermes native row event IDs and timestamps; add an explicit OpenClaw Gateway preprocessing capture mode using existing host derivatives, with conversation-access enforcement and one inbound writer. Successful document wrappers retain derived trust; failed/path-only file markers are not treated as contents.
 - Exclude Hermes' reserved empty/failed voice transcription prefixes from capture while preserving accompanying written text and ordinary quotations; successful transcript provenance remains unavailable on the pinned stable host.

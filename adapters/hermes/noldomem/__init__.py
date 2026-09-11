@@ -493,8 +493,26 @@ class NoldoMemProvider(MemoryProvider):
                 last_user = next((i for i in range(len(messages) - 1, -1, -1)
                                   if messages[i].get("role") == "user"), len(messages))
                 captured = []
+                memory_call_ids = set()
+                memory_tools = {"noldomem_recall", "noldomem_store", "noldomem_forget",
+                                "noldomem_relearn_source", "noldomem_pin"}
                 for message in messages[last_user:]:
                     role = message.get("role")
+                    if role == "assistant":
+                        for call in message.get("tool_calls") or []:
+                            if not isinstance(call, dict):
+                                continue
+                            function = call.get("function")
+                            if (isinstance(function, dict) and function.get("name") in memory_tools
+                                    and isinstance(call.get("id"), str)):
+                                memory_call_ids.add(call["id"])
+                    if role == "tool" and (
+                        message.get("name") in memory_tools
+                        or message.get("tool_call_id") in memory_call_ids
+                    ):
+                        # Memory results are derived context, not new observations.
+                        # Recapturing them makes stale recall recursively persistent.
+                        continue
                     if role not in {"user", "assistant", "tool"}:
                         continue
                     content = message.get("content", "")

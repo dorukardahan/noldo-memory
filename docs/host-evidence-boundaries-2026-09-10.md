@@ -1,5 +1,9 @@
 # Remaining host evidence boundaries, 2026-09-10
 
+Later evidence: [native acceptance on September 11](native-acceptance-2026-09-11.md).
+The preflight/request-limit observations below are historical; the old unused
+0/10 allowance was superseded by bounded application turns.
+
 This is a narrow follow-up to the [platform comparison](platform-memory-alignment-2026-09-09.md)
 and [eight-request acceptance run](model-acceptance-2026-09-10.md), not a new research baseline.
 PR #34 started this follow-up at `1ab313184b7e1dbaf2d9debae5341bd5662978ef`, clean, with successful CI.

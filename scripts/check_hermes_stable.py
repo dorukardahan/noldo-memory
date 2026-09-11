@@ -17,7 +17,43 @@ import threading
 import time
 
 
-def check(host, repo, evidence_only=False, audio_provenance=False):
+def check_memory_echo(manager, endpoint, repo):
+    import httpx
+
+    text = 'The Aurora observatory guide is Kestrel.'
+    stored = json.loads(manager.handle_tool_call('noldomem_store', {'text': text}))['data']
+    recalled = manager.handle_tool_call('noldomem_recall', {'query': 'Aurora observatory guide'})
+    assert text in recalled
+    rows = [
+        {'role': 'user', 'content': 'Check my booking.'},
+        {'role': 'assistant', 'content': '', 'tool_calls': [
+            {'id': 'recall-call', 'function': {'name': 'noldomem_recall'}},
+            {'id': 'document-call', 'function': {'name': 'read_document'}},
+        ]},
+        {'role': 'tool', 'tool_call_id': 'recall-call', 'content': recalled},
+        {'role': 'tool', 'tool_call_id': 'document-call',
+         'content': 'The document describes a violet observatory dome.'},
+        {'role': 'assistant', 'content': 'The document is available.'},
+    ]
+    manager.on_session_switch('session-b')
+    for _ in range(2):
+        manager.sync_all(rows[0]['content'], rows[-1]['content'], session_id='session-b', messages=rows)
+        assert manager.flush_pending(timeout=5)
+    exported = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+    assert [row['text'] for row in exported if 'Kestrel' in row['text']] == [text]
+    assert any('violet' in row['text'] and row['evidence']['assertion'] == 'derived' for row in exported)
+    assert json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id': stored['id']}))['data']['deleted']
+    manager.sync_all(rows[0]['content'], rows[-1]['content'], session_id='session-b', messages=rows)
+    assert manager.flush_pending(timeout=5)
+    assert 'Kestrel' not in manager.prefetch_all('Aurora observatory guide', session_id='session-b')
+    assert not any('Kestrel' in row['text'] for row in httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json())
+    print(json.dumps({'native_loader_manager_http': True, 'recursive_memory_capture_excluded': True,
+                      'external_document_result_retained': True, 'forgotten_tool_echo_replay_excluded': True,
+                      'adapter_sha256': hashlib.sha256((repo / 'adapters/hermes/noldomem/__init__.py').read_bytes()).hexdigest(),
+                      'model_calls': 0}))
+
+
+def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_only=False):
     sys.path[:0] = [str(host), str(repo)]
     import uvicorn
     import httpx
@@ -68,6 +104,9 @@ def check(host, repo, evidence_only=False, audio_provenance=False):
         provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
         manager.add_provider(provider)
         manager.initialize_all('session-a')
+        if memory_echo_only:
+            check_memory_echo(manager, endpoint, repo)
+            return
         if evidence_only or audio_provenance:
             import asyncio
             from types import SimpleNamespace
@@ -259,10 +298,11 @@ if __name__ == '__main__':
     parser.add_argument('--child', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--evidence-only', action='store_true', help='Only the new event metadata and native STT formatting checks.')
     parser.add_argument('--audio-provenance', action='store_true', help='Candidate host structured STT capture, injection and replay checks.')
+    parser.add_argument('--memory-echo-only', action='store_true', help='Only native memory tool echo/replay capture checks; no model.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.child:
-        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance)
+        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance, args.memory_echo_only)
     else:
         with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
             env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
@@ -270,6 +310,7 @@ if __name__ == '__main__':
                    'AGENT_MEMORY_DATA_DIR': scratch, 'PYTHONDONTWRITEBYTECODE': '1'}
             result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child',
                                      *(['--evidence-only'] if args.evidence_only else []),
-                                     *(['--audio-provenance'] if args.audio_provenance else [])],
+                                     *(['--audio-provenance'] if args.audio_provenance else []),
+                                     *(['--memory-echo-only'] if args.memory_echo_only else [])],
                                     cwd=scratch, env=env)
             raise SystemExit(result.returncode)
