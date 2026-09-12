@@ -192,7 +192,13 @@ JSON-config admission floor for automatic prefetch; calibrate it for the actual
 embedding model. Explicit recall tools do not inherit that floor.
 
 Use `supersedes` on a store for a confirmed user correction. `valid_from` is Unix
-seconds, defaulting to learning time when omitted. Recall supports `as_of` and
+seconds, defaulting to the server clock when omitted or null. If the user did not
+explicitly give an effective date, omit it or use null; do not generate a Unix
+timestamp for “now”. Explicit past/future effective dates remain supported. Event
+time and record creation time are separate from revision validity. Do not add an
+unspecified calendar date or timezone from the current clock or locale to stored
+source text. These are tool instructions, not a guarantee against model inference.
+Recall supports `as_of` and
 `include_history`. Ordinary queries select currently valid records.
 
 Native write mirroring cannot propagate `replace` or `remove` from substrings to

@@ -623,12 +623,12 @@ class NoldoMemProvider(MemoryProvider):
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "text": {"type": "string", "description": "Memory text to store."},
+                        "text": {"type": "string", "description": "The information supported by the source (be specific and concise). Preserve unspecified calendar dates and timezones; do not fill them in from the current clock, locale, or model inference."},
                         "memory_type": {"type": "string", "enum": sorted(VALID_MEMORY_TYPES)},
                         "namespace": {"type": "string"},
                         "source": {"type": "string"},
                         "supersedes": {"type": "string"},
-                        "valid_from": {"type": "number", "description": "Validity start as Unix seconds; omitted means now."},
+                        "valid_from": {"type": ["number", "null"], "description": "If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time."},
                     },
                     "required": ["text"],
                 },

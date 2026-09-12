@@ -18,7 +18,11 @@ Optional tool arguments accept omission or `null`, including on transports that
 require every argument key. For a new assertion, leave `supersedes` and
 `valid_from` unspecified; use a recalled ID only for a confirmed correction.
 `valid_from` describes when the assertion became valid, not its event's scheduled
-time. Unspecified recall `as_of` selects current memory. Empty/invented revision
+time or record creation time. If the user gave no effective date, omit `valid_from`
+or use `null`; do not calculate a Unix timestamp for “now”. Explicit past/future
+effective dates remain supported. Store only source-supported calendar dates and
+timezones; the current clock or locale does not supply missing event details.
+Unspecified recall `as_of` selects current memory. Empty/invented revision
 IDs still fail API validation, and required content/identifiers do not accept null.
 
 The plugin is dependency-free and declares `openclaw.extensions`, so a local

@@ -1935,3 +1935,38 @@ def test_sync_does_not_promote_failed_or_detached_audio_metadata(monkeypatch, tm
     ])
     row, = calls[0]['messages']
     assert row['text'] == text and row['evidence']['modality'] == 'text'
+
+
+def test_temporal_tool_contract_preserves_explicit_dates_and_unspecified_source(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path)
+    calls = []
+
+    class Client:
+        def store(self, body):
+            calls.append(body.copy())
+            return {"stored": True, "id": "synthetic-revision"}
+
+    provider._client = Client()
+    hermes = next(s for s in provider.get_tool_schemas() if s["name"] == "noldomem_store")
+    script = """
+import {registerTools} from './plugin/src/tools.js';
+const factories = [];
+registerTools({registerTool(f) {factories.push(f);}}, {}, {});
+console.log(JSON.stringify(factories.map(f => f({agentId:'alpha'})).find(t => t.name === 'noldomem_store').parameters));
+"""
+    claw = json.loads(subprocess.check_output(["node", "--input-type=module", "--eval", script],
+                                             cwd=REPO_ROOT, text=True))
+    assert hermes["parameters"]["properties"]["valid_from"]["type"] == ["number", "null"]
+    # Both adapters expose the same validity/source contract to their host.
+    desc = hermes["parameters"]["properties"]["valid_from"]["description"]
+    assert claw["properties"]["valid_from"]["description"].startswith(desc)
+    assert hermes["parameters"]["properties"]["text"]["description"] == claw["properties"]["content"]["description"]
+    for timestamp in (None, 0, 4102444800):
+        result = json.loads(provider.handle_tool_call("noldomem_store", {
+            "text": "Aurora visits start Friday at 19:30.",
+            "supersedes": "synthetic-parent", "valid_from": timestamp,
+        }))
+        assert result["success"]
+        assert calls[-1]["valid_from"] == timestamp
+        assert calls[-1]["text"] == "Aurora visits start Friday at 19:30."
+    provider.shutdown()

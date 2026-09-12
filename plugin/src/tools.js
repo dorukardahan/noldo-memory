@@ -156,11 +156,11 @@ export function registerTools(api, client, cfg) {
           "to the prior recalled ID. Do not supersede facts using model inference.",
         parameters: objectSchema(
           {
-            content: stringSchema("The information to remember (be specific and concise)"),
+            content: stringSchema("The information supported by the source (be specific and concise). Preserve unspecified calendar dates and timezones; do not fill them in from the current clock, locale, or model inference."),
             namespace: stringSchema("Memory namespace (default: default)"),
             source: stringSchema("Source label (default: agent-tool)"),
             supersedes: stringSchema("Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID."),
-            valid_from: numberSchema("User-specified validity start as Unix seconds; unspecified means now. An event's scheduled time is not when the assertion became valid."),
+            valid_from: numberSchema("If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time."),
           },
           ["content"]
         ),

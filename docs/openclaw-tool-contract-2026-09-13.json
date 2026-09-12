@@ -1,0 +1,105 @@
+{
+  "scope": "Installed schema reconstruction, not a recorded model request",
+  "model_calls": 0,
+  "api_calls": 0,
+  "baseline": {
+    "description": "Store important information in long-term memory. Use for decisions, preferences, lessons learned, configuration changes, or any fact that should persist across sessions. For a confirmed user correction, set supersedes to the prior recalled ID. Do not supersede facts using model inference.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "The information to remember (be specific and concise)"
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Memory namespace (default: default) Omit or use null when unspecified."
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Source label (default: agent-tool) Omit or use null when unspecified."
+        },
+        "supersedes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID. Omit or use null when unspecified."
+        },
+        "valid_from": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "User-specified validity start as Unix seconds; unspecified means now. An event's scheduled time is not when the assertion became valid. Omit or use null when unspecified."
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "null_past_future_schema_valid": true
+  },
+  "candidate": {
+    "description": "Store important information in long-term memory. Use for decisions, preferences, lessons learned, configuration changes, or any fact that should persist across sessions. For a confirmed user correction, set supersedes to the prior recalled ID. Do not supersede facts using model inference.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "The information supported by the source (be specific and concise). Preserve unspecified calendar dates and timezones; do not fill them in from the current clock, locale, or model inference."
+        },
+        "namespace": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Memory namespace (default: default) Omit or use null when unspecified."
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Source label (default: agent-tool) Omit or use null when unspecified."
+        },
+        "supersedes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID. Omit or use null when unspecified."
+        },
+        "valid_from": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time. Omit or use null when unspecified."
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "null_past_future_schema_valid": true
+  },
+  "date": "2026-09-13",
+  "host": "OpenClaw 2026.9.3",
+  "node": "24.19.0",
+  "baseline_head": "150b3d06ecfe6358da865d73aba04bd780e8c936",
+  "pipeline": [
+    "normalizeOpenAIStrictCompatSchema",
+    "projectRuntimeToolInputSchema",
+    "validateJsonSchemaValue"
+  ],
+  "script_sha256": "a8bd0212191f03f361121632c582462d5f0e196aad0495366d20484222030ebb"
+}

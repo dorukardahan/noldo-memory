@@ -1,5 +1,7 @@
 # Platform memory alignment evidence
 
+Follow-up: [Gateway lifecycle and temporal tool contract, 2026-09-13](openclaw-lifecycle-and-time-2026-09-13.md). Model-free hook dispatch now has Gateway-startup evidence; the earlier real model failures remain open.
+
 Status: scoped implementation and native memory integration validation delivered in PR #34; full functional acceptance remains incomplete. Later evidence: [Hermes native acceptance](native-acceptance-2026-09-11.md) and [OpenClaw native execution with an optional-tool schema fix and remaining temporal/grounding failures](openclaw-native-acceptance-2026-09-12.md). The earlier [September 10 model observations](model-acceptance-2026-09-10.md) used a separate bridge and are not native-loop proof.
 Research cutoff: 2026-09-09T08:17:03Z (Asia/Singapore: 16:17:03).
 Only public sources and independently constructed synthetic examples are used.

@@ -1,5 +1,7 @@
 # OpenClaw native acceptance report, 2026-09-12
 
+Follow-up: [Gateway lifecycle and temporal tool contract, 2026-09-13](openclaw-lifecycle-and-time-2026-09-13.md). Model-free hook dispatch now has Gateway-startup evidence; the earlier real model failures remain open.
+
 Four additional application turns ran through the installed OpenClaw 2026.9.3 /
 Node 24.19.0 **official `agent exec` CLI**, OpenAI `gpt-5.6-sol`, and the installed
 Codex runtime over stdio. Trace timestamps place execution on 2026-09-11 UTC.
