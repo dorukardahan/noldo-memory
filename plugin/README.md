@@ -95,6 +95,14 @@ Declarative prompts can recall history; trivial acknowledgements skip search. An
 `recallMinSemanticScore` filters automatic context using a model-calibrated floor;
 there is no universal default. Explicit recall remains available in degraded mode.
 
+Automatic capture remains selective. Alongside preferences, decisions and longer
+messages, it recognizes short declared booking, appointment and event-contact
+details in a bounded set of English/Turkish sentence forms. It retains the source
+text without adding dates or timezones. Recognized question and speculation markers
+exclude statements from this additional short-event rule; it is not general fact
+extraction or a guarantee that every short statement will be captured. Existing
+prompt-injection, role and agent-scope checks still apply.
+
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official
 `message:preprocessed` event **instead of** inbound `agent_end`. Internal hooks

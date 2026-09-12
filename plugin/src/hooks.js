@@ -48,6 +48,16 @@ function boundedCaptureText(text) {
   return text.slice(0, 2000).replace(/[\uD800-\uDBFF]$/u, "");
 }
 
+function isShortEventFact(text) {
+  // Keep short declared event details without requiring a remember command or
+  // padding. This is a bounded heuristic, not general fact extraction.
+  if (/[?？]/u.test(text) || /\b(?:if|maybe|perhaps|might|could|would|whether|belki|muhtemelen|olabilir|galiba|sanırım|eğer)\b/iu.test(text)) return false;
+  if (/(?:^|\s)(?:mı|mi|mu|mü)(?:\s|[.!]|$)/iu.test(text)) return false;
+  const english = /^(?:my|our|the)\s+[^.!?\n]{0,100}\b(?:booking|reservation|appointment|meeting|guide|organizer|contact)\s+(?:is|are|was|were|will be|moved to|changed to)\s+\S/iu;
+  const turkish = /^(?:rezervasyonum(?:uz)?|randevum(?:uz)?|toplantım(?:ız)?|rehberim(?:iz)?)\s+\S/iu;
+  return english.test(text) || turkish.test(text);
+}
+
 function shouldCapture(text) {
   if (!text || text.length < 15) return false;
   if (looksLikePromptInjection(text)) return false;
@@ -56,6 +66,7 @@ function shouldCapture(text) {
   // Capture if explicitly trigger-worthy or moderately long with substance
   return (
     CAPTURE_TRIGGERS.some((p) => p.test(text)) ||
+    isShortEventFact(text) ||
     (text.length > 80 && !text.startsWith("```"))
   );
 }
