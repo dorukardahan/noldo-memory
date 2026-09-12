@@ -21,7 +21,7 @@ import agent_memory.api as api_module
 from agent_memory.api import app
 from agent_memory.config import Config
 from agent_memory.pool import StoragePool
-from agent_memory.search import SearchWeights
+from agent_memory.search import SearchWeights, _build_cache_query_norm
 
 
 class _StubEmbedder:
@@ -206,7 +206,7 @@ class TestSearchCacheMinScore:
              WHERE query_norm = ? AND limit_val = ? AND agent = ?
              ORDER BY min_score
             """,
-            ("python", 10, "main"),
+            (_build_cache_query_norm("python", None, None), 10, "main"),
         ).fetchall()
 
         cached_scores = {float(r["min_score"]) for r in rows}

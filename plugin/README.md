@@ -5,12 +5,25 @@ This native OpenClaw plugin exposes NoldoMem as agent tools:
 - `noldomem_recall` - search long-term memory
 - `noldomem_store` - store important facts, preferences, decisions, and lessons
 - `noldomem_pin` - protect critical memories from decay and cleanup
+- `noldomem_forget` - delete an assertion and its connected revision history
+- `noldomem_relearn_source` - explicitly unblock one forgotten source for future ingestion
 - native typed hooks for operational tool capture, compaction capture, and
   subagent failure capture
 
 It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
 tool access to that service.
+
+Optional tool arguments accept omission or `null`, including on transports that
+require every argument key. For a new assertion, leave `supersedes` and
+`valid_from` unspecified; use a recalled ID only for a confirmed correction.
+`valid_from` describes when the assertion became valid, not its event's scheduled
+time or record creation time. If the user gave no effective date, omit `valid_from`
+or use `null`; do not calculate a Unix timestamp for “now”. Explicit past/future
+effective dates remain supported. Store only source-supported calendar dates and
+timezones; the current clock or locale does not supply missing event details.
+Unspecified recall `as_of` selects current memory. Empty/invented revision
+IDs still fail API validation, and required content/identifiers do not accept null.
 
 The plugin is dependency-free and declares `openclaw.extensions`, so a local
 `openclaw plugins install -l ./plugin` uses the current OpenClaw 2026.5.2+
@@ -34,6 +47,7 @@ Then enable it in `openclaw.json`:
       "noldomem": {
         "enabled": true,
         "hooks": {
+          "allowConversationAccess": true,
           "allowPromptInjection": false,
           "timeoutMs": 5000,
           "timeouts": {
@@ -69,17 +83,54 @@ Restart OpenClaw after installing.
 
 ## Plugin vs Hook Pack
 
-Use both pieces for the full custom-memory workflow:
+Use the typed plugin for current-turn automatic recall (`enableAutoRecall`) and
+capture (`enableAutoCapture`). Both remain opt-in. Automatic recall runs only when `hooks.allowPromptInjection` is also `true`. OpenClaw 2026.9.3
+requires explicit `hooks.allowConversationAccess: true` for non-bundled
+conversation hooks, including `agent_end` and `message_sent`. Without that grant
+the native loader rejects those hook registrations; tools alone can still load.
+The example above enables capture/lifecycle access while retaining the
+prompt-injection prohibition. For automatic recall, deliberately enable both
+`enableAutoRecall` and `hooks.allowPromptInjection` in the selected profile.
+Declarative prompts can recall history; trivial acknowledgements skip search. An optional
+`recallMinSemanticScore` filters automatic context using a model-calibrated floor;
+there is no universal default. Explicit recall remains available in degraded mode.
 
-- `plugin/` gives agents active tools for recall/store/pin.
-- `hooks/` handles lifecycle capture and bootstrap injection, especially
-  `agent:bootstrap`, `message:received`, `message:sent`, and `/new` session
-  transitions.
+For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
+with `autoCaptureSource: "preprocessed"` selects the official
+`message:preprocessed` event **instead of** inbound `agent_end`. Internal hooks
+must be enabled and the explicit conversation-access grant above is required.
+This mode captures accepted inbound prepared text without waiting for a successful
+model completion. It keeps available event IDs/times and audio/file derivative
+origin; successful file extraction wrappers are normalized without promoting their
+contents into instructions. Unlabelled prepared text stays `derived` because the
+host may have appended link-understanding output. A typed caption is not labelled
+as image extraction. Missing, pending and multi-file references are not guessed.
 
-Keep `enableAutoRecall=false` unless you explicitly want the native plugin to
-run a recall check before prompt build. The hook pack already handles bootstrap
-recall and is cheaper for normal operation.
+The default `autoCaptureSource: "agent_end"` preserves existing behavior, including
+CLI turns. The `preprocessed` mode does not cover CLI-only ingress; choose the
+capture surface for the profile deliberately. `message_sent` still observes
+confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
+provider call or background join cache is introduced. See the
+[verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md).
 
-If the agent has an explicit tool allow list, remove OpenClaw's native
-`memory_search` and `memory_get` tools when NoldoMem is the intended memory
-system. Keep `noldomem_recall`, `noldomem_store`, and `noldomem_pin` allowed.
+The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
+the same typed plugin capture/injection events can duplicate storage, retrieval
+and context. JSONL sync is an archive/legacy path, not a reader for the current
+stable host's canonical SQLite sessions. Do not infer live coverage from its
+successful scan.
+
+The plugin binds tools to the host's factory context. Missing/mismatched agent
+identity fails closed; a model cannot select another agent through tool arguments.
+Use a distinct scoped API key per agent as the server-side boundary. Subtask
+capture accepts only the same agent's target session. Confirmed `message_sent`
+text is labeled delivered; `agent_end` alone is not delivery proof.
+
+See [platform evidence](../docs/platform-memory-alignment-2026-09-09.md) for the
+native/coexistence choices and remaining stable-host test limitations.
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.
+
+For source-session granularity, opaque relearning receipts and legacy limits, see
+[source replay protection](../docs/forgetting-sources.md).

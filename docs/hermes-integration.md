@@ -17,15 +17,16 @@ memory:
 ```
 
 This disables Hermes' native `MEMORY.md` / `USER.md` prompt injection while
-keeping the NoldoMem provider and `session_search` available. Running both
-long-term memory systems at once is possible, but it can create duplicate or
-conflicting facts.
+keeping the NoldoMem provider and `session_search` available. Two independent long-term writers are not a supported synchronized store:
+native replacement/deletion does not identify external records. For small curated
+sets, evaluate native-only first. See the [stable comparison](platform-memory-alignment-2026-09-09.md).
 
 Hermes v2026.5.28 gates `MemoryProvider` tools behind the `memory` toolset when
 an explicit toolset list is configured. If a platform/profile uses
 `platform_toolsets` or another explicit `enabled_toolsets` path, make sure the
 effective toolsets still include `memory`; otherwise `noldomem_recall`,
-`noldomem_store`, and `noldomem_pin` will not be injected. If you need to hide
+`noldomem_store`, `noldomem_pin`, `noldomem_forget`, and
+`noldomem_relearn_source` will not be injected. If you need to hide
 Hermes' built-in file-backed `memory` tool, verify the live tool surface after
 changing toolsets instead of assuming the external provider remains visible.
 
@@ -63,7 +64,12 @@ Example store request:
 ```
 
 `session_id` is optional. When supplied, NoldoMem stores it as
-`source_session` for provenance.
+`source_session` for provenance. Automatic recall retains supplied media
+`modality`, `representation`, `observed_at` and `confidence` alongside assertion
+and delivery labels, within the existing context budget. Labels are constrained
+and numeric metadata must be finite and valid; absent legacy fields are omitted.
+This does not infer media origin from ordinary quotations or restore metadata
+that the host discarded before invoking the provider.
 
 Example pin request:
 
@@ -94,7 +100,7 @@ decisions should remain in the memory text, `category`, `source`, or
 Hermes provider implementations should:
 
 - bound recall by result count and character budget
-- prefetch recall in the background when possible
+- use one bounded current-query prefetch; do not repeat completed-query searches without a reusable cache
 - keep completed-turn storage off the user response path
 - use short HTTP timeouts
 - degrade gracefully when NoldoMem is unavailable
@@ -109,6 +115,8 @@ tools:
 - `noldomem_recall`
 - `noldomem_store`
 - `noldomem_pin`
+- `noldomem_forget`
+- `noldomem_relearn_source`
 
 Shared names make NoldoMem recognizable across runtimes.
 
@@ -133,3 +141,10 @@ instead of blocking the reply.
 
 The repository ships a ready adapter at
 [`adapters/hermes/noldomem`](../adapters/hermes/noldomem).
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.
+
+For explicit forgetting and relearning, see [source replay protection](forgetting-sources.md).
+The source-session block is agent-local; unkeyed legacy data has no replay guarantee.

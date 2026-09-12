@@ -407,15 +407,8 @@ def _extract_text(content: Any) -> str:
 
     Content can be a string or a list of {type, text} dicts.
     """
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                parts.append(item.get("text", ""))
-        return "\n".join(parts).strip()
-    return ""
+    from .evidence import content_text
+    return content_text(content)
 
 
 # Patterns for operationally important tool outputs [S13, 2026-02-17]
@@ -775,6 +768,7 @@ async def ingest_sessions(
                     knowledge_graph.process_text(
                         chunk.text,
                         source=chunk.session_id,
+                        source_memory_id=chunk.md5,
                         timestamp=chunk.timestamp,
                     )
                 except Exception as exc:

@@ -10,6 +10,8 @@ Single-file database with:
 from __future__ import annotations
 
 import json
+import hashlib
+from contextlib import contextmanager
 import logging
 import os
 import re
@@ -75,6 +77,18 @@ def _load_vec_extension(conn: sqlite3.Connection) -> None:
 
 _SCHEMA_SQL = """
 -- Memory metadata
+-- Per-agent admission markers contain only a digest of the source session ID.
+CREATE TABLE IF NOT EXISTS forgotten_sources (
+    source_key TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS graph_sources (
+    kind TEXT NOT NULL,
+    object_id TEXT NOT NULL,
+    memory_id TEXT NOT NULL REFERENCES memories(id),
+    owned INTEGER NOT NULL,
+    PRIMARY KEY (kind, object_id, memory_id)
+);
+
 CREATE TABLE IF NOT EXISTS memories (
     id TEXT PRIMARY KEY,
     text TEXT NOT NULL,
@@ -169,10 +183,17 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 """
 
 
+class ForgottenSourceError(ValueError):
+    """The source was explicitly forgotten; retries do not authorize relearning."""
+
+
 class MemoryStorage:
     """SQLite-backed storage with vector search and FTS5."""
 
     def __init__(self, db_path: Optional[str] = None, dimensions: int = 4096) -> None:
+        self._transaction_depth = 0
+        self._graph_source = None
+        self.cache_generation = 0
         from .config import load_config
 
         cfg = load_config()
@@ -300,6 +321,10 @@ class MemoryStorage:
         _add_col("memories", "source TEXT DEFAULT 'api'", "source")
         # Trust level: system, user, import
         _add_col("memories", "trust_level TEXT DEFAULT 'user'", "trust_level")
+        _add_col("memories", "evidence TEXT DEFAULT '{}'", "evidence")
+        _add_col("memories", "valid_from REAL", "valid_from")
+        _add_col("memories", "valid_to REAL", "valid_to")
+        _add_col("memories", "supersedes TEXT", "supersedes")
         # Compression: preserve original text before summarization
         _add_col("memories", "original_text TEXT", "original_text")
 
@@ -337,11 +362,88 @@ class MemoryStorage:
         except Exception:
             pass
 
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_validity ON memories(valid_to, valid_from) WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_capture_origin ON memories(namespace, source_session, source)")
         conn.commit()
 
     # ------------------------------------------------------------------
     # Memory CRUD
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def transaction(self):
+        """Serialize admission and writes, including nested graph operations."""
+        conn = self._get_conn()
+        owner = not conn.in_transaction
+        if owner:
+            conn.execute("BEGIN IMMEDIATE")
+        self._transaction_depth += 1
+        try:
+            yield conn
+            if owner:
+                conn.commit()
+        except BaseException:
+            if owner:
+                conn.rollback()
+            raise
+        finally:
+            self._transaction_depth -= 1
+
+    def _commit(self):
+        if not self._transaction_depth:
+            self._get_conn().commit()
+
+    @staticmethod
+    def source_key(source_session):
+        # Never fingerprint content, URLs, paths, or content-derived legacy IDs.
+        if not isinstance(source_session, str) or not source_session.strip():
+            return None
+        return hashlib.sha256(source_session.encode("utf-8")).hexdigest()
+
+    def source_is_forgotten(self, source_session):
+        key = self.source_key(source_session)
+        return bool(key and self._get_conn().execute(
+            "SELECT 1 FROM forgotten_sources WHERE source_key = ?", (key,)
+        ).fetchone())
+
+    def relearn_source(self, source_session=None, *, source_key=None):
+        """Explicit authorization only; does not restore deleted content."""
+        if source_key is not None:
+            if source_session is not None or not isinstance(source_key, str) or not re.fullmatch(r"[0-9a-f]{64}", source_key):
+                raise ValueError("Provide exactly one valid source key or session ID")
+            key = source_key
+        else:
+            key = self.source_key(source_session)
+        if key is None:
+            raise ValueError("A non-empty source session ID or source key is required")
+        with self.transaction() as conn:
+            return bool(conn.execute("DELETE FROM forgotten_sources WHERE source_key = ?", (key,)).rowcount)
+
+    @contextmanager
+    def graph_source(self, memory_id):
+        with self.transaction():
+            if self.get_memory(memory_id) is None:
+                raise ValueError("Graph source memory no longer exists")
+            previous = self._graph_source
+            self._graph_source = memory_id
+            try:
+                yield
+            finally:
+                self._graph_source = previous
+
+    def _track_graph_source(self, kind, object_id, *, created=False):
+        conn = self._get_conn()
+        if self._graph_source is None:
+            # An unlinked/manual writer now supports this object independently.
+            conn.execute("UPDATE graph_sources SET owned = 0 WHERE kind = ? AND object_id = ?",
+                         (kind, object_id))
+            return
+        owned = created or bool(conn.execute(
+            "SELECT 1 FROM graph_sources WHERE kind = ? AND object_id = ? AND owned = 1",
+            (kind, object_id),
+        ).fetchone())
+        conn.execute("INSERT OR IGNORE INTO graph_sources VALUES (?, ?, ?, ?)",
+                     (kind, object_id, self._graph_source, int(owned)))
 
     def store_memory(
         self,
@@ -364,15 +466,38 @@ class MemoryStorage:
         lesson_status: Optional[str] = None,
         lesson_scope: Optional[str] = None,
         resolved_at: Optional[float] = None,
+        evidence: Optional[Dict[str, Any]] = None,
+        valid_from: Optional[float] = None,
+        valid_to: Optional[float] = None,
+        supersedes: Optional[str] = None,
+        _commit: bool = True,
     ) -> str:
         """Insert a memory. Returns the memory ID."""
+        if _commit:
+            values = dict(locals())
+            values.pop("self")
+            values["_commit"] = False
+            with self.transaction():
+                return self.store_memory(**values)
         conn = self._get_conn()
+        if not conn.in_transaction:
+            raise RuntimeError("Uncommitted store requires a write transaction")
+        if self.source_is_forgotten(source_session):
+            raise ForgottenSourceError("Source session was forgotten; explicit relearning is required")
         mid = memory_id or uuid.uuid4().hex[:16]
         now = time.time()
         created_at = now if created_at is None else float(created_at)
         updated_at = created_at if updated_at is None else float(updated_at)
         last_accessed_at = created_at if last_accessed_at is None else float(last_accessed_at)
         memory_type = normalize_memory_type(memory_type)
+
+        # Replacement imports must not leave old vector/FTS copies behind for
+        # a later forgetting operation to miss. This is inside the write lock.
+        previous = conn.execute("SELECT vector_rowid FROM memories WHERE id = ?", (mid,)).fetchone()
+        if previous is not None:
+            if previous["vector_rowid"] is not None:
+                conn.execute("DELETE FROM memory_vectors WHERE rowid = ?", (previous["vector_rowid"],))
+            conn.execute("DELETE FROM memory_fts WHERE id = ?", (mid,))
 
         vector_rowid: Optional[int] = None
         if vector is not None:
@@ -387,8 +512,9 @@ class MemoryStorage:
                (id, text, category, memory_type, importance, source_session, namespace,
                 created_at, updated_at, vector_rowid,
                 strength, last_accessed_at, deleted_at, pinned,
-                source, trust_level, lesson_status, lesson_scope, resolved_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                source, trust_level, lesson_status, lesson_scope, resolved_at,
+                evidence, valid_from, valid_to, supersedes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 mid,
                 text,
@@ -409,6 +535,8 @@ class MemoryStorage:
                 lesson_status,
                 lesson_scope,
                 resolved_at,
+                json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False),
+                valid_from, valid_to, supersedes,
             ),
         )
 
@@ -418,8 +546,38 @@ class MemoryStorage:
                 "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",
                 (mid, text),
             )
-        conn.commit()
+        if _commit:
+            conn.commit()
         return mid
+
+    def revise_memory(self, previous_id, *, text, vector, valid_from, source_session=None, evidence=None):
+        """Atomically close one current assertion and preserve its replacement.
+
+        This is an explicit correction, never inferred from embedding similarity.
+        A stale previous ID fails instead of creating competing current branches.
+        """
+        conn = self._get_conn()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute(
+                "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND valid_to IS NULL",
+                (previous_id,),
+            ).fetchone()
+            if previous is None:
+                raise ValueError("Previous memory is missing or already superseded")
+            if previous["valid_from"] is not None and valid_from < previous["valid_from"]:
+                raise ValueError("Replacement predates the previous validity interval")
+            new_id = self.store_memory(
+                text=text, vector=vector, category=previous["category"],
+                importance=previous["importance"], namespace=previous["namespace"],
+                memory_type=previous["memory_type"], source="explicit-revision",
+                trust_level="user", source_session=source_session, evidence=evidence,
+                valid_from=valid_from, supersedes=previous_id, pinned=previous["pinned"],
+                _commit=False,
+            )
+            conn.execute("UPDATE memories SET valid_to = ?, updated_at = ? WHERE id = ?",
+                         (valid_from, time.time(), previous_id))
+        return {"action": "inserted", "id": new_id, "supersedes": previous_id}
 
     def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
         """Return a single memory dict or None."""
@@ -430,23 +588,65 @@ class MemoryStorage:
         return dict(row) if row else None
 
     def delete_memory(self, memory_id: str) -> bool:
-        """Delete a memory and its vector/FTS entries. Returns True if found."""
-        conn = self._get_conn()
-        row = conn.execute(
-            "SELECT vector_rowid FROM memories WHERE id = ?", (memory_id,)
-        ).fetchone()
-        if not row:
-            return False
+        """Compatibility wrapper; see forget_memory for the relearning receipt."""
+        return self.forget_memory(memory_id)["deleted"]
 
-        vector_rowid = row["vector_rowid"]
-        if vector_rowid is not None:
-            conn.execute(
-                "DELETE FROM memory_vectors WHERE rowid = ?", (vector_rowid,)
-            )
-        conn.execute("DELETE FROM memory_fts WHERE id = ?", (memory_id,))
-        conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        conn.commit()
-        return True
+    def forget_memory(self, memory_id: str) -> Dict[str, Any]:
+        """Forget the revision family and return only non-content source receipts."""
+        conn = self._get_conn()
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if not self.get_memory(memory_id):
+                return {"deleted": False, "source_keys": [], "unidentified_records": 0}
+            # UNION bounds malformed imported cycles. Namespace guards also
+            # contain legacy/imported links that predate lineage validation.
+            rows = conn.execute(
+                """WITH RECURSIVE family(id) AS (
+                     SELECT id FROM memories WHERE id = ?
+                     UNION
+                     SELECT m.id FROM memories m JOIN family f
+                       ON m.supersedes = f.id OR m.id = (SELECT supersedes FROM memories WHERE id = f.id)
+                     WHERE m.namespace = (SELECT namespace FROM memories WHERE id = ?)
+                   ) SELECT m.id, m.vector_rowid, m.source_session FROM memories m JOIN family f ON m.id = f.id""",
+                (memory_id, memory_id),
+            ).fetchall()
+            source_keys = set()
+            unidentified = 0
+            for row in rows:
+                key = self.source_key(row["source_session"])
+                if key:
+                    source_keys.add(key)
+                    conn.execute("INSERT OR IGNORE INTO forgotten_sources VALUES (?)", (key,))
+                else:
+                    unidentified += 1
+                refs = conn.execute("SELECT * FROM graph_sources WHERE memory_id = ?", (row["id"],)).fetchall()
+                conn.execute("DELETE FROM graph_sources WHERE memory_id = ?", (row["id"],))
+                for ref in refs:
+                    remaining = conn.execute(
+                        "SELECT 1 FROM graph_sources WHERE kind = ? AND object_id = ?",
+                        (ref["kind"], ref["object_id"]),
+                    ).fetchone()
+                    if ref["kind"] == "relationship" and ref["owned"]:
+                        # Shared links must not retain the forgotten source's text span.
+                        conn.execute("UPDATE relationships SET context = '' WHERE id = ?", (ref["object_id"],))
+                        if not remaining:
+                            conn.execute("DELETE FROM relationships WHERE id = ?", (ref["object_id"],))
+                conn.execute("DELETE FROM temporal_facts WHERE source_memory_id = ?", (row["id"],))
+                for ref in refs:
+                    if ref["kind"] == "entity" and ref["owned"]:
+                        conn.execute("""DELETE FROM entities WHERE id = ?
+                            AND NOT EXISTS (SELECT 1 FROM graph_sources WHERE kind = 'entity' AND object_id = entities.id)
+                            AND NOT EXISTS (SELECT 1 FROM relationships WHERE source_id = entities.id OR target_id = entities.id)
+                            AND NOT EXISTS (SELECT 1 FROM temporal_facts WHERE entity_id = entities.id OR object_entity_id = entities.id)""",
+                                     (ref["object_id"],))
+                if row["vector_rowid"] is not None:
+                    conn.execute("DELETE FROM memory_vectors WHERE rowid = ?", (row["vector_rowid"],))
+                conn.execute("DELETE FROM memory_fts WHERE id = ?", (row["id"],))
+                conn.execute("DELETE FROM memories WHERE id = ?", (row["id"],))
+            conn.execute("DELETE FROM search_result_cache")
+            conn.execute("DELETE FROM embedding_cache")
+        self.cache_generation += 1
+        return {"deleted": True, "source_keys": sorted(source_keys), "unidentified_records": unidentified}
 
     def update_memory(
         self,
@@ -657,7 +857,8 @@ class MemoryStorage:
         - < 21 days old -> protect (min 0.8)
         - Very recent (last 72h) -> boost (+0.1)
         - 21-90 days -> importance-adjusted decay (gentle: 0.07 base)
-        - GC phase: soft-delete zombies at floor with low importance, unaccessed 60+ days
+        - GC phase: archive unversioned zombies at floor, low importance, unaccessed 60+ days
+        - Revision families retain current/history rows until explicit forgetting.
         - No hard-delete: gc_purge is disabled. Soft-deleted memories are recoverable.
         - Lessons: 270+ days floor, 60-day protect, 60-270 days -> 0.02 decay
           min_strength for lessons is 0.8 (immune from dropping below useful threshold)
@@ -761,6 +962,7 @@ class MemoryStorage:
                  WHERE deleted_at IS NULL
                    AND COALESCE(pinned, 0) = 0
                    AND COALESCE(memory_type, 'other') != 'lesson'
+                   AND valid_from IS NULL AND valid_to IS NULL AND supersedes IS NULL
                    AND strength <= ?
                    AND importance <= 0.3
                    AND COALESCE(last_accessed_at, created_at) < ? - ?
@@ -818,8 +1020,23 @@ class MemoryStorage:
             return {"purged_memories": 0, "purged_vectors": 0}
 
     # ------------------------------------------------------------------
-    # Write-time semantic merge
+    # Exact retry deduplication and distinct assertion storage
     # ------------------------------------------------------------------
+
+    def find_duplicate(self, *, text, namespace="default", category="other", memory_type="other",
+                       source="api", trust_level="user", source_session=None, evidence=None):
+        conn = self._get_conn()
+        memory_type = normalize_memory_type(memory_type)
+        existing = conn.execute(
+            """SELECT id FROM memories WHERE text = ? AND namespace = ?
+               AND category = ? AND memory_type = ? AND source = ?
+               AND trust_level = ? AND source_session IS ? AND evidence = ? AND deleted_at IS NULL
+               AND valid_to IS NULL
+               LIMIT 1""",
+            (text, namespace, category, memory_type, source, trust_level, source_session,
+             json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False)),
+        ).fetchone()
+        return existing["id"] if existing else None
 
     def merge_or_store(
         self,
@@ -833,148 +1050,29 @@ class MemoryStorage:
         namespace: str = "default",
         source: str = "api",
         trust_level: str = "user",
+        evidence: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Store a memory, merging into nearest neighbor when highly similar.
+        """Preserve distinct assertions; only collapse exact provenance-matched retries.
 
-        If *vector* is provided, we search the nearest neighbor via sqlite-vec.
-        If similarity > threshold AND category matches, we merge content and
-        average embeddings.
+        Semantic similarity is useful for retrieval, but does not prove that two
+        assertions describe the same event or have the same validity. The legacy
+        similarity_threshold argument remains accepted for caller compatibility.
         """
-        conn = self._get_conn()
-        now = time.time()
-
-        if memory_type == "lesson":
+        with self.transaction():
+            if self.source_is_forgotten(source_session):
+                raise ForgottenSourceError("Source session was forgotten; explicit relearning is required")
+            existing = self.find_duplicate(
+                text=text, namespace=namespace, category=category, memory_type=memory_type,
+                source=source, trust_level=trust_level, source_session=source_session, evidence=evidence,
+            )
+            if existing:
+                return {"action": "merged", "id": existing, "similarity": 1.0}
             mid = self.store_memory(
-                text=text,
-                vector=vector,
-                category=category,
-                importance=importance,
-                source_session=source_session,
-                memory_type=memory_type,
-                namespace=namespace,
-                source=source,
-                trust_level=trust_level,
+                text=text, vector=vector, category=category, importance=importance,
+                source_session=source_session, memory_type=memory_type,
+                namespace=namespace, source=source, trust_level=trust_level, evidence=evidence, _commit=False,
             )
             return {"action": "inserted", "id": mid, "similarity": None}
-
-        if vector is None:
-            mid = self.store_memory(
-                text=text,
-                vector=None,
-                category=category,
-                importance=importance,
-                source_session=source_session,
-                memory_type=memory_type,
-                namespace=namespace,
-                source=source,
-                trust_level=trust_level,
-            )
-            return {"action": "inserted", "id": mid, "similarity": None}
-
-        try:
-            nn = self.search_vectors(vector, limit=1, min_score=0.0, namespace=namespace)
-        except Exception as exc:
-            logger.warning("merge_or_store: vector search failed; inserting: %s", exc)
-            mid = self.store_memory(
-                text=text,
-                vector=vector,
-                category=category,
-                importance=importance,
-                source_session=source_session,
-                memory_type=memory_type,
-                namespace=namespace,
-                source=source,
-                trust_level=trust_level,
-            )
-            return {"action": "inserted", "id": mid, "similarity": None}
-
-        if not nn:
-            mid = self.store_memory(
-                text=text,
-                vector=vector,
-                category=category,
-                importance=importance,
-                source_session=source_session,
-                memory_type=memory_type,
-                namespace=namespace,
-                source=source,
-                trust_level=trust_level,
-            )
-            return {"action": "inserted", "id": mid, "similarity": None}
-
-        best = nn[0]
-        best_id = best.get("id")
-        similarity = float(best.get("score") or 0.0)
-
-        if (
-            best_id
-            and similarity >= similarity_threshold
-            and (best.get("category") or "other") == category
-            and best.get("deleted_at") is None
-        ):
-            old_text = (best.get("text") or "").rstrip()
-            new_text = text.strip()
-            merged_text = f"{old_text}\n• {new_text}" if old_text else new_text
-
-            # Average embeddings (old + new)
-            vec_rowid = best.get("vector_rowid")
-            if vec_rowid is not None:
-                row = conn.execute(
-                    "SELECT embedding FROM memory_vectors WHERE rowid = ?", (vec_rowid,)
-                ).fetchone()
-                if row and row[0] is not None:
-                    try:
-                        old_vec = np.frombuffer(row[0], dtype=np.float32)
-                        new_vec = np.asarray(vector, dtype=np.float32)
-                        if old_vec.shape == new_vec.shape:
-                            avg_vec = ((old_vec + new_vec) / 2.0).astype(np.float32)
-                            conn.execute(
-                                "UPDATE memory_vectors SET embedding = ? WHERE rowid = ?",
-                                (avg_vec.tobytes(), vec_rowid),
-                            )
-                    except Exception:
-                        pass
-
-            # Merge text + metadata
-            conn.execute(
-                """
-                UPDATE memories
-                   SET text = ?,
-                       importance = MAX(COALESCE(importance, 0.5), ?),
-                       updated_at = ?,
-                       strength = MIN(COALESCE(strength, 1.0) + 0.2, 5.0),
-                       last_accessed_at = ?
-                 WHERE id = ?
-                """,
-                (merged_text, importance, now, now, best_id),
-            )
-            conn.execute("DELETE FROM memory_fts WHERE id = ?", (best_id,))
-            conn.execute(
-                "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",
-                (best_id, merged_text),
-            )
-            conn.commit()
-
-            logger.info(
-                "merge_or_store: merged into %s (sim=%.4f cat=%s)",
-                best_id,
-                similarity,
-                category,
-            )
-            return {"action": "merged", "id": best_id, "similarity": similarity}
-
-        mid = self.store_memory(
-            text=text,
-            vector=vector,
-            category=category,
-            importance=importance,
-            source_session=source_session,
-            memory_type=memory_type,
-            namespace=namespace,
-            source=source,
-            trust_level=trust_level,
-        )
-        return {"action": "inserted", "id": mid, "similarity": similarity}
 
     # ------------------------------------------------------------------
     # Batch operations
@@ -989,61 +1087,15 @@ class MemoryStorage:
         Each item dict should have at least ``text``; optional keys:
         ``vector``, ``category``, ``memory_type``, ``importance``, ``source_session``, ``id``.
         """
-        conn = self._get_conn()
-        ids: List[str] = []
-        now = time.time()
-
-        try:
+        ids = []
+        with self.transaction():
             for item in items:
-                mid = item.get("id") or uuid.uuid4().hex[:16]
-                text = item["text"]
-                vector = item.get("vector")
-                category = item.get("category", "other")
-                memory_type = normalize_memory_type(item.get("memory_type", "other"))
-                importance = item.get("importance", 0.5)
-                source = item.get("source_session")
-                namespace = item.get("namespace", "default")
-
-                vector_rowid: Optional[int] = None
-                if vector is not None:
-                    blob = np.array(vector, dtype=np.float32).tobytes()
-                    cur = conn.execute(
-                        "INSERT INTO memory_vectors(embedding) VALUES (?)", (blob,)
-                    )
-                    vector_rowid = cur.lastrowid
-
-                conn.execute(
-                    """INSERT OR REPLACE INTO memories
-                       (id, text, category, memory_type, importance, source_session, namespace,
-                        created_at, updated_at, vector_rowid,
-                        strength, last_accessed_at, deleted_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
-                    (
-                        mid,
-                        text,
-                        category,
-                        memory_type,
-                        importance,
-                        source,
-                        namespace,
-                        now,
-                        now,
-                        vector_rowid,
-                        1.0,
-                        now,
-                    ),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO memory_fts(id, text) VALUES (?, ?)",
-                    (mid, text),
-                )
-                ids.append(mid)
-
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
+                ids.append(self.store_memory(
+                    text=item["text"], vector=item.get("vector"), memory_id=item.get("id"),
+                    category=item.get("category", "other"), memory_type=item.get("memory_type", "other"),
+                    importance=item.get("importance", 0.5), source_session=item.get("source_session"),
+                    namespace=item.get("namespace", "default"), evidence=item.get("evidence"), _commit=False,
+                ))
         return ids
 
 
@@ -1068,6 +1120,16 @@ class MemoryStorage:
     # Vector search
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def validity_filter(*, include_history=False, as_of=None, prefix="", include_future=False, validity_time=None):
+        if include_history and as_of is None:
+            if include_future:  # Scoped forgetting must also find scheduled text.
+                return "1=1", []
+            return f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?)", [time.time() if validity_time is None else validity_time]
+        moment = (time.time() if validity_time is None else validity_time) if as_of is None else as_of
+        return (f"({prefix}valid_from IS NULL OR {prefix}valid_from <= ?) AND "
+                f"({prefix}valid_to IS NULL OR {prefix}valid_to > ?)", [moment, moment])
+
     def search_vectors(
         self,
         query_vector: List[float],
@@ -1075,16 +1137,21 @@ class MemoryStorage:
         min_score: float = 0.0,
         namespace: Optional[str] = None,
         memory_type: Optional[str] = None,
+        include_history: bool = False,
+        as_of: Optional[float] = None,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """Nearest-neighbour search via sqlite-vec (cosine distance).
+        """Nearest-neighbour search via sqlite-vec's existing default L2 index.
 
         Returns dicts with keys: ``id``, ``text``, ``category``, ``importance``,
-        ``created_at``, ``score`` (cosine similarity ∈ [0, 1]).
+        ``created_at``, ``score`` (legacy 1 - L2 / 2, not a probability).
         """
         conn = self._get_conn()
         blob = np.array(query_vector, dtype=np.float32).tobytes()
         requested_limit = max(1, int(limit))
-        has_metadata_filter = namespace is not None or memory_type is not None
+        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of, validity_time=validity_time)
+        has_versions = conn.execute("SELECT 1 FROM memories WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL LIMIT 1").fetchone()
+        has_metadata_filter = namespace is not None or memory_type is not None or bool(has_versions)
 
         # sqlite-vec applies KNN LIMIT before we join/filter memory metadata.
         # For namespace or memory_type scoped search, widen progressively so a
@@ -1122,7 +1189,7 @@ class MemoryStorage:
             # Pre-filter by min_score and collect vec_rowid → similarity mapping
             candidates: List[tuple[int, float]] = []
             for r in rows:
-                # sqlite-vec returns cosine *distance* (0 = identical, 2 = opposite)
+                # Preserve the existing L2 index and score scale. No reindex.
                 similarity = 1.0 - (r["distance"] / 2.0)
                 if similarity >= min_score:
                     candidates.append((r["vec_rowid"], round(similarity, 4)))
@@ -1142,7 +1209,8 @@ class MemoryStorage:
                     "deleted_at IS NULL",
                     "importance >= 0.05",
                 ]
-                params: List[Any] = list(chunk)
+                where_parts.append(validity)
+                params: List[Any] = list(chunk) + validity_params
                 if namespace is not None:
                     where_parts.append("namespace = ?")
                     params.append(namespace)
@@ -1176,6 +1244,7 @@ class MemoryStorage:
                         limit=requested_limit,
                         namespace=namespace,
                         memory_type=memory_type,
+                        include_history=include_history, as_of=as_of, validity_time=validity_time,
                     )
                     if fallback:
                         return fallback
@@ -1192,6 +1261,9 @@ class MemoryStorage:
         limit: int,
         namespace: Optional[str],
         memory_type: Optional[str],
+        include_history: bool = False,
+        as_of: Optional[float] = None,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
         where_parts = [
             "m.vector_rowid IS NOT NULL",
@@ -1199,6 +1271,9 @@ class MemoryStorage:
             "m.importance >= 0.05",
         ]
         params: List[Any] = []
+        validity, validity_params = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", validity_time=validity_time)
+        where_parts.append(validity)
+        params.extend(validity_params)
         if namespace is not None:
             where_parts.append("m.namespace = ?")
             params.append(namespace)
@@ -1218,10 +1293,6 @@ class MemoryStorage:
             tuple(params),
         ).fetchall()
 
-        query_norm = float(np.linalg.norm(query_vector))
-        if query_norm <= 0.0:
-            return []
-
         results: List[Dict[str, Any]] = []
         for row in rows:
             embedding = row["embedding"]
@@ -1230,11 +1301,9 @@ class MemoryStorage:
             vector = np.frombuffer(embedding, dtype=np.float32)
             if vector.shape != query_vector.shape:
                 continue
-            vector_norm = float(np.linalg.norm(vector))
-            if vector_norm <= 0.0:
-                continue
-            cosine = float(np.dot(query_vector, vector) / (query_norm * vector_norm))
-            similarity = 1.0 - ((1.0 - cosine) / 2.0)
+            # The fallback must use the same metric as vec0's default index;
+            # changing to cosine here changes admission at high record counts.
+            similarity = 1.0 - float(np.linalg.norm(query_vector - vector)) / 2.0
             if similarity < min_score:
                 continue
             d = dict(row)
@@ -1250,62 +1319,60 @@ class MemoryStorage:
     # ------------------------------------------------------------------
 
     def search_text(
-        self, query: str, limit: int = 10, namespace: Optional[str] = None, memory_type: Optional[str] = None
+        self, query: str, limit: int = 10, namespace: Optional[str] = None,
+        memory_type: Optional[str] = None, *, include_history: bool = False,
+        as_of: Optional[float] = None, include_future: bool = False,
+        validity_time: Optional[float] = None,
     ) -> List[Dict[str, Any]]:
-        """FTS5 search. Returns memories sorted by BM25 relevance."""
-        conn = self._get_conn()
-
-        # Build a safe FTS5 query from searchable tokens only. Raw text can
-        # contain JSON, quotes, or shell-like punctuation that breaks MATCH.
+        """FTS5 search with scope and validity applied BEFORE the candidate limit."""
         tokens = re.findall(r"[\w]+(?:[.-][\w]+)*", query, flags=re.UNICODE)
-        safe_query = " OR ".join(
-            f'"{tok}"' for tok in tokens if tok.strip()
-        )
+        safe_query = " OR ".join(f'"{tok}"' for tok in tokens if tok.strip())
         if not safe_query:
             return []
-
-        rows = conn.execute(
-            """
-            SELECT fts.id, bm25(memory_fts) AS rank
-            FROM memory_fts fts
-            WHERE memory_fts MATCH ?
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (safe_query, limit),
-        ).fetchall()
-
-        if not rows:
-            return []
-
-        # Batch fetch: single query instead of N+1 per-row lookups
-        fts_ids = [r["id"] for r in rows]
-        rank_map = {r["id"]: r["rank"] for r in rows}
-        placeholders = ",".join("?" for _ in fts_ids)
-
-        where_parts = [f"id IN ({placeholders})", "deleted_at IS NULL", "importance >= 0.05"]
-        params: List[Any] = list(fts_ids)
+        validity, values = self.validity_filter(include_history=include_history, as_of=as_of, prefix="m.", include_future=include_future, validity_time=validity_time)
+        where = ["memory_fts MATCH ?", "m.deleted_at IS NULL", "m.importance >= 0.05", validity]
+        params = [safe_query] + values
         if namespace is not None:
-            where_parts.append("namespace = ?")
+            where.append("m.namespace = ?")
             params.append(namespace)
         if memory_type is not None:
-            where_parts.append("COALESCE(memory_type, 'other') = ?")
+            where.append("COALESCE(m.memory_type, 'other') = ?")
             params.append(memory_type)
             if memory_type == "lesson":
-                where_parts.append("COALESCE(lesson_status, 'active') = 'active'")
-
-        sql = f"SELECT * FROM memories WHERE {' AND '.join(where_parts)}"
-        mem_rows = conn.execute(sql, tuple(params)).fetchall()
-
-        results: List[Dict[str, Any]] = []
-        for mem in mem_rows:
-            d = dict(mem)
-            d["bm25_rank"] = rank_map.get(mem["id"], 0.0)
-            results.append(d)
-
-        # Preserve original BM25 ranking order (lower rank = better)
-        results.sort(key=lambda x: x["bm25_rank"])
-        return results
+                where.append("COALESCE(m.lesson_status, 'active') = 'active'")
+        # Rank in FTS first, then widen until enough *eligible* rows remain.
+        # Joining every matching row before LIMIT forces large materialization
+        # on broad queries. A fixed prefilter LIMIT would instead starve sparse
+        # scopes, so keep widening until the corpus is exhausted when necessary.
+        conn = self._get_conn()
+        fetch_limit = max(limit * 4, 64)
+        while True:
+            ranked = conn.execute(
+                "SELECT id, rank AS bm25_rank FROM memory_fts WHERE memory_fts MATCH ? ORDER BY rank LIMIT ?",
+                (safe_query, fetch_limit),
+            ).fetchall()
+            if not ranked:
+                return []
+            ranks = {row["id"]: row["bm25_rank"] for row in ranked}
+            ids = list(ranks)
+            eligible = {}
+            for offset in range(0, len(ids), 900):
+                chunk = ids[offset:offset + 900]
+                placeholders = ",".join("?" for _ in chunk)
+                # The MATCH clause is handled above; all other admission
+                # conditions apply before choosing the effective result limit.
+                rows = conn.execute(
+                    f"SELECT m.* FROM memories m WHERE m.id IN ({placeholders}) AND {' AND '.join(where[1:])}",
+                    chunk + params[1:],
+                ).fetchall()
+                for row in rows:
+                    item = dict(row)
+                    item["bm25_rank"] = ranks[item["id"]]
+                    eligible[item["id"]] = item
+            results = [eligible[mid] for mid in ids if mid in eligible]
+            if len(results) >= limit or len(ranked) < fetch_limit:
+                return results[:limit]
+            fetch_limit *= 2
 
     # ------------------------------------------------------------------
     # Entity CRUD
@@ -1338,7 +1405,8 @@ class MemoryStorage:
                    WHERE id = ?""",
                 (now, eid),
             )
-            conn.commit()
+            self._track_graph_source("entity", eid)
+            self._commit()
             return eid
 
         eid = entity_id or uuid.uuid4().hex[:16]
@@ -1356,7 +1424,8 @@ class MemoryStorage:
                 json.dumps(metadata or {}),
             ),
         )
-        conn.commit()
+        self._track_graph_source("entity", eid, created=True)
+        self._commit()
         return eid
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -1410,7 +1479,8 @@ class MemoryStorage:
                 "UPDATE relationships SET confidence = ?, context = ? WHERE id = ?",
                 (new_conf, context, existing["id"]),
             )
-            conn.commit()
+            self._track_graph_source("relationship", existing["id"])
+            self._commit()
             return existing["id"]
 
         rid = uuid.uuid4().hex[:16]
@@ -1420,7 +1490,8 @@ class MemoryStorage:
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (rid, source_id, target_id, relation_type, confidence, context, now),
         )
-        conn.commit()
+        self._track_graph_source("relationship", rid, created=True)
+        self._commit()
         return rid
 
     def store_temporal_fact(
@@ -1439,7 +1510,7 @@ class MemoryStorage:
                VALUES (?, ?, ?, ?, ?, ?)""",
             (fid, entity_id, fact, valid_from or time.time(), valid_to, source_memory_id),
         )
-        conn.commit()
+        self._commit()
         return fid
 
     def get_entity_facts(self, entity_id: str, current_only: bool = True) -> List[Dict[str, Any]]:
@@ -1482,7 +1553,7 @@ class MemoryStorage:
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (query_norm, limit_val, min_score, agent, results_json, now, expires_at),
         )
-        conn.commit()
+        self._commit()
 
     def get_cached_search_result(
         self, query_norm: str, limit_val: int, min_score: float, agent: str
@@ -1504,6 +1575,7 @@ class MemoryStorage:
         Per-agent DBs historically stored rows under agent='main'. Clear both the
         normalized agent key and legacy 'main' rows on any explicit invalidation.
         """
+        self.cache_generation += 1
         conn = self._get_conn()
         now = time.time()
         if agent:
@@ -1517,7 +1589,7 @@ class MemoryStorage:
                 )
         else:
             conn.execute("DELETE FROM search_result_cache WHERE expires_at <= ?", (now,))
-        conn.commit()
+        self._commit()
 
     def cache_embedding(self, text_hash: str, embedding_blob: bytes) -> None:
         """Store an embedding in the persistent cache."""
@@ -1527,7 +1599,7 @@ class MemoryStorage:
             "INSERT OR REPLACE INTO embedding_cache (text_hash, embedding, created_at) VALUES (?, ?, ?)",
             (text_hash, embedding_blob, now),
         )
-        conn.commit()
+        self._commit()
 
     def get_cached_embedding(self, text_hash: str) -> Optional[bytes]:
         """Retrieve a cached embedding blob."""
@@ -1596,7 +1668,7 @@ class MemoryStorage:
         # Indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_entity_rel_active ON temporal_facts(entity_id, relation_type, is_active)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_valid_from ON temporal_facts(valid_from)")
-        conn.commit()
+        self._commit()
 
     def store_typed_fact(
         self,
@@ -1625,7 +1697,7 @@ class MemoryStorage:
             (fid, entity_id, fact_text, valid_from or time.time(), None, source_memory_id,
              relation_type, object_value, object_entity_id, confidence)
         )
-        conn.commit()
+        self._commit()
         return fid
 
     def get_active_facts(self, entity_id: str, relation_type: str) -> List[Dict[str, Any]]:
@@ -1644,7 +1716,7 @@ class MemoryStorage:
             "UPDATE temporal_facts SET is_active = 0, valid_to = ? WHERE id = ?",
             (now, fact_id)
         )
-        conn.commit()
+        self._commit()
 
     def get_conflicts(self, entity_id: Optional[str] = None, limit: int = 20) -> List[Dict[str, Any]]:
         """Identify conflicts (multiple active facts for same exclusive relation)."""

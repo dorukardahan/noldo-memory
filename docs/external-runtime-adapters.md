@@ -88,6 +88,8 @@ tool names when possible:
 - `noldomem_recall`
 - `noldomem_store`
 - `noldomem_pin`
+- `noldomem_forget`
+- `noldomem_relearn_source`
 
 Shared names make NoldoMem recognizable across runtimes, but they are not a
 protocol requirement.
@@ -109,3 +111,6 @@ host runtime supports them:
 
 If NoldoMem is slow or unavailable, the host runtime should continue the
 conversation without memory context instead of blocking the reply.
+
+For explicit forgetting and relearning, see [source replay protection](forgetting-sources.md).
+The source-session block is agent-local; unkeyed legacy data has no replay guarantee.

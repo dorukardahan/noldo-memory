@@ -28,7 +28,8 @@ store. Keep `session_search` enabled if you still want transcript search.
 Hermes v0.19 injects external `MemoryProvider` tools only when the effective
 toolsets are unset or include `memory`. If your platform/profile uses an
 explicit toolset list, keep `memory` enabled and verify that `noldomem_recall`,
-`noldomem_store`, and `noldomem_pin` appear in the live tool surface. Builds
+`noldomem_store`, `noldomem_pin`, `noldomem_forget`, and
+`noldomem_relearn_source` appear in the live tool surface. Builds
 that expose `memory.external_tools_enabled_when_memory_toolset_disabled` may
 use that explicit compatibility option instead. Use a distinct `agent` value
 for each Hermes identity rather than sharing the legacy `hermes` scope.
@@ -50,7 +51,7 @@ Create `$HERMES_HOME/noldomem.json`:
   "sync_prefetch_on_miss": true,
   "sync_turns_enabled": false,
   "tools_enabled": true,
-  "recall_cache_ttl_seconds": 300.0,
+  "recall_cache_ttl_seconds": 0.0,
   "recall_cache_max_entries": 128
 }
 ```
@@ -67,6 +68,8 @@ The provider exposes:
 - `noldomem_recall`
 - `noldomem_store`
 - `noldomem_pin`
+- `noldomem_forget`
+- `noldomem_relearn_source`
 
 The provider also tracks Hermes session rotations. Store calls include the
 current Hermes `session_id`, and NoldoMem preserves that value as
@@ -119,7 +122,10 @@ thread, but the provider contract cannot coalesce calls that are still waiting
 inside that host-owned queue. Bounding that host backlog requires a Hermes-side
 executor policy rather than an adapter change.
 
-Recall results use a thread-safe LRU cache. `recall_cache_ttl_seconds` controls
+Recall can use an opt-in thread-safe LRU cache. The default TTL is zero so writes
+from another session cannot leave a provider-local stale copy. The server owns
+shared search caching. Completed-query background prefetch is skipped at TTL zero;
+it does not predict the next user prompt. Own writes also invalidate local cache. `recall_cache_ttl_seconds` controls
 expiry and `recall_cache_max_entries` controls the maximum entry count. The
 cache is cleared on session changes, reset, Hermes `rewound=True` notifications,
 legacy rewind reasons, compaction boundaries, and shutdown. Cache identity uses
@@ -135,7 +141,7 @@ so provider data cannot smuggle a nested trusted-memory fence into the prompt.
 
 Both cache settings are validated. Supported ranges are:
 
-- `recall_cache_ttl_seconds`: 0.1–3600 seconds
+- `recall_cache_ttl_seconds`: 0–3600 seconds (default 0; disabled)
 - `recall_cache_max_entries`: 1–4096
 
 Equivalent environment variables are available with the `NOLDOMEM_` prefix,
@@ -168,3 +174,63 @@ and only the health status, storage/embedding booleans, numeric uptime, and an
 allowlisted error class are exposed. Exit codes are `0` for configured/default
 or live-ready, `1` for unconfigured, and `2` for a completed or safely refused
 live probe that is not ready.
+
+## Stable-host alignment (2026-09-09)
+
+The real Hermes `v2026.9.7` provider loader and MemoryManager were exercised with
+an isolated HTTP API and temporary native MemoryStore. See the
+[comparison](../../../docs/platform-memory-alignment-2026-09-09.md).
+
+`sync_turn(..., messages=...)` preserves text blocks from the latest turn and
+labels assistant/tool output generated, never delivery-confirmed. Results of
+NoldoMem tools are excluded by their tool-call identity/name so recalled memory
+does not recursively become a new source; external tool derivatives remain
+capturable. Existing captured quotations and unidentified legacy tool results are
+not retroactively removed. It does not
+fetch attachments or transcribe media. `recall_min_semantic_score` is an optional
+JSON-config admission floor for automatic prefetch; calibrate it for the actual
+embedding model. Explicit recall tools do not inherit that floor.
+
+Use `supersedes` on a store for a confirmed user correction. `valid_from` is Unix
+seconds, defaulting to the server clock when omitted or null. If the user did not
+explicitly give an effective date, omit it or use null; do not generate a Unix
+timestamp for “now”. Explicit past/future effective dates remain supported. Event
+time and record creation time are separate from revision validity. Do not add an
+unspecified calendar date or timezone from the current clock or locale to stored
+source text. These are tool instructions, not a guarantee against model inference.
+Recall supports `as_of` and
+`include_history`. Ordinary queries select currently valid records.
+
+Native write mirroring cannot propagate `replace` or `remove` from substrings to
+external IDs and now refuses those operations instead of recapturing deleted text.
+Do not operate it as two independent authorities. Keep native session search and
+skills separately; a native-only curated memory can be preferable for small sets.
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.
+
+For source-session granularity, opaque relearning receipts and legacy limits, see
+[source replay protection](../../../docs/forgetting-sources.md).
+
+The provider skips the pinned Hermes empty/failed-transcription prefixes instead
+of saving them as user facts. Written text after the prefix remains eligible for
+capture. This does not restore audio provenance from successful plain quoted
+transcripts or prove raw speech recognition quality. See the
+[behavioral evidence](../../../docs/model-acceptance-2026-09-10.md).
+
+### Optional gateway audio evidence (host candidate)
+
+[Hermes draft PR #107369](https://github.com/NousResearch/hermes-agent/pull/107369)
+adds `display_metadata.audio_transcriptions`; it is not in the pinned v2026.9.7
+stable release. When supplied, the adapter captures successful clips separately
+as received, derived audio text, retaining the original clip message ID and
+available reference. A transcript must also occur in the actual message text;
+failed, empty or detached metadata is not promoted to a fact. Typed captions
+remain separate text. Signed URL query/fragment components are discarded.
+
+Without these fields, existing stable text capture continues; a plain quotation
+cannot prove its audio origin. Unknown confidence stays unknown. This does not
+backfill old sources, decode audio, or establish outgoing attachment delivery.
+The candidate provider/API/DB and forgetting checks are recorded in
+[the host follow-up](../../../docs/host-candidate-follow-up-2026-09-10.md).

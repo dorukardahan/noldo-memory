@@ -1,0 +1,14 @@
+{
+  "host": "2026.9.3",
+  "upstream_stable_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "node": "v24.19.0",
+  "script_sha256": "1063387a25688d078286902a6f5ba66ac1333d3203c195bc7f6f458df44931b4",
+  "native_input_file_pdf_text_extraction": true,
+  "native_pdf_visual_fallback_images": 1,
+  "visual_has_no_text_derivative": true,
+  "raw_audio_decoded": false,
+  "ocr_performed": false,
+  "capture_or_answer_test": false,
+  "model_requests": 0,
+  "temporary_profile_removed": true
+}

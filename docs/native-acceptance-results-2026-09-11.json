@@ -1,0 +1,142 @@
+{
+  "historical_extra_physical_requests": 0,
+  "policy": "at most 5 application turns; 120 seconds each; 600 seconds host wall time",
+  "host": "Hermes 0.21.1",
+  "backend": "openai-codex/codex_responses",
+  "candidate": "ac875a79bf490e15bff9d3ba0fda64513cbf02a1",
+  "embedding_mode": "lexical-only, no embedding calls",
+  "application_turns_started": 3,
+  "physical_requests": "unknown",
+  "host_wall_seconds": 62.93726726598106,
+  "turns": [
+    {
+      "number": 1,
+      "session": "synthetic-a",
+      "prompt": "The Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "wall_seconds": 21.43854524497874,
+      "process_exit": 0,
+      "answer": "Noted: Aurora observatory on Friday at 19:30, with a preference for a quiet, non-group visit.",
+      "completed": true,
+      "native_api_calls_counter": 2,
+      "native_usage": {
+        "session_input_tokens": 5510,
+        "session_output_tokens": 193,
+        "session_cache_read_tokens": 0,
+        "session_cache_write_tokens": 0
+      },
+      "tool_names": [
+        "noldomem_store",
+        "noldomem_store"
+      ]
+    },
+    {
+      "number": 2,
+      "session": "synthetic-a",
+      "prompt": "That preference has changed: I now prefer guided group observatory visits. Quiet visits were my earlier preference.",
+      "wall_seconds": 23.26008661603555,
+      "process_exit": 0,
+      "answer": "Updated: you now prefer guided group observatory visits. The quiet, non-group preference is marked as your earlier preference.",
+      "completed": true,
+      "native_api_calls_counter": 3,
+      "native_usage": {
+        "session_input_tokens": 1752,
+        "session_output_tokens": 215,
+        "session_cache_read_tokens": 8576,
+        "session_cache_write_tokens": 0
+      },
+      "tool_names": [
+        "noldomem_store",
+        "noldomem_store",
+        "noldomem_recall",
+        "noldomem_store"
+      ]
+    },
+    {
+      "number": 3,
+      "session": "synthetic-b",
+      "prompt": "For the Aurora observatory visit, what is the booking time, what kind of visit fits me now versus before, and who is the guide?",
+      "wall_seconds": 18.223909131018445,
+      "process_exit": 0,
+      "answer": "Booking: Friday at 19:30.\n\nNow: a guided group visit fits you.\nBefore: you preferred a quiet visit without a group.\nGuide: no guide’s name is recorded.",
+      "completed": true,
+      "native_api_calls_counter": 2,
+      "native_usage": {
+        "session_input_tokens": 5002,
+        "session_output_tokens": 111,
+        "session_cache_read_tokens": 3072,
+        "session_cache_write_tokens": 0
+      },
+      "tool_names": [
+        "noldomem_recall"
+      ]
+    }
+  ],
+  "explicit_revision_records": [
+    {
+      "id": "93450dfd9d954c4b",
+      "text": "The user prefers quiet visits without a group.",
+      "namespace": "user",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": 1789102709.789747,
+      "supersedes": null
+    },
+    {
+      "id": "3f79a8156c044c32",
+      "text": "The user now prefers guided group observatory visits; quiet visits without a group were their earlier preference.",
+      "namespace": "user",
+      "source_session": "synthetic-a",
+      "valid_from": 1789102709.789747,
+      "valid_to": null,
+      "supersedes": "93450dfd9d954c4b"
+    }
+  ],
+  "fresh_session_tool_result_records": [
+    {
+      "id": "85b66131e9ed4867",
+      "namespace": "default",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": null
+    },
+    {
+      "id": "637101b512da4625",
+      "namespace": "default",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": null
+    },
+    {
+      "id": "507a9a6ee1fb4631",
+      "namespace": "default",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": null
+    },
+    {
+      "id": "edc251b8b9ae46b7",
+      "namespace": "default",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": null
+    },
+    {
+      "id": "f18f0d62830f4f05",
+      "namespace": "default",
+      "source_session": "synthetic-a",
+      "valid_from": null,
+      "valid_to": null
+    }
+  ],
+  "date": "2026-09-11",
+  "model": "gpt-5.6-sol",
+  "tool_names_semantics": "Names in returned history; turn 2 includes the two previous store calls. Not physical request counts.",
+  "post_fix_model_free_check": {
+    "adapter_sha256": "8b4611a578103404247758d38498b8b2f60739dcaca96b9383c657281607cd6b",
+    "native_loader_manager_http": true,
+    "recursive_memory_capture_excluded": true,
+    "external_document_result_retained": true,
+    "forgotten_tool_echo_replay_excluded": true,
+    "model_calls": 0
+  }
+}

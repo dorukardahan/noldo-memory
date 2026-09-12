@@ -14,32 +14,19 @@ const VALID_RECALL_MEMORY_TYPES = new Set([
   "other",
 ]);
 
-function resolveAgentId(ctx) {
-  // ctx from OpenClaw tool execution includes sessionKey
-  // Extract agent id from session key pattern "agent:<id>:..."
-  const sk = ctx?.sessionKey || ctx?.agentSessionKey || "";
-  const match = sk.match(/^agent:([^:]+)/);
-  return match ? match[1] : "main";
-}
-
-function resolveRequestedAgent(value, ctx) {
-  if (typeof value !== "string") return resolveAgentId(ctx);
-  const normalized = value.trim();
-  if (!normalized) return resolveAgentId(ctx);
-  if (normalized === "all") return "all";
-  return normalized.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80) || resolveAgentId(ctx);
-}
+import { resolveAgentId } from "./scope.js";
+import { hasSafeRecallMetadata } from "./sanitize.js";
 
 function formatRecallResults(data) {
-  const results = data.results || [];
+  const results = (data.results || []).filter(hasSafeRecallMetadata);
   if (results.length === 0) return "No relevant memories found.";
 
   return results
     .map((r, i) => {
       const type = r.memory_type ? `[${r.memory_type}]` : "";
-      const score = r.score ? ` (${(r.score * 100).toFixed(0)}%)` : "";
+      const score = Number.isFinite(r.score) ? ` (rank score ${r.score.toFixed(4)})` : "";
       const text = (r.text || r.content || "").slice(0, 500);
-      return `${i + 1}. ${type} ${text}${score}`;
+      return `${i + 1}. [id=${r.id} valid_from=${r.valid_from ?? "unknown"} valid_to=${r.valid_to ?? "open"} evidence=${JSON.stringify(r.evidence || {})}] ${type} ${text}${score}`;
     })
     .join("\n");
 }
@@ -54,7 +41,15 @@ function objectSchema(properties, required = []) {
   return {
     type: "object",
     additionalProperties: false,
-    properties,
+    // Strict host transports may require every property to be present. Keep a
+    // real "not supplied" value instead of forcing empty IDs or invented times.
+    properties: Object.fromEntries(Object.entries(properties).map(([name, schema]) => [
+      name, required.includes(name) ? schema : {
+        ...schema,
+        type: [schema.type, "null"],
+        description: `${schema.description} Omit or use null when unspecified.`,
+      },
+    ])),
     ...(required.length ? { required } : {}),
   };
 }
@@ -70,168 +65,223 @@ function numberSchema(description) {
 export function registerTools(api, client, cfg) {
   // ── noldomem_recall ──
   api.registerTool(
-    {
-      name: "noldomem_recall",
-      label: "NoldoMem Recall",
-      description:
-        "Mandatory recall step: search NoldoMem long-term memory before answering questions " +
-        "about prior work, decisions, dates, people, preferences, todos, or anything discussed " +
-        "in previous sessions. Returns top matching memories with relevance scores. " +
-        "Use this proactively — do NOT wait for the user to say 'remember'.",
-      parameters: objectSchema(
-        {
-          query: stringSchema("Natural language search query"),
-          limit: numberSchema("Max results (default: 5)"),
-          memory_type: stringSchema(
-            "Filter by type: fact, preference, rule, conversation, lesson, other"
-          ),
-          namespace: stringSchema("Memory namespace. Omit to search all namespaces."),
-          agent: stringSchema(
-            "Agent scope to search. Defaults to current agent. Use all for cross-agent recall."
-          ),
-        },
-        ["query"]
-      ),
-      async execute(_toolCallId, params, ctx) {
-        const agent = resolveRequestedAgent(params.agent, ctx);
-        try {
-          const body = {
-            query: params.query,
-            limit: params.limit || cfg.recallLimit,
-            agent,
-            max_tokens: cfg.recallMaxTokens,
-          };
-          const namespace =
-            typeof params.namespace === "string" && params.namespace.trim()
-              ? params.namespace.trim()
-              : undefined;
-          const memoryType = normalizeRequestedMemoryType(params.memory_type);
-          if (namespace) body.namespace = namespace;
-          if (memoryType) body.memory_type = memoryType;
-
-          const data = await client.recall(body);
-          const text = formatRecallResults(data);
-          return {
-            content: [{ type: "text", text }],
-            details: {
-              count: (data.results || []).length,
-              search_mode: data.search_mode,
+    (ctx) => {
+      const agent = resolveAgentId(ctx);
+      if (!agent) return null;
+      return {
+        name: "noldomem_recall",
+        label: "NoldoMem Recall",
+        description:
+          "Search your own NoldoMem history when relevant context is missing for questions " +
+          "about prior work, decisions, dates, people, preferences, todos, or anything discussed " +
+          "in previous sessions. Returns top matching memories with relevance scores. " +
+          "Use proactively when needed; do not repeat a search already supplied by automatic recall.",
+        parameters: objectSchema(
+          {
+            query: stringSchema("Natural language search query"),
+            limit: numberSchema("Max results (default: 5)"),
+            include_history: { type: "boolean", description: "Include previous versions." },
+            as_of: numberSchema("Historical validity time as Unix seconds; leave unspecified for current memory."),
+            memory_type: stringSchema(
+              "Filter by type: fact, preference, rule, conversation, lesson, other"
+            ),
+            namespace: stringSchema("Memory namespace. Omit to search all namespaces."),
+          },
+          ["query"]
+        ),
+        async execute(_toolCallId, params) {
+          try {
+            const body = {
+              query: params.query,
+              limit: params.limit || cfg.recallLimit,
               agent,
-              memories: (data.results || []).map((r) => ({
-                id: r.id,
-                text: (r.text || "").slice(0, 300),
-                memory_type: r.memory_type,
-                score: r.score,
-              })),
-            },
-          };
-        } catch (err) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Memory recall failed: ${err.message || err}`,
+              max_tokens: cfg.recallMaxTokens,
+            };
+            for (const key of ["include_history", "as_of"]) {
+              if (params[key] !== undefined && params[key] !== null) body[key] = params[key];
+            }
+            const namespace =
+              typeof params.namespace === "string" && params.namespace.trim()
+                ? params.namespace.trim()
+                : undefined;
+            const memoryType = normalizeRequestedMemoryType(params.memory_type);
+            if (namespace) body.namespace = namespace;
+            if (memoryType) body.memory_type = memoryType;
+
+            const data = await client.recall(body);
+            const text = formatRecallResults(data);
+            return {
+              content: [{ type: "text", text }],
+              details: {
+                count: (data.results || []).length,
+                search_mode: data.search_mode,
+                agent,
+                memories: (data.results || []).map((r) => ({
+                  id: r.id,
+                  text: (r.text || "").slice(0, 300),
+                  memory_type: r.memory_type,
+                  score: r.score,
+                })),
               },
-            ],
-            details: { error: String(err) },
-          };
-        }
-      },
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Memory recall failed: ${err.message || err}`,
+                },
+              ],
+              details: { error: String(err) },
+            };
+          }
+        },
+      };
     },
     { name: "noldomem_recall" }
   );
 
   // ── noldomem_store ──
   api.registerTool(
-    {
-      name: "noldomem_store",
-      label: "NoldoMem Store",
-      description:
-        "Store important information in long-term memory. Use for decisions, " +
-        "preferences, lessons learned, configuration changes, or any fact that " +
-        "should persist across sessions. The system auto-classifies the memory type.",
-      parameters: objectSchema(
-        {
-          content: stringSchema("The information to remember (be specific and concise)"),
-          namespace: stringSchema("Memory namespace (default: default)"),
-          source: stringSchema("Source label (default: agent-tool)"),
+    (ctx) => {
+      const agent = resolveAgentId(ctx);
+      if (!agent) return null;
+      return {
+        name: "noldomem_store",
+        label: "NoldoMem Store",
+        description:
+          "Store important information in long-term memory. Use for decisions, " +
+          "preferences, lessons learned, configuration changes, or any fact that " +
+          "should persist across sessions. For a confirmed user correction, set supersedes " +
+          "to the prior recalled ID. Do not supersede facts using model inference.",
+        parameters: objectSchema(
+          {
+            content: stringSchema("The information supported by the source (be specific and concise). Preserve unspecified calendar dates and timezones; do not fill them in from the current clock, locale, or model inference."),
+            namespace: stringSchema("Memory namespace (default: default)"),
+            source: stringSchema("Source label (default: agent-tool)"),
+            supersedes: stringSchema("Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID."),
+            valid_from: numberSchema("If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time."),
+          },
+          ["content"]
+        ),
+        async execute(_toolCallId, params) {
+          try {
+            const data = await client.store({
+              text: params.content,
+              supersedes: params.supersedes ?? undefined,
+              valid_from: params.valid_from ?? undefined,
+              agent,
+              session_id: ctx.sessionKey || ctx.sessionId,
+              source: params.source || "agent-tool",
+              namespace: params.namespace || cfg.defaultNamespace,
+            });
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Memory stored: "${params.content.slice(0, 100)}${params.content.length > 100 ? "..." : ""}"`,
+                },
+              ],
+              details: data,
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Memory store failed: ${err.message || err}`,
+                },
+              ],
+              details: { error: String(err) },
+            };
+          }
         },
-        ["content"]
-      ),
-      async execute(_toolCallId, params, ctx) {
-        const agent = resolveAgentId(ctx);
-        try {
-          const data = await client.store({
-            text: params.content,
-            agent,
-            source: params.source || "agent-tool",
-            namespace: params.namespace || cfg.defaultNamespace,
-          });
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Memory stored: "${params.content.slice(0, 100)}${params.content.length > 100 ? "..." : ""}"`,
-              },
-            ],
-            details: data,
-          };
-        } catch (err) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Memory store failed: ${err.message || err}`,
-              },
-            ],
-            details: { error: String(err) },
-          };
-        }
-      },
+      };
     },
     { name: "noldomem_store" }
   );
 
   // ── noldomem_pin ──
   api.registerTool(
-    {
-      name: "noldomem_pin",
-      label: "NoldoMem Pin",
-      description:
-        "Pin a critical memory so it survives decay, garbage collection, and consolidation. " +
-        "Use for non-negotiable rules, key credentials info, or architectural decisions.",
-      parameters: objectSchema(
-        {
-          memory_id: stringSchema("The memory ID to pin"),
+    (ctx) => {
+      const agent = resolveAgentId(ctx);
+      if (!agent) return null;
+      return {
+        name: "noldomem_pin",
+        label: "NoldoMem Pin",
+        description:
+          "Pin a critical memory so it survives decay, garbage collection, and consolidation. " +
+          "Use for non-negotiable rules, key credentials info, or architectural decisions.",
+        parameters: objectSchema(
+          {
+            memory_id: stringSchema("The memory ID to pin"),
+          },
+          ["memory_id"]
+        ),
+        async execute(_toolCallId, params) {
+          try {
+            const data = await client.pin({
+              id: params.memory_id,
+              agent,
+            });
+            return {
+              content: [
+                { type: "text", text: `Pinned memory ${params.memory_id}.` },
+              ],
+              details: data,
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Pin failed: ${err.message || err}`,
+                },
+              ],
+              details: { error: String(err) },
+            };
+          }
         },
-        ["memory_id"]
-      ),
-      async execute(_toolCallId, params, ctx) {
-        const agent = resolveAgentId(ctx);
-        try {
-          const data = await client.pin({
-            id: params.memory_id,
-            agent,
-          });
-          return {
-            content: [
-              { type: "text", text: `Pinned memory ${params.memory_id}.` },
-            ],
-            details: data,
-          };
-        } catch (err) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Pin failed: ${err.message || err}`,
-              },
-            ],
-            details: { error: String(err) },
-          };
-        }
-      },
+      };
     },
     { name: "noldomem_pin" }
   );
+  api.registerTool((ctx) => {
+    const agent = resolveAgentId(ctx);
+    if (!agent) return null;
+    return {
+      name: "noldomem_forget",
+      label: "NoldoMem Forget",
+      description: "On an explicit user forgetting request, delete the selected memory and its connected previous versions from NoldoMem. Further ingestion from identified source sessions is blocked until explicit relearning. Original transcripts and other stores are separate.",
+      parameters: objectSchema({ memory_id: stringSchema("ID of the memory to forget, including its revision family.") }, ["memory_id"]),
+      async execute(_toolCallId, params) {
+        try {
+          const data = await client.forget({ id: params.memory_id, agent });
+          return { content: [{ type: "text", text: data.deleted ? `Memory and its revision history forgotten. Relearning source keys: ${JSON.stringify(data.source_keys || [])}. Records without replay protection: ${data.unidentified_records ?? "unknown"}.` : "Memory not found." }], details: data };
+        } catch {
+          return { content: [{ type: "text", text: "Memory forgetting failed." }], isError: true };
+        }
+      },
+    };
+  }, { name: "noldomem_forget" });
+
+  api.registerTool((ctx) => {
+    const agent = resolveAgentId(ctx);
+    if (!agent) return null;
+    return {
+      name: "noldomem_relearn_source",
+      label: "NoldoMem Relearn Source",
+      description: "Only on an explicit user request to learn again from a forgotten source session, unblock that exact session. Never use automatically after a rejected capture. Does not restore deleted content.",
+      parameters: objectSchema({ session_id: stringSchema("Exact original source session ID, or provide source_key."), source_key: stringSchema("Opaque source key from the forgetting receipt. Provide this OR session_id, not both.") }),
+      async execute(_toolCallId, params) {
+        try {
+          const data = await client.relearnSource({ agent, session_id: params.session_id ?? undefined, source_key: params.source_key ?? undefined, confirm: true });
+          return { content: [{ type: "text", text: data.cleared ? "Source unblocked for future ingestion. Deleted content was not restored." : "No source block found." }], details: data };
+        } catch {
+          return { content: [{ type: "text", text: "Source relearning authorization failed." }], isError: true };
+        }
+      },
+    };
+  }, { name: "noldomem_relearn_source" });
+
 }

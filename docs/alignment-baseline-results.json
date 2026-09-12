@@ -1,0 +1,144 @@
+{
+  "model_label": "bge-m3-Q8_0.gguf",
+  "embedding_snapshot_count": 20,
+  "live_embedding_measurement": {
+    "n": 20,
+    "median_ms": 284.512
+  },
+  "volume_stress_offline": [
+    {
+      "rows": 1000,
+      "distribution": "identical text/vector stress",
+      "n": 30,
+      "median_ms": 3.463
+    },
+    {
+      "rows": 10000,
+      "distribution": "identical text/vector stress",
+      "n": 30,
+      "median_ms": 23.08
+    }
+  ],
+  "stored_rows": 8,
+  "cases": [
+    {
+      "case": "preference",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.5874,
+      "context_chars": 466,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "image",
+      "expected_retrieved": false,
+      "distinct_evidence_preserved": false,
+      "top_semantic": 0.5028,
+      "context_chars": 478,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "audio",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.6064,
+      "context_chars": 467,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "document",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.5689,
+      "context_chars": 456,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "link",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.6177,
+      "context_chars": 478,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "outgoing",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.5698,
+      "context_chars": 478,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "typo",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.5802,
+      "context_chars": 464,
+      "cross_agent_leak": false
+    },
+    {
+      "case": "decision",
+      "expected_retrieved": true,
+      "distinct_evidence_preserved": true,
+      "top_semantic": 0.5492,
+      "context_chars": 478,
+      "cross_agent_leak": false
+    }
+  ],
+  "unrelated": [
+    {
+      "query": "How do I bake sourdough bread",
+      "count": 5,
+      "max_semantic": 0.4139
+    },
+    {
+      "query": "Explain hexadecimal arithmetic",
+      "count": 5,
+      "max_semantic": 0.4483
+    },
+    {
+      "query": "What causes ocean tides",
+      "count": 5,
+      "max_semantic": 0.4158
+    },
+    {
+      "query": "Translate good morning into Italian",
+      "count": 5,
+      "max_semantic": 0.4575
+    }
+  ],
+  "retrieval_cold_offline": {
+    "n": 100,
+    "median_ms": 1.322,
+    "sample_p95_ms": 1.619
+  },
+  "retrieval_warm_offline": {
+    "n": 100,
+    "median_ms": 0.057,
+    "sample_p95_ms": 0.073
+  },
+  "timing_replay_embedding_calls": 160,
+  "native_curated_input_chars": 739,
+  "admission_calibration_same_small_dataset": [
+    {
+      "min_semantic_score": 0.45,
+      "related_expected_admitted": 7,
+      "unrelated_queries_with_context": 1,
+      "related_context_chars": 3581
+    },
+    {
+      "min_semantic_score": 0.5,
+      "related_expected_admitted": 7,
+      "unrelated_queries_with_context": 0,
+      "related_context_chars": 2461
+    },
+    {
+      "min_semantic_score": 0.55,
+      "related_expected_admitted": 6,
+      "unrelated_queries_with_context": 0,
+      "related_context_chars": 1226
+    }
+  ],
+  "generated_answer_accuracy": "not measured"
+}

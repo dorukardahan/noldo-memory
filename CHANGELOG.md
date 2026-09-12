@@ -6,6 +6,40 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking Python helper transition (next major release)
+- Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
+
+### Fixed
+- Clarify both host tool contracts: undated corrections must omit/null the validity time, and stored event dates/timezones must come from the source. Hermes explicitly admits null validity. Preserve explicit past/future revisions; this is not a claim that the previous model timestamp/grounding failures are resolved.
+- Provide explicit null values for optional OpenClaw tool arguments, preserving omitted-field API defaults and rejection of invalid revisions and cross-agent writes. This fixes the observed empty-ID new-store failure; it does not validate model-selected timestamps.
+- Exclude Hermes NoldoMem tool results from turn capture, preventing recursive copies of recalled or forgotten memory while retaining external tool derivatives. Existing transcript quotations and legacy copies are not retroactively rewritten.
+- Consume optional structured audio evidence from Hermes draft PR #107369 as derived per-clip records, preserving typed captions and original identities without changing old stable behavior. This host field is not yet released.
+- Preserve available Hermes native row event IDs and timestamps; add an explicit OpenClaw Gateway preprocessing capture mode using existing host derivatives, with conversation-access enforcement and one inbound writer. Successful document wrappers retain derived trust; failed/path-only file markers are not treated as contents.
+- Exclude Hermes' reserved empty/failed voice transcription prefixes from capture while preserving accompanying written text and ordinary quotations; successful transcript provenance remains unavailable on the pinned stable host.
+- Prevent forgotten source sessions from reappearing through capture/store/import; retain only an agent-local source digest and support explicit relearning via API and both host tools. Link new derived graph data to its memory and fence deletion caches. See `docs/forgetting-sources.md` for session granularity, migration/recovery and legacy limits.
+- Preserve supplied media modality, representation, observation time and confidence in Hermes automatic context; bound labels and omit absent legacy fields.
+- Reject degraded keyword/graph-text candidates supported only by stopwords or pronoun substrings, preserving grounded graph links and Turkish inflection matching.
+- Exclude OpenClaw's empty-audio failure placeholder from capture while retaining separately supplied user text and successful media sections.
+- Document OpenClaw 2026.9.3's required conversation-access grant for native capture hooks; verify the candidate with the installed native loader and hook runner in an isolated profile.
+- Use one validity timestamp per search, keep explicit as-of queries independent from ingestion-date phrases, and screen recalled metadata before OpenClaw prompt formatting.
+- Exclude scheduled future revisions from ordinary history recall while retaining them for explicit forgetting; capture long messages within the existing text bound.
+- Treat an absent embedder as degraded; atomically import only linear revision families, preserve retained child boundaries and reject detaching/reparenting existing revisions.
+- Keep recall degradation status local to each request; preserve rule evidence and include historical text in query-based forgetting.
+- Declare forgetting in the OpenClaw tool manifest; validate partial-import lineage against retained rows.
+- Reinforce only results admitted to recall output, and prevent degraded searches from becoming semantic cache hits.
+- Bind OpenClaw tools and lifecycle capture to trusted agent context; reject missing scope and model-supplied cross-agent overrides.
+- Preserve distinct statements and provenance instead of merging by vector similarity; deduplicate exact retries without growing text.
+- Invalidate in-flight and cached recall after writes, and disable Hermes provider-local caching by default.
+- Scope reranker score caches by agent and document content; retain explicit revision families during decay archival.
+- Apply historical-query inference consistently to the existing administrative recall endpoint.
+- Keep filtered vector fallback on the same L2 metric as the existing sqlite-vec index.
+
+### Added
+- Explicit memory revisions with validity intervals, historical recall, revision-family forgetting and export/import evidence preservation.
+- Bounded media-derivative evidence metadata, current-turn capture and delivery-aware outgoing OpenClaw text capture.
+- Optional model-calibrated automatic recall admission, synthetic regression/replay tools and dated native/platform comparison.
+
+
 ## [1.27.16] - 2026-07-23
 
 ### Fixed
