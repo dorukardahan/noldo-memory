@@ -117,6 +117,37 @@ valid at their narrower scope. No plugin/core monkey-patch or new Gateway was
 introduced to turn this absence into an apparent pass, and it is not evidence
 that production Gateway hooks or Hermes memory are broken.
 
+### Model-free follow-up: registry activation
+
+A fresh, credential-free fixture on the same installed host compared two native
+loading paths with the same candidate and explicit hook grants. Native
+`resolvePluginTools` returned all five tools while `getGlobalHookRunner()` remained
+null. Calling the normal `loadOpenClawPlugins` with activation enabled then made
+both `before_prompt_build` and `agent_end` available. The
+[result](openclaw-hook-activation-2026-09-12.json) and
+[reproducer](../scripts/check_openclaw_hook_activation.mjs) record this comparison.
+No hook callback, HTTP request or model was invoked; the fixture was removed.
+This adds no model-budget consumption and is not a new full native acceptance pass.
+
+At stable `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`,
+[`resolvePluginToolLoadState` in `src/plugins/tools.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/plugins/tools.ts)
+builds tool discovery with `activate: false`.
+[`activatePluginRegistry` in `loader-shared.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/plugins/loader-shared.ts)
+initializes the global hook runner. Harness prompt/agent-end helpers consult that
+runner. NoldoMem already declares `activation.onStartup: true`;
+[`shouldConsiderForGatewayStartup`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/plugins/gateway-startup-plugin-config.ts)
+uses that flag for Gateway startup selection, not as a request to activate every
+standalone tool-discovery registry.
+
+This demonstrates a host lifecycle boundary consistent with the missing automatic
+requests in the CLI trace, rather than a missing NoldoMem enable flag or an
+inability to register its hooks. It does not prove the complete CLI invocation's
+registry state at every phase, or that all official entry points lack activation.
+No redundant manifest field, manual global-registry initialization in NoldoMem,
+core patch or additional host contribution was introduced. Full automatic native
+dispatch remains open; the successful activated-loader control is not substituted
+for it. The previous model budget remains exhausted at five application turns.
+
 ## Original acceptance mapping and remaining work
 
 | Criterion | Effect of this evidence |
