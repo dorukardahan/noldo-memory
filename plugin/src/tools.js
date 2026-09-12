@@ -41,7 +41,15 @@ function objectSchema(properties, required = []) {
   return {
     type: "object",
     additionalProperties: false,
-    properties,
+    // Strict host transports may require every property to be present. Keep a
+    // real "not supplied" value instead of forcing empty IDs or invented times.
+    properties: Object.fromEntries(Object.entries(properties).map(([name, schema]) => [
+      name, required.includes(name) ? schema : {
+        ...schema,
+        type: [schema.type, "null"],
+        description: `${schema.description} Omit or use null when unspecified.`,
+      },
+    ])),
     ...(required.length ? { required } : {}),
   };
 }
@@ -73,7 +81,7 @@ export function registerTools(api, client, cfg) {
             query: stringSchema("Natural language search query"),
             limit: numberSchema("Max results (default: 5)"),
             include_history: { type: "boolean", description: "Include previous versions." },
-            as_of: numberSchema("Validity time as Unix seconds."),
+            as_of: numberSchema("Historical validity time as Unix seconds; leave unspecified for current memory."),
             memory_type: stringSchema(
               "Filter by type: fact, preference, rule, conversation, lesson, other"
             ),
@@ -90,7 +98,7 @@ export function registerTools(api, client, cfg) {
               max_tokens: cfg.recallMaxTokens,
             };
             for (const key of ["include_history", "as_of"]) {
-              if (params[key] !== undefined) body[key] = params[key];
+              if (params[key] !== undefined && params[key] !== null) body[key] = params[key];
             }
             const namespace =
               typeof params.namespace === "string" && params.namespace.trim()
@@ -151,8 +159,8 @@ export function registerTools(api, client, cfg) {
             content: stringSchema("The information to remember (be specific and concise)"),
             namespace: stringSchema("Memory namespace (default: default)"),
             source: stringSchema("Source label (default: agent-tool)"),
-            supersedes: stringSchema("ID of the prior assertion being explicitly corrected."),
-            valid_from: numberSchema("Validity start as Unix seconds; omitted means now."),
+            supersedes: stringSchema("Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID."),
+            valid_from: numberSchema("User-specified validity start as Unix seconds; unspecified means now. An event's scheduled time is not when the assertion became valid."),
           },
           ["content"]
         ),
@@ -160,8 +168,8 @@ export function registerTools(api, client, cfg) {
           try {
             const data = await client.store({
               text: params.content,
-              supersedes: params.supersedes,
-              valid_from: params.valid_from,
+              supersedes: params.supersedes ?? undefined,
+              valid_from: params.valid_from ?? undefined,
               agent,
               session_id: ctx.sessionKey || ctx.sessionId,
               source: params.source || "agent-tool",
@@ -267,7 +275,7 @@ export function registerTools(api, client, cfg) {
       parameters: objectSchema({ session_id: stringSchema("Exact original source session ID, or provide source_key."), source_key: stringSchema("Opaque source key from the forgetting receipt. Provide this OR session_id, not both.") }),
       async execute(_toolCallId, params) {
         try {
-          const data = await client.relearnSource({ agent, session_id: params.session_id, source_key: params.source_key, confirm: true });
+          const data = await client.relearnSource({ agent, session_id: params.session_id ?? undefined, source_key: params.source_key ?? undefined, confirm: true });
           return { content: [{ type: "text", text: data.cleared ? "Source unblocked for future ingestion. Deleted content was not restored." : "No source block found." }], details: data };
         } catch {
           return { content: [{ type: "text", text: "Source relearning authorization failed." }], isError: true };

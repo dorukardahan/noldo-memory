@@ -1,5 +1,10 @@
 # Native acceptance, 2026-09-11
 
+Update: the subsequent [OpenClaw native run and schema correction](openclaw-native-acceptance-2026-09-12.md)
+used separately provisioned temporary access. The auth prerequisite below is
+historical; all five OpenClaw application turns have now been used. Its unresolved
+temporal and answer-grounding results do not change the Hermes evidence here.
+
 Three real Hermes application turns completed through `AIAgent.run_conversation`,
 native `openai-codex` / `codex_responses`, NoldoMem tools, and a temporary HTTP API
 with its own SQLite database. The model was `gpt-5.6-sol`; candidate code was

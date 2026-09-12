@@ -32,6 +32,50 @@ assert.equal(factories[0]({}), null, 'missing identity must not fall back to ano
 ''')
 
 
+def test_openclaw_optional_arguments_accept_null_without_fabricating_revision_or_time():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import { registerTools } from './plugin/src/tools.js';
+const factories = [], requests = [];
+const client = Object.fromEntries(['store', 'recall', 'relearnSource'].map(name => [name,
+  async body => { requests.push([name, JSON.parse(JSON.stringify(body))]); return {results: []}; },
+]));
+registerTools({registerTool(factory) { factories.push(factory); }}, client,
+  {defaultNamespace: 'default', recallLimit: 5, recallMaxTokens: 500});
+const tools = factories.map(factory => factory({agentId: 'alpha', sessionKey: 'agent:alpha:a'}));
+for (const tool of tools) {
+  for (const [name, schema] of Object.entries(tool.parameters.properties)) {
+    const required = (tool.parameters.required || []).includes(name);
+    assert.equal(Array.isArray(schema.type) && schema.type.includes('null'), !required,
+      `${tool.name}.${name}: only optional arguments admit null`);
+  }
+}
+const store = tools.find(tool => tool.name === 'noldomem_store');
+const input = {content: 'Aurora visits are quiet.', namespace: null, source: null,
+  supersedes: null, valid_from: null};
+await store.execute('new', input);
+await store.execute('omitted', {content: input.content});
+assert.deepEqual(requests[0], requests[1], 'null must preserve omitted-field semantics');
+assert.equal(requests[0][1].agent, 'alpha');
+assert.equal(requests[0][1].session_id, 'agent:alpha:a');
+await store.execute('revision', {...input, supersedes: 'old-id', valid_from: 1234});
+assert.equal(requests[2][1].supersedes, 'old-id');
+assert.equal(requests[2][1].valid_from, 1234);
+await store.execute('invalid', {...input, supersedes: ''});
+assert.equal(requests[3][1].supersedes, '', 'invalid IDs must still reach API validation');
+const recall = tools.find(tool => tool.name === 'noldomem_recall');
+await recall.execute('current', {query: 'Aurora', limit: null, include_history: null,
+  as_of: null, memory_type: null, namespace: null});
+assert.deepEqual(requests[4][1], {query: 'Aurora', limit: 5, agent: 'alpha', max_tokens: 500});
+await recall.execute('old', {query: 'Aurora', include_history: false, as_of: 0});
+assert.equal(requests[5][1].include_history, false);
+assert.equal(requests[5][1].as_of, 0, 'valid zero must not be replaced by an absence default');
+const relearn = tools.find(tool => tool.name === 'noldomem_relearn_source');
+await relearn.execute('receipt', {session_id: null, source_key: 'synthetic-receipt'});
+assert.deepEqual(requests[6][1], {agent: 'alpha', source_key: 'synthetic-receipt', confirm: true});
+''')
+
+
 def test_openclaw_implicit_recall_and_latest_turn_capture():
     run_node(r'''
 import assert from 'node:assert/strict';

@@ -1,5 +1,10 @@
 # Existing Gateway isolation boundary, 2026-09-11
 
+Update: separate temporary access was subsequently provisioned outside this test
+run. See the [native execution results](openclaw-native-acceptance-2026-09-12.md).
+The proposed login below was not repeated by the test; its budget is now exhausted.
+The active-Gateway boundary remains distinct from the isolated CLI result.
+
 The installed OpenClaw 2026.9.3 / Node 24.19.0 was rechecked. The official source
 examined is stable commit `1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7`.
 NoldoMem was `a01eff3c51a4249a5b8674251eb46b80686b23a1`, with a clean tree.

@@ -14,6 +14,13 @@ It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
 tool access to that service.
 
+Optional tool arguments accept omission or `null`, including on transports that
+require every argument key. For a new assertion, leave `supersedes` and
+`valid_from` unspecified; use a recalled ID only for a confirmed correction.
+`valid_from` describes when the assertion became valid, not its event's scheduled
+time. Unspecified recall `as_of` selects current memory. Empty/invented revision
+IDs still fail API validation, and required content/identifiers do not accept null.
+
 The plugin is dependency-free and declares `openclaw.extensions`, so a local
 `openclaw plugins install -l ./plugin` uses the current OpenClaw 2026.5.2+
 installer path without an extra npm install step.
