@@ -1,5 +1,10 @@
 # OpenClaw lifecycle and temporal contract follow-up, 2026-09-13
 
+Later evidence: [Gateway application attempts and short-event capture fix](openclaw-gateway-attempts-2026-09-13.md).
+The rehearsal below proves model-free SDK dispatch only; real agent RPC requires
+normal startup and trusted Codex state. Both later application attempts failed
+before model execution, so the model acceptance gaps remain open.
+
 The installed **OpenClaw 2026.9.3 / Node 24.19.0** now has a passing model-free
 Gateway-startup/capture/injection check. Both adapters have clearer source/time
 tool instructions. The previous real model failures remain failures; no model,
