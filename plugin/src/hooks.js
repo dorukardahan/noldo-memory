@@ -58,11 +58,21 @@ function isShortEventFact(text) {
   return english.test(text) || turkish.test(text);
 }
 
+function isQuestionOnly(text) {
+  // Reject recognizable information-seeking questions before length/keyword
+  // admission. Preserve mixed declarative turns and explicit memory requests.
+  const sentences = text.trim().split(/(?<=[.!?？])\s+|\n+/u).filter(Boolean);
+  return sentences.length > 0 && sentences.every(sentence =>
+    /^(?:what|when|where|which|who|whose|why|how|ne|nerede|hangi|kim|kimin|neden|nasıl)\s/iu.test(sentence) &&
+    /[?？]$/u.test(sentence.trim()));
+}
+
 function shouldCapture(text) {
   if (!text || text.length < 15) return false;
   if (looksLikePromptInjection(text)) return false;
   text = boundedCaptureText(text);
   if (SKIP_PATTERNS.some((p) => p.test(text))) return false;
+  if (isQuestionOnly(text)) return false;
   // Capture if explicitly trigger-worthy or moderately long with substance
   return (
     CAPTURE_TRIGGERS.some((p) => p.test(text)) ||

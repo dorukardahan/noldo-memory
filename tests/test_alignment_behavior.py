@@ -162,6 +162,38 @@ assert.equal(stores.length, facts.length, 'questions, guesses, injection, assist
 ''')
 
 
+def test_openclaw_question_only_turns_are_not_captured_as_reported_facts():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const hooks = {}, stores = [];
+registerAutoCapture({on(name, fn) {hooks[name] = fn;}}, {
+  store: async body => {stores.push(body); return {};},
+}, {captureMaxItems: 3, defaultNamespace: 'default'});
+const ctx = {agentId:'alpha',sessionKey:'agent:alpha:questions'};
+for (const text of [
+  'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?',
+  'Which rehearsal room did we agree on for the winter concert, and what time will the organizer arrive?',
+  'What do I prefer? Who is the organizer?',
+  'Hangi rehberi tercih etmiştim ve akşam yapılacak gözlemevi ziyaretinin başlangıç saati neydi?',
+]) {
+  await hooks.agent_end({success:true,messages:[{role:'user',content:text}]}, ctx);
+}
+assert.equal(stores.length, 0, 'length and preference/decision keywords do not turn questions into facts');
+const facts = [
+  'I prefer quiet visits. What time does the observatory open?',
+  'What time does it open? I prefer a guided group for this appointment.',
+  'Remember that I prefer quiet visits, okay?',
+  'For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.',
+];
+for (const text of facts) {
+  await hooks.agent_end({success:true,messages:[{role:'user',content:text}]}, ctx);
+}
+assert.deepEqual(stores.map(s => s.text), facts, 'preserve supplied facts and explicit memory instructions in mixed turns');
+assert(stores.every(s => s.agent === 'alpha' && s.session_id === ctx.sessionKey));
+''')
+
+
 def test_openclaw_native_text_derivatives_keep_lower_trust():
     run_node(r'''
 import assert from 'node:assert/strict';

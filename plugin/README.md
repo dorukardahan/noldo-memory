@@ -102,6 +102,10 @@ text without adding dates or timezones. Recognized question and speculation mark
 exclude statements from this additional short-event rule; it is not general fact
 extraction or a guarantee that every short statement will be captured. Existing
 prompt-injection, role and agent-scope checks still apply.
+Recognized English/Turkish question-only turns are excluded before length and
+keyword admission, even when they mention preferences or decisions. Mixed turns
+that also supply facts and explicit memory requests retain the existing capture
+rules. This bounded check does not classify every possible question form.
 
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official

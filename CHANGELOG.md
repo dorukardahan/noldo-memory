@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
 
 ### Fixed
+- Exclude recognizable English/Turkish question-only turns from OpenClaw automatic fact capture, including long questions and preference/decision keywords. Preserve mixed factual turns and explicit memory requests.
 - Capture short declared event details in the OpenClaw plugin without requiring a remember command or message padding. Preserve source text and scope; the bounded English/Turkish heuristic does not cover every short fact.
 - Clarify both host tool contracts: undated corrections must omit/null the validity time, and stored event dates/timezones must come from the source. Hermes explicitly admits null validity. Preserve explicit past/future revisions; this is not a claim that the previous model timestamp/grounding failures are resolved.
 - Provide explicit null values for optional OpenClaw tool arguments, preserving omitted-field API defaults and rejection of invalid revisions and cross-agent writes. This fixes the observed empty-ID new-store failure; it does not validate model-selected timestamps.

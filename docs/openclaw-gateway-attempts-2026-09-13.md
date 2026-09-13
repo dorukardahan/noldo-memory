@@ -1,6 +1,8 @@
 # OpenClaw Gateway acceptance attempts, 2026-09-13
 
-**No new model acceptance passed.** Two authorized application attempts stopped
+Later evidence: [a separately authorized two-application native run passed the bounded scenario](openclaw-native-gateway-2026-09-13.md). Its budget and results are separate from the failures below.
+
+**At this checkpoint, no new model acceptance passed.** Two authorized application attempts stopped
 before an observed model-input event, using 9.82 seconds in total. A separate
 model-free preflight exposed and verified a fix for short-event capture. The
 [receipt](openclaw-gateway-attempts-2026-09-13.json) records failures as well as the

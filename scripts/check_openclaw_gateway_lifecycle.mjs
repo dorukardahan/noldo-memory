@@ -43,6 +43,12 @@ try {
   assert.deepEqual(await exported('alpha'), []);
   // No plugin callback or hook runner is called directly. These are the same
   // SDK entry points used by the native Codex harness after/before model turns.
+  await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'question'), event: {
+    success: true, messages: [{role: 'user', content:
+      'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?'},
+    {role: 'assistant', content: 'The guide is unknown.'}], durationMs: 1,
+  }});
+  assert.deepEqual(await exported('alpha'), [], 'Question-only completion became a reported fact');
   await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'learning'), event: {
     success: true, messages: [{role: 'user', content: episode},
       {role: 'assistant', content: 'Understood.'}], durationMs: 1,
@@ -64,7 +70,8 @@ try {
     sdk_completion_dispatch: true, captured_id: captured.id,
     capture_source_session: captured.source_session, injected_prompt: built.prompt,
     other_agent_prompt: other.prompt, capture: true, cross_session_injection: true,
-    agent_isolation: true, manual_store_or_recall: false, model_calls: 0,
+    agent_isolation: true, question_only_not_captured: true,
+    manual_store_or_recall: false, model_calls: 0,
     full_model_loop: false,
   }));
 } finally {
