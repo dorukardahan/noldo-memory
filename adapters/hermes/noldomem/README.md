@@ -234,3 +234,14 @@ cannot prove its audio origin. Unknown confidence stays unknown. This does not
 backfill old sources, decode audio, or establish outgoing attachment delivery.
 The candidate provider/API/DB and forgetting checks are recorded in
 [the host follow-up](../../../docs/host-candidate-follow-up-2026-09-10.md).
+
+### Media text versus attachment presence
+
+The pinned stable Cloud adapter’s `[Content of …]:` local text-file wrapper is
+captured as derived document text. Native text-mode image descriptions remain
+derived image text. Binary image/audio/file blocks next to text do not prove
+that text was extracted: it keeps a `text` representation and conservative
+derived trust. No raw attachment is fetched by this adapter. Generated assistant
+text and external tool derivatives are not proof of external delivery. See the
+[media-path follow-up](../../../docs/media-path-follow-up-2026-09-13.md) for the
+verified channel-specific path, source limits and models-free test boundary.

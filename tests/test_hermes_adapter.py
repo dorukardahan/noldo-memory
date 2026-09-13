@@ -1888,6 +1888,32 @@ def test_sync_excludes_memory_tool_echoes_but_keeps_external_observations(
         assert body['messages'][1]['evidence']['assertion'] == 'derived'
 
 
+def test_sync_distinguishes_adjacent_media_text_and_native_document_derivative(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    class Client:
+        def capture(self, body):
+            calls.append(body)
+    provider._client = Client()
+    caption = 'I prefer Friday observatory visits.'
+    for kind in ['image_url', 'input_audio', 'file']:
+        provider.sync_turn(caption, 'Acknowledged.', messages=[{'role': 'user', 'content': [
+            {'type': 'text', 'text': caption}, {'type': kind, 'url': 'https://example.test/attachment'},
+        ]}])
+    assert len(calls) == 3
+    for call in calls:
+        row = call['messages'][0]
+        assert row['text'] == caption
+        assert row['evidence']['representation'] == 'text'
+        assert row['evidence']['assertion'] == 'derived'
+    document = '[Content of plan.txt]:\nThe Aurora roof opens at sunrise.'
+    provider.sync_turn(document, 'Acknowledged.', messages=[{'role': 'user', 'content': document}])
+    evidence = calls[-1]['messages'][0]['evidence']
+    assert evidence['modality'] == 'document'
+    assert evidence['representation'] == 'extracted_text'
+    assert evidence['assertion'] == 'derived'
+
+
 def test_sync_keeps_clip_provenance_separate_from_typed_caption(monkeypatch, tmp_path):
     provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
     calls = []

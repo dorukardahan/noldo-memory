@@ -536,14 +536,19 @@ class NoldoMemProvider(MemoryProvider):
                     # Stable text-only vision enrichment loses its binary block
                     # before reaching MemoryManager. Preserve the lower trust.
                     vision_derivative = content.startswith("[The user sent an image~ Here's what I can see:\n")
-                    has_media = has_media or vision_derivative
+                    # The stable Cloud adapter labels text read from attachments.
+                    # A raw media block next to text alone proves no extraction.
+                    document_derivative = bool(re.search(r"(?:^|\n)\[Content of [^\]\n]+\]:\n\S", content))
+                    known_derivative = vision_derivative or document_derivative
+                    has_media = has_media or known_derivative
                     parts = audio_parts + ([{
                         "role": role, "text": _truncate(content, 4000),
                         "session": body.get("session_id", ""),
                         "evidence": {"role": role, "assertion": "reported" if role == "user" and not has_media else "derived",
                                      "delivery": "received" if role == "user" else "generated",
-                                     "modality": "image" if vision_derivative else ("mixed" if has_media else "text"),
-                                     "representation": "extracted_text" if has_media else "text"},
+                                     "modality": "mixed" if vision_derivative and document_derivative else (
+                                         "image" if vision_derivative else "document" if document_derivative else "text"),
+                                     "representation": "extracted_text" if known_derivative else "text"},
                     }] if content.strip() else [])
                     # Stable Hermes passes these on the actual user row. They
                     # identify/time the event, but do not prove an audio origin.

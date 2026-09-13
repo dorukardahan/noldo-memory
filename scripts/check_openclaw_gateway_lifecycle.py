@@ -14,7 +14,7 @@ import threading
 import time
 
 
-def check(host, node):
+def check(host, node, media_file=False):
     import uvicorn
     import agent_memory.api as api
     from agent_memory.config import Config
@@ -65,6 +65,7 @@ def check(host, node):
             reservation.bind(("127.0.0.1", 0))
             gateway_port = reservation.getsockname()[1]
         config = {
+            "logging": {"file": str(root / "gateway.log")},
             "gateway": {"mode": "local", "bind": "loopback", "port": gateway_port,
                         "auth": {"mode": "none"}, "controlUi": {"enabled": False}},
             "discovery": {"mdns": {"mode": "off"}},
@@ -83,7 +84,8 @@ def check(host, node):
                                      input=json.dumps(config), env=env, text=True, capture_output=True, timeout=60)
             assert patched.returncode == 0, patched.stderr
             proc = subprocess.Popen([str(node), str(repo / "scripts/check_openclaw_gateway_lifecycle.mjs"),
-                                     str(host), str(repo), endpoint, str(gateway_port)],
+                                     str(host), str(repo), endpoint, str(gateway_port),
+                                     *(["--media-file"] if media_file else [])],
                                     env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     start_new_session=True)
             stdout, stderr = proc.communicate(timeout=120)
@@ -116,5 +118,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("host", type=Path)
     parser.add_argument("node", type=Path)
+    parser.add_argument("--media-file", action="store_true")
     args = parser.parse_args()
-    check(args.host, args.node)
+    check(args.host, args.node, args.media_file)

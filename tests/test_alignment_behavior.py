@@ -194,6 +194,47 @@ assert(stores.every(s => s.agent === 'alpha' && s.session_id === ctx.sessionKey)
 ''')
 
 
+def test_openclaw_default_capture_distinguishes_file_text_from_raw_attachments():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const hooks = {}, stores = [];
+registerAutoCapture({on(name, fn) {hooks[name] = fn;}}, {
+  store: async body => {stores.push(body); return {};},
+}, {captureMaxItems: 3, defaultNamespace: 'default'});
+const ctx = {agentId:'alpha',sessionKey:'agent:alpha:media'};
+const caption = 'I prefer the observatory visit on Friday.';
+for (const type of ['image_url', 'input_audio', 'file']) {
+  await hooks.agent_end({success:true,messages:[{role:'user',content:[
+    {type:'text',text:caption},{type,url:'https://example.test/attachment'},
+  ]}]}, ctx);
+}
+assert.equal(stores.length, 3);
+assert(stores.every(s => s.text === caption && s.evidence.representation === 'text'));
+assert(stores.every(s => s.evidence.assertion === 'derived'), 'do not promote uncertain composite text');
+const extracted = 'The Aurora roof opens at sunrise.';
+const envelope = `<file name="plan.txt" mime="text/plain">\n<<<EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>\nSource: External\n---\n${extracted}\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>\n</file>`;
+await hooks.agent_end({success:true,messages:[{role:'user',content:envelope}]}, ctx);
+assert.equal(stores.at(-1).text, extracted);
+assert.equal(stores.at(-1).evidence.modality, 'document');
+assert.equal(stores.at(-1).evidence.representation, 'extracted_text');
+assert.equal(stores.at(-1).evidence.assertion, 'derived');
+// Actual stable formatter leaves a blank line before the untrusted envelope.
+const nativeEnvelope = '<media:document>\n\n' + envelope.replace('>\n<<<', '>\n\n<<<');
+const beforeNative = stores.length;
+await hooks.agent_end({success:true,messages:[{role:'user',content:nativeEnvelope}]}, ctx);
+assert.equal(stores.length, beforeNative + 1);
+assert.equal(stores.at(-1).text, extracted);
+assert.equal(stores.at(-1).evidence.representation, 'extracted_text');
+const count = stores.length;
+for (const marker of ['[PDF content rendered to images]', '[Attachment could not be read]', '[No extractable text]']) {
+  await hooks.agent_end({success:true,messages:[{role:'user',content:`<media:document>\n\n<file name="plan.pdf">\n${marker}\n</file>`}]}, ctx);
+}
+await hooks.agent_end({success:true,messages:[{role:'user',content:[{type:'image_url',url:'https://example.test/attachment'}]}]}, ctx);
+assert.equal(stores.length, count, 'file presence, rendered pixels and read failure are not extracted facts');
+''')
+
+
 def test_openclaw_native_text_derivatives_keep_lower_trust():
     run_node(r'''
 import assert from 'node:assert/strict';

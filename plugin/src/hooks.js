@@ -298,16 +298,17 @@ export function registerAutoCapture(api, client, cfg) {
       const messages = Array.isArray(event.messages) ? event.messages : [];
       const latestUser = messages.findLastIndex((message) => message?.role === "user");
       const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
-        .map(omitEmptyAudioPlaceholder);
+        .map(text => preprocessedFileText(omitEmptyAudioPlaceholder(text)));
       const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
       const media = Array.isArray(blocks) && blocks.some((block) =>
         ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
-      const candidates = texts.filter((text) => shouldCapture(text) ||
-        ((media || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
+      const candidates = texts.filter(({text, extracted}) => shouldCapture(text) ||
+        ((media || extracted || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
 
-      for (const text of candidates) {
-        const derivativeKind = nativeMediaKind(text);
-        const derived = media || derivativeKind !== null;
+      for (const {text, extracted} of candidates) {
+        const kinds = new Set([nativeMediaKind(text), extracted ? "document" : null].filter(Boolean));
+        const derivativeKind = kinds.size > 1 ? "mixed" : [...kinds][0];
+        const derived = media || Boolean(derivativeKind);
         try {
           await client.store({
             text: boundedCaptureText(text),
@@ -315,7 +316,8 @@ export function registerAutoCapture(api, client, cfg) {
             source: "plugin-auto-capture",
             session_id: ctx.sessionKey || ctx.sessionId,
             evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
-              modality: derivativeKind || (media ? "mixed" : "text"), representation: derived ? "extracted_text" : "text" },
+              // Binary presence does not prove the adjacent text came from it.
+              modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text" },
             namespace: cfg.defaultNamespace,
           });
         } catch (err) {
@@ -407,13 +409,13 @@ function preprocessedFileText(body) {
     (_block, content) => {
       // Only successful extraction has the host's matching untrusted envelope.
       // Failure/path-only/rendered-image markers are not document contents.
-      const match = content.match(/^<<<EXTERNAL_UNTRUSTED_CONTENT id="([a-f0-9]{16})">>>\nSource: [^\n]+\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>$/u);
+      const match = content.trim().match(/^<<<EXTERNAL_UNTRUSTED_CONTENT id="([a-f0-9]{16})">>>\nSource: [^\n]+\n---\n([\s\S]*)\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="\1">>>$/u);
       if (!match) return "";
       extracted = true;
       // Remove random wrapper IDs for stable deduplication, not the trust boundary:
       // the extracted text is still screened, stored as derived and injected untrusted.
       return match[2];
-    }).trim();
+    }).replace(/(?:^|\n)<media:document>(?=\n|$)/gu, "").trim();
   return { text, extracted };
 }
 

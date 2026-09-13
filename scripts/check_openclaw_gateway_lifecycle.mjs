@@ -8,6 +8,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {pathToFileURL} from 'node:url';
 const [host, candidate, endpoint, portText] = process.argv.slice(2);
+const mediaFile = process.argv.includes('--media-file');
 assert(host && candidate && endpoint && portText);
 assert.equal(new URL(endpoint).hostname, '127.0.0.1');
 assert(process.env.OPENCLAW_STATE_DIR?.startsWith(process.env.HOME + path.sep));
@@ -35,27 +36,48 @@ const gateway = await start(Number(portText), {bind: 'loopback', auth: {mode: 'n
 try {
   assert(sdk.getAgentHarnessHookRunner()?.hasHooks('agent_end'));
   assert(sdk.getAgentHarnessHookRunner()?.hasHooks('before_prompt_build'));
-  const episode = 'For the Aurora observatory visit, I prefer quiet visits without a group.';
-  const query = 'Plan the Aurora observatory visit around my preference.';
+  const episode = mediaFile ? 'The Aurora observatory roof opens at sunrise.' :
+    'For the Aurora observatory visit, I prefer quiet visits without a group.';
+  const query = mediaFile ? 'When does the Aurora observatory roof open?' :
+    'Plan the Aurora observatory visit around my preference.';
+  let completionText = episode;
+  if (mediaFile) {
+    const file = path.join(process.env.HOME, 'synthetic-plan.txt');
+    fs.writeFileSync(file, episode);
+    const apply = await native('', 'applyMediaUnderstanding');
+    const inbound = {Body: '<media:document>', media: [{path: file, contentType: 'text/plain'}]};
+    const result = await apply({ctx: inbound, workspaceDir: process.env.HOME,
+      cfg: {tools: {media: {image: {enabled: false}, audio: {enabled: false}, video: {enabled: false}}}},
+      selfServeLocalPaths: true});
+    assert(result.appliedFile, 'Native file processing did not run');
+    assert(inbound.Body.includes(episode));
+    assert(inbound.Body.includes('<file '), 'Native file envelope absent');
+    completionText = inbound.Body;
+  }
   const ctx = (agent, session) => ({agentId: agent, sessionKey: `agent:${agent}:${session}`,
     sessionId: session, workspaceDir: process.env.HOME, trigger: 'user'});
   const exported = async agent => (await fetch(`${endpoint}/v1/export?agent=${agent}`)).json();
   assert.deepEqual(await exported('alpha'), []);
   // No plugin callback or hook runner is called directly. These are the same
   // SDK entry points used by the native Codex harness after/before model turns.
-  await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'question'), event: {
+  if (!mediaFile) await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'question'), event: {
     success: true, messages: [{role: 'user', content:
       'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?'},
     {role: 'assistant', content: 'The guide is unknown.'}], durationMs: 1,
   }});
   assert.deepEqual(await exported('alpha'), [], 'Question-only completion became a reported fact');
   await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'learning'), event: {
-    success: true, messages: [{role: 'user', content: episode},
+    success: true, messages: [{role: 'user', content: completionText},
       {role: 'assistant', content: 'Understood.'}], durationMs: 1,
   }});
   const rows = await exported('alpha');
   const captured = rows.find(r => r.text === episode);
-  assert(captured, 'Gateway-activated agent_end did not capture the synthetic event');
+  assert(captured, 'Gateway-activated capture mismatch: ' + JSON.stringify({completionText, rows}));
+  if (mediaFile) {
+    assert.equal(captured.evidence.assertion, 'derived');
+    assert.equal(captured.evidence.modality, 'document');
+    assert.equal(captured.evidence.representation, 'extracted_text');
+  }
   const built = await sdk.resolveAgentHarnessBeforePromptBuildResult({ctx: ctx('alpha', 'later'),
     prompt: query, developerInstructions: 'Synthetic lifecycle fixture.', messages: []});
   assert(built.prompt.includes(episode), 'Automatic cross-session injection absent');
@@ -70,7 +92,10 @@ try {
     sdk_completion_dispatch: true, captured_id: captured.id,
     capture_source_session: captured.source_session, injected_prompt: built.prompt,
     other_agent_prompt: other.prompt, capture: true, cross_session_injection: true,
-    agent_isolation: true, question_only_not_captured: true,
+    agent_isolation: true,
+    ...(mediaFile ? {native_local_file_processing: true, derived_document_preserved: true,
+      utility_preprocessing_path: true, raw_image_or_audio_decoded: false} :
+      {question_only_not_captured: true}),
     manual_store_or_recall: false, model_calls: 0,
     full_model_loop: false,
   }));

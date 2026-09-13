@@ -118,12 +118,17 @@ contents into instructions. Unlabelled prepared text stays `derived` because the
 host may have appended link-understanding output. A typed caption is not labelled
 as image extraction. Missing, pending and multi-file references are not guessed.
 
-The default `autoCaptureSource: "agent_end"` preserves existing behavior, including
-CLI turns. The `preprocessed` mode does not cover CLI-only ingress; choose the
+The default `autoCaptureSource: "agent_end"` includes CLI turns. It now also
+normalizes successful native file envelopes, including the stable formatter’s
+blank line, and drops failed/path-only file notices. Both capture modes keep
+extracted content derived and untrusted. A raw image/audio/file block next to
+text is not extraction evidence: that text retains a `text` representation and
+conservative derived trust. The `preprocessed` mode does not cover CLI-only ingress; choose the
 capture surface for the profile deliberately. `message_sent` still observes
 confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
 provider call or background join cache is introduced. See the
-[verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md).
+[verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md) and
+[media-path follow-up](../docs/media-path-follow-up-2026-09-13.md).
 
 The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
 the same typed plugin capture/injection events can duplicate storage, retrieval

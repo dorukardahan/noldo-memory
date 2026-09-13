@@ -1,5 +1,8 @@
 # Remaining host evidence boundaries, 2026-09-10
 
+Later media evidence: [local file-to-memory follow-up on September 13](media-path-follow-up-2026-09-13.md).
+The later native preprocessing run supersedes the handcrafted file-envelope limitation below.
+
 Later evidence: [native acceptance on September 11](native-acceptance-2026-09-11.md).
 The preflight/request-limit observations below are historical; the old unused
 0/10 allowance was superseded by bounded application turns.

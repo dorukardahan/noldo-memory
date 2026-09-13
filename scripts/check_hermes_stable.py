@@ -53,7 +53,52 @@ def check_memory_echo(manager, endpoint, repo):
                       'model_calls': 0}))
 
 
-def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_only=False):
+def check_media_text(manager, endpoint, profile):
+    """Native local-file enrichment and row/manager path; no media model or send."""
+    import httpx
+    from types import SimpleNamespace
+    from gateway.platforms.whatsapp_cloud import WhatsAppCloudAdapter
+    from gateway.run import _build_document_context_note
+    from agent.turn_context import _stage_turn_user_message
+
+    text = 'The Aurora observatory roof opens at sunrise.'
+    document = profile / 'synthetic-plan.txt'
+    document.write_text(text)
+    enriched = WhatsAppCloudAdapter._inject_document_text([str(document)], '')
+    assert text in enriched
+    body = _build_document_context_note(document.name, document.name, 'text/plain') + '\n\n' + enriched
+    row, _ = _stage_turn_user_message(SimpleNamespace(), body, None, 1700000123.456,
+                                     'synthetic-document-1', None, None)
+    manager.sync_all(body, 'Acknowledged.', session_id='session-a', messages=[row])
+    assert manager.flush_pending(timeout=5)
+    rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+    record = next(r for r in rows if text in r['text'])
+    assert record['evidence']['modality'] == 'document'
+    assert record['evidence']['representation'] == 'extracted_text'
+    assert record['evidence']['assertion'] == 'derived'
+    assert record['evidence']['event_id'] == 'synthetic-document-1'
+    manager.on_session_switch('session-b')
+    assert text in manager.prefetch_all('When does the Aurora observatory roof open?', session_id='session-b')
+    caption = 'I prefer quiet observatory visits.'
+    raw = [{'type': 'text', 'text': caption},
+           {'type': 'image_url', 'image_url': {'url': 'https://example.test/not-fetched.png'}}]
+    row, _ = _stage_turn_user_message(SimpleNamespace(), raw, None, 1700000124.456,
+                                     'synthetic-image-1', None, None)
+    manager.sync_all(caption, 'Acknowledged.', session_id='session-b', messages=[row])
+    assert manager.flush_pending(timeout=5)
+    rows = httpx.get(endpoint + '/v1/export', params={'agent': 'alpha'}).json()
+    caption_row = next(r for r in rows if r['text'] == caption)
+    assert caption_row['evidence']['representation'] == 'text'
+    assert caption_row['evidence']['assertion'] == 'derived'
+    assert httpx.get(endpoint + '/v1/export', params={'agent': 'beta'}).json() == []
+    print(json.dumps({'native_cloud_text_file_read': True, 'native_row_builder': True,
+                      'native_manager_api_capture': True, 'document_derived_evidence': True,
+                      'cross_session_document_injection': True, 'adjacent_text_not_extraction': True,
+                      'other_agent_export_empty': True, 'raw_image_decoded': False,
+                      'model_calls': 0, 'channel_send': False}))
+
+
+def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_only=False, media_text_only=False):
     sys.path[:0] = [str(host), str(repo)]
     import uvicorn
     import httpx
@@ -104,6 +149,9 @@ def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_o
         provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
         manager.add_provider(provider)
         manager.initialize_all('session-a')
+        if media_text_only:
+            check_media_text(manager, endpoint, profile)
+            return
         if memory_echo_only:
             check_memory_echo(manager, endpoint, repo)
             return
@@ -299,10 +347,11 @@ if __name__ == '__main__':
     parser.add_argument('--evidence-only', action='store_true', help='Only the new event metadata and native STT formatting checks.')
     parser.add_argument('--audio-provenance', action='store_true', help='Candidate host structured STT capture, injection and replay checks.')
     parser.add_argument('--memory-echo-only', action='store_true', help='Only native memory tool echo/replay capture checks; no model.')
+    parser.add_argument('--media-text-only', action='store_true', help='Native local text-file enrichment and adjacent-media evidence; no model.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.child:
-        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance, args.memory_echo_only)
+        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance, args.memory_echo_only, args.media_text_only)
     else:
         with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
             env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
@@ -311,6 +360,7 @@ if __name__ == '__main__':
             result = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--host', str(args.host.resolve()), '--child',
                                      *(['--evidence-only'] if args.evidence_only else []),
                                      *(['--audio-provenance'] if args.audio_provenance else []),
-                                     *(['--memory-echo-only'] if args.memory_echo_only else [])],
+                                     *(['--memory-echo-only'] if args.memory_echo_only else []),
+                                     *(['--media-text-only'] if args.media_text_only else [])],
                                     cwd=scratch, env=env)
             raise SystemExit(result.returncode)
