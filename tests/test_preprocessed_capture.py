@@ -82,3 +82,34 @@ assert(legacy.has('agent_end'));
 '''
     subprocess.run(['node', '--input-type=module', '--eval', script],
                    cwd=Path(__file__).resolve().parent.parent, check=True, capture_output=True, text=True)
+
+
+def test_document_marker_inside_extracted_content_is_preserved_in_both_capture_modes():
+    script = r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const text = 'The manual example is:\n<media:document>\nThe Aurora roof opens at sunrise.';
+const body = '<media:document>\n\n<file name="manual.txt" mime="text/plain">\n\n' +
+  '<<<EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>\nSource: External\n---\n' + text +
+  '\n<<<END_EXTERNAL_UNTRUSTED_CONTENT id="0123456789abcdef">>>\n</file>';
+for (const source of ['agent_end', 'preprocessed']) {
+  const callbacks = new Map(), stores = [];
+  const api = {config:{plugins:{entries:{noldomem:{hooks:{allowConversationAccess:true}}}}},
+    on(name, fn) {callbacks.set(name, fn);}, registerHook(name, fn) {callbacks.set(name, fn);}};
+  registerAutoCapture(api, {async store(row) {stores.push(row);}},
+    {autoCaptureSource:source, captureMaxItems:3, defaultNamespace:'default'});
+  if (source === 'agent_end') {
+    await callbacks.get(source)({success:true,messages:[{role:'user',content:body}]},
+      {agentId:'alpha',sessionKey:'agent:alpha:manual'});
+  } else {
+    await callbacks.get('message:preprocessed')({type:'message',action:'preprocessed',
+      sessionKey:'agent:alpha:manual',context:{bodyForAgent:body}});
+  }
+  assert.equal(stores.length,1);
+  assert.equal(stores[0].text,text,source + ' altered literal document content');
+  assert.equal(stores[0].evidence.assertion,'derived');
+  assert.equal(stores[0].evidence.representation,'extracted_text');
+}
+'''
+    subprocess.run(['node', '--input-type=module', '--eval', script],
+                   cwd=Path(__file__).resolve().parent.parent, check=True, capture_output=True, text=True)

@@ -114,3 +114,18 @@ would not resolve them. No further OAuth/model authorization is requested merely
 to repeat the already passed correction/recall scenario. Maintainer decisions and
 an explicitly scoped raw-media/channel test would be needed before claiming those
 remaining behaviors; no new infrastructure or extraction provider is assumed.
+
+## Content-preservation follow-up
+
+A subsequent direct review of `ef473b52505bf5543476b06ac95ebfff2489eea0` found
+that removing document placeholders after unwrapping also removed the same
+literal line from a real document, for example a protocol manual. The new
+regression failed first. Cleanup is now limited to the leading transport
+placeholder before the file envelope. Both capture modes retain the literal marker line and surrounding document
+text with derived evidence. All 32 relevant preprocessing,
+alignment and plugin-package tests passed. Earlier native file/model runs remain
+pinned to their recorded source hashes; they were not rerun for this local fix.
+
+A separate [bounded raw-media acceptance plan](raw-media-acceptance-plan.md)
+describes the additional authorization and evidence required for incoming bytes.
+It does not claim execution or remove the outgoing-delivery maintainer gate.

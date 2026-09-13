@@ -405,7 +405,10 @@ function registerPreprocessedCapture(api, client, cfg) {
 
 function preprocessedFileText(body) {
   let extracted = false;
-  const text = body.replace(/<file name="[^"\n]*"(?: mime="[^"\n]*")?>\n([\s\S]*?)\n<\/file>/gu,
+  // Remove only the leading transport placeholder before unwrapping contents.
+  // A document may itself contain the same literal marker (e.g. a manual).
+  const text = body.replace(/^<media:document>\s*(?=<file name=")/u, "")
+    .replace(/<file name="[^"\n]*"(?: mime="[^"\n]*")?>\n([\s\S]*?)\n<\/file>/gu,
     (_block, content) => {
       // Only successful extraction has the host's matching untrusted envelope.
       // Failure/path-only/rendered-image markers are not document contents.
@@ -415,7 +418,7 @@ function preprocessedFileText(body) {
       // Remove random wrapper IDs for stable deduplication, not the trust boundary:
       // the extracted text is still screened, stored as derived and injected untrusted.
       return match[2];
-    }).replace(/(?:^|\n)<media:document>(?=\n|$)/gu, "").trim();
+    }).trim();
   return { text, extracted };
 }
 
