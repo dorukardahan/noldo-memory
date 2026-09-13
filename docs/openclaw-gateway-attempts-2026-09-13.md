@@ -91,6 +91,52 @@ No install receipt was forged, no guard was relaxed, and no production plugin or
 account was changed. This does not establish a defect in the production memory
 path or a need for a new host bridge.
 
+## Follow-up: official installation and model-free state preflight
+
+The subsequent preflight used a new empty profile, without OAuth, NoldoMem data,
+paired hosts or application turns. Official
+`plugins install @openclaw/codex@2026.9.3 --pin` succeeded with lifecycle scripts
+disabled. Native plugin inspection reported global origin, npm install source
+and **`trusted-official`**. The lockfile's version, registry artifact and integrity
+matched the selected registry metadata. This is native install provenance, not
+an independent cryptographic verification of the registry's attestations.
+
+The [registry package](https://registry.npmjs.org/@openclaw%2Fcodex) was published
+on September 8 at 11:47:29 UTC. Its version name is not its publication date.
+The operator explicitly approved this package/version's temporary installation
+before the seven-day age threshold. The installed host's official installer
+bypasses npm freshness settings for its install subprocess, while
+`createSafeNpmInstallArgs` in
+[`safe-package-install.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/infra/safe-package-install.ts)
+retains `--ignore-scripts`; no global policy was changed. Native `npm audit`
+exited 0 with zero reported vulnerabilities. This is a known-advisory check,
+not a guarantee of package safety.
+
+Normal `gateway run` reached readiness. The first catalog request failed with
+`unknown session catalog: codex`: native inspection showed the temporary
+profile's `sessionCatalog.enabled=false`. The plugin's `register` function
+gates catalog registration on that setting. After the official temporary-only
+`config set plugins.entries.codex.config.sessionCatalog.enabled true` change,
+a fresh normal Gateway served
+`codex sessions --agent synthetic-memory --json` successfully in **5.475 s**:
+one local host, `connected=true`, and no sessions. No external hosts were attached.
+
+This exercises
+[`listCodexSessionCatalog`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/session-catalog-listing.ts)
+through the real Gateway RPC. Its
+`managedThreads.snapshot()` calls the lazy native keyed store before listing
+the local app-server catalog. Thus the prior state trust gate passed during
+operation, beyond plugin registration alone. No core patch, manufactured install
+record or private helper call was used. The initial failed catalog query is
+retained in the receipt; neither catalog query is a model application turn.
+
+**No new OAuth login, model application or inference request was initiated.**
+No physical request/token metering was added. The earlier two application
+attempts remain exhausted and unsuccessful. This preflight does not prove
+model-chosen correction, grounded answers or model-triggered memory hooks.
+The temporary Gateway and install area were removed without logout/revoke;
+the selected production process IDs remained unchanged.
+
 ## Acceptance mapping and next boundary
 
 - **Implicit/multimodal/temporal recall:** short-event capture improved; real
@@ -112,15 +158,11 @@ path or a need for a new host bridge.
   provenance remain unchanged limitations.
 
 A further model run requires a new bounded authorization and new isolated access
-after cleanup. Before requesting browser approval again, prepare the temporary
-profile with an official pinned `@openclaw/codex@2026.9.3` installation, subject to
-the existing package/supply-chain approval boundary, and verify trusted-state
-access without inference. The official `openclaw codex sessions --agent synthetic-memory --json`
-command on the new empty Gateway reaches the
-[`managedThreads.snapshot()` path](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/session-catalog-listing.ts);
-verify that actual catalog/store operation, not only auth status or plugin metadata.
-No production hosts or sessions may be attached to that profile.
-Local linkage is not a substitute. Only after that
-preflight passes should the two-session correction/answer test be attempted.
-No new package installation, OAuth login or model allowance is implied by this
-proposal. Full original acceptance remains incomplete.
+after cleanup. The official pinned installation and actual catalog/store
+preflight above now establish the supported setup; local linkage is not a
+substitute. Reuse that setup in a fresh isolated profile, with the candidate
+NoldoMem API/DB and catalog explicitly enabled, for the proposed two-session
+correction/answer test. Each application must remain bounded to 120 seconds,
+240 seconds total, only if newly authorized. No production hosts or sessions
+may be attached. New OAuth login and model allowance have not been granted by
+the package-install approval. Full original acceptance remains incomplete.

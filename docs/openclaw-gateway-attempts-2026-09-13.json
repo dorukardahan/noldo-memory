@@ -123,5 +123,60 @@
     "selected_production_process_ids_unchanged": true,
     "logout_or_revoke_used": false,
     "installed_codex_artifact_not_removed": true
+  },
+  "official_install_model_free_followup": {
+    "candidate_head": "4c250bd9817cb882ee7b516825e4ddb38d139644",
+    "package": "@openclaw/codex@2026.9.3",
+    "install_exit_code": 0,
+    "install_origin": "global",
+    "install_source": "npm",
+    "trust_reason": "trusted-official",
+    "registry_published_at": "2026-09-08T11:47:29.826Z",
+    "scoped_age_exception_explicitly_approved": true,
+    "lifecycle_scripts_disabled": true,
+    "lock_registry_integrity_match": true,
+    "attestation_signature_independently_verified": false,
+    "npm_audit": {
+      "exit_code": 0,
+      "reported_vulnerabilities": 0
+    },
+    "new_oauth_logins": 0,
+    "new_model_application_turns": 0,
+    "inference_initiated": false,
+    "physical_request_and_token_metering": "not instrumented; catalog-only preflight",
+    "catalog_queries": [
+      {
+        "exit_code": 1,
+        "seconds": 3.531,
+        "result": "unknown session catalog: codex",
+        "cause": "temporary sessionCatalog.enabled=false"
+      },
+      {
+        "exit_code": 0,
+        "seconds": 5.475,
+        "result": {
+          "hosts": [
+            {
+              "kind": "gateway",
+              "connected": true,
+              "sessions": []
+            }
+          ]
+        },
+        "change": "official CLI enabled catalog in temporary profile"
+      }
+    ],
+    "lifecycle": "normal gateway run; readiness before official catalog RPC",
+    "native_state_path": "listCodexSessionCatalog -> managedThreads.snapshot -> openSyncKeyedStore",
+    "production_memory_or_sessions_used": false,
+    "cleanup": {
+      "temporary_gateway_stopped": true,
+      "residual_owned_processes": 0,
+      "test_port_closed": true,
+      "temporary_root_and_runner_removed": true,
+      "selected_production_pids_unchanged": true,
+      "logout_or_revoke_used": false
+    },
+    "acceptance_limit": "Catalog/state access passed; no correction, answer, or model-triggered memory-hook acceptance inferred."
   }
 }
