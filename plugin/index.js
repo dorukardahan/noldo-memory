@@ -44,6 +44,7 @@ export default definePluginEntry({
         `${process.env.HOME || "~"}/.noldomem/memory-api-key`,
       defaultNamespace: rawCfg.defaultNamespace || "default",
       enableAutoRecall: rawCfg.enableAutoRecall ?? false,
+      recallAllNamespaces: rawCfg.recallAllNamespaces ?? false,
       enableAutoCapture: rawCfg.enableAutoCapture ?? false,
       autoCaptureSource: rawCfg.autoCaptureSource ?? "agent_end",
       enableOperationalCapture: rawCfg.enableOperationalCapture ?? true,

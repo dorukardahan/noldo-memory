@@ -266,7 +266,8 @@ export function registerAutoRecall(api, client, cfg) {
         query: userQuery,
         limit: cfg.recallLimit,
         agent,
-        namespace: cfg.defaultNamespace,
+        // Cross-namespace recall is explicit; preserve existing workspace isolation.
+        ...(cfg.recallAllNamespaces === true ? {} : { namespace: cfg.defaultNamespace }),
         max_tokens: cfg.recallMaxTokens,
         ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });

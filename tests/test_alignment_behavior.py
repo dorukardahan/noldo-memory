@@ -90,14 +90,22 @@ const client = {
   recall: async body => {recalls.push(body); return {results: []};},
   store: async body => {stores.push(body); return {};},
 };
-const cfg = {recallLimit: 5, recallMaxTokens: 500, captureMaxItems: 3, defaultNamespace: 'default'};
+const cfg = {recallLimit: 5, recallMaxTokens: 500, captureMaxItems: 3, defaultNamespace: 'default', recallAllNamespaces: true};
 registerAutoRecall(api, client, cfg);
 registerAutoCapture(api, client, cfg);
 const ctx = {agentId: 'alpha', sessionKey: 'agent:alpha:session-a'};
 await hooks.before_prompt_build({prompt: 'Plan the observatory visit around the quiet hours', messages: []}, ctx);
 assert.equal(recalls.length, 1, 'declarative contextual request needs no recall command');
+assert.equal(recalls[0].agent, 'alpha');
+assert.equal(Object.hasOwn(recalls[0], 'namespace'), false, 'implicit recall must cover all own-agent namespaces');
 await hooks.before_prompt_build({prompt: 'Thanks, that is all.', messages: []}, ctx);
 assert.equal(recalls.length, 1, 'acknowledgement should not search');
+const scoped = {};
+registerAutoRecall({on(name, fn) { scoped[name] = fn; }}, client,
+  {defaultNamespace: 'private-workspace', recallLimit: 5, recallMaxTokens: 500});
+await scoped.before_prompt_build({prompt: 'Plan the observatory visit'}, ctx);
+assert.equal(recalls.at(-1).namespace, 'private-workspace', 'default recall preserves configured namespace isolation');
+assert.equal(recalls.at(-1).agent, 'alpha');
 await hooks.agent_end({success: true, messages: [
  {role: 'user', content: 'I prefer morning visits to the observatory.'},
  {role: 'assistant', content: 'Understood.'},
