@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-09-15
+
+### Fixed
+- Add opt-in `recallAllNamespaces` to OpenClaw automatic recall. When enabled, recall searches the current agent's namespaces while retaining agent isolation. The default remains `false`, preserving existing namespace-scoped behavior.
+- Document the opt-in and extend native Gateway lifecycle verification across same-agent namespaces and a separate agent.
+
+All runtime manifests are coordinated at 2.0.1. No database migration is required. Publishing this release does not deploy it or enable the opt-in in existing installations.
+
 ## [2.0.0] - 2026-09-14
 
 See the [upgrade and recovery notes](docs/release-2.0.0.md).
