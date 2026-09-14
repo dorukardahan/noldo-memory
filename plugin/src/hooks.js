@@ -315,6 +315,27 @@ export function registerAutoCapture(api, client, cfg, readHistory = readGatewayM
   // image belongs to this user turn: imagesCount can include context images.
   // Keep identities/count presence only, bounded even if completion never fires.
   const imageRuns = new Set();
+  const documentRuns = new Map();
+  api.on("before_prompt_build", (event, ctx) => {
+    const key = captureRunKey(ctx);
+    if (!key) return;
+    documentRuns.delete(key);
+    if (cfg.autoCaptureSource === "preprocessed" ||
+        api.config?.plugins?.entries?.noldomem?.hooks?.allowConversationAccess !== true ||
+        typeof event.prompt !== "string" || event.prompt.length > 32000) return;
+    const documents = [];
+    for (const match of event.prompt.matchAll(/<file name="([^"\n]{1,200})"(?: mime="[^"\n]*")?>\n([\s\S]*?)\n<\/file>/gu)) {
+      const prepared = preprocessedFileText(match[0]);
+      if (prepared.extracted && prepared.text.length >= 15 && !looksLikePromptInjection(prepared.text)) {
+        documents.push({name: match[1], text: boundedCaptureText(prepared.text)});
+      }
+      if (documents.length >= cfg.captureMaxItems) break;
+    }
+    if (!documents.length) return;
+    // Retain bounded derivatives only, never the composite system/model prompt.
+    documentRuns.set(key, documents);
+    if (documentRuns.size > 128) documentRuns.delete(documentRuns.keys().next().value);
+  });
   api.on("llm_input", (event, ctx) => {
     const key = captureRunKey(ctx);
     if (!key) return;
@@ -330,6 +351,8 @@ export function registerAutoCapture(api, client, cfg, readHistory = readGatewayM
   api.on("agent_end", async (event, ctx) => {
     const runKey = captureRunKey(ctx);
     const hadImages = imageRuns.delete(runKey);
+    const documents = documentRuns.get(runKey) || [];
+    documentRuns.delete(runKey);
     if (!event.success) return;
 
     const agent = resolveAgentId(ctx);
@@ -372,7 +395,7 @@ export function registerAutoCapture(api, client, cfg, readHistory = readGatewayM
     // supplies its earlier snapshot to agent_end. Recover metadata only via the
     // public local Gateway API, with an explicit conversation-access grant.
     const gateway = api.config?.gateway;
-    if (hadImages && cfg.captureMaxItems > candidates.length &&
+    if ((hadImages || documents.length) && cfg.captureMaxItems > candidates.length &&
         api.config?.plugins?.entries?.noldomem?.hooks?.allowConversationAccess === true &&
         gateway?.mode === "local" && gateway.bind === "loopback" &&
         Number.isInteger(gateway.port) && gateway.port > 0 && gateway.port <= 65535 &&
@@ -398,8 +421,34 @@ export function registerAutoCapture(api, client, cfg, readHistory = readGatewayM
         api.logger?.warn("noldomem: source media metadata unavailable");
       }
     }
+    // The official prepared prompt can contain PDF text that the Codex completion
+    // snapshot omits. Bind each derivative to that exact turn's durable attachment;
+    // never recover text from upstreamUserText or infer a source from a filename alone.
+    let documentCount = 0;
+    const sourceMedia = responseSource?.__openclaw?.media;
+    if (api.config?.plugins?.entries?.noldomem?.hooks?.allowConversationAccess === true &&
+        !texts.some(part => part.extracted) && Array.isArray(sourceMedia) && sourceMessage?.idempotencyKey === `${ctx.runId}:user` &&
+        (!event.runId || event.runId === ctx.runId)) {
+      for (const document of documents) {
+        if (candidates.length + documentCount >= cfg.captureMaxItems) break;
+        const matching = sourceMedia.filter(fact => isManagedMediaReference(fact?.url) &&
+          fact.url.slice("media://inbound/".length) === document.name &&
+          (fact.kind === "document" || fact.kind === "file" || fact.contentType === "application/pdf"));
+        if (matching.length !== 1) continue;
+        // hydrationSuppressed prevents a later binary re-attachment; it does not
+        // invalidate text actually extracted in this admitted turn.
+        try {
+          await client.store({text: document.text, agent, namespace: cfg.defaultNamespace,
+            source: "plugin-document-derivative", session_id: ctx.sessionKey || ctx.sessionId,
+            evidence: {...completionSourceEvidence(sourceMessage), role: "user", assertion: "derived",
+              delivery: "received", modality: "document", representation: "extracted_text",
+              reference: matching[0].url}});
+          documentCount++;
+        } catch { api.logger?.warn("noldomem: document derivative capture unavailable"); }
+      }
+    }
     const response = mediaResponseCandidate(event, ctx, responseSource, messages.slice(latestUser + 1));
-    if (response && candidates.length < cfg.captureMaxItems) {
+    if (response && candidates.length + documentCount < cfg.captureMaxItems) {
       try {
         await client.store({...response, agent, namespace: cfg.defaultNamespace,
           session_id: ctx.sessionKey || ctx.sessionId});

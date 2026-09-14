@@ -98,7 +98,60 @@ def check_media_text(manager, endpoint, profile):
                       'model_calls': 0, 'channel_send': False}))
 
 
-def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_only=False, media_text_only=False):
+
+def check_document_read(manager, endpoint, profile, document):
+    """Actual native PDF reader and provider lane; no model, no media service."""
+    import httpx
+    from gateway.run import _build_document_context_note
+    from tools.file_tools import read_file_tool
+
+    target = profile / 'synthetic-plan.pdf'
+    shutil.copyfile(document, target)
+    task = 'synthetic-document-read'
+    result = read_file_tool(str(target), task_id=task)
+    assert json.loads(result).get('extracted_document') is True
+    failed = read_file_tool(str(profile / 'missing.pdf'), task_id=task)
+    assert json.loads(failed).get('error')
+    note = _build_document_context_note(target.name, str(target), 'application/pdf')
+    user = note + '\n\nPlease summarize the visit notes.'
+    messages = [
+        {'role':'user', 'content':user},
+        {'role':'assistant', 'content':'', 'tool_calls':[
+            {'id':'native-read', 'function':{'name':'read_file', 'arguments':json.dumps({'path':str(target)})}},
+            {'id':'native-missing', 'function':{'name':'read_file', 'arguments':json.dumps({'path':str(profile / 'missing.pdf')})}},
+        ]},
+        {'role':'tool', 'name':'read_file', 'tool_call_id':'native-read', 'content':result},
+        {'role':'tool', 'name':'read_file', 'tool_call_id':'native-missing', 'content':failed},
+        {'role':'assistant', 'content':'The supplied text was extracted.'},
+    ]
+    for _ in range(2):
+        manager.sync_all(user, messages[-1]['content'], session_id='document-a', messages=messages)
+        assert manager.flush_pending(timeout=5)
+    rows = httpx.get(endpoint + '/v1/export', params={'agent':'alpha'}).json()
+    documents = [r for r in rows if r['evidence']['modality']=='document']
+    assert len(documents)==1
+    record = documents[0]
+    assert 'east arch' in record['text']
+    assert record['evidence']['assertion']=='derived'
+    assert record['evidence']['representation']=='extracted_text'
+    assert record['evidence']['reference']==str(target)
+    assert not any('To read it, extract' in r['text'] or 'missing.pdf' in r['text'] for r in rows)
+    manager.on_session_switch('document-b')
+    context = manager.prefetch_all('Where should I meet for the Aurora visit?', session_id='document-b')
+    assert 'east arch' in context and 'modality=document' in context
+    assert httpx.get(endpoint + '/v1/export', params={'agent':'beta'}).json()==[]
+    assert json.loads(manager.handle_tool_call('noldomem_forget', {'memory_id':record['id']}))['data']['deleted']
+    manager.sync_all(user, messages[-1]['content'], session_id='document-a', messages=messages)
+    assert manager.flush_pending(timeout=5)
+    assert 'east arch' not in manager.prefetch_all('Where should I meet for the Aurora visit?', session_id='document-b')
+    print(json.dumps({'model_calls':0,'native_pdf_read':True,'native_missing_file_error':True,
+                      'loader_manager_http_capture':True,'document_derived_reference':True,
+                      'failed_read_not_captured':True,'obsolete_read_instruction_removed':True,
+                      'duplicate_prevented':True,'cross_session_document_injection':True,
+                      'other_agent_empty':True,'forgotten_source_replay_blocked':True}))
+
+
+def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_only=False, media_text_only=False, document_read=None):
     sys.path[:0] = [str(host), str(repo)]
     import uvicorn
     import httpx
@@ -149,6 +202,9 @@ def check(host, repo, evidence_only=False, audio_provenance=False, memory_echo_o
         provider.load_config = lambda *args, **kwargs: cfg  # Synthetic config, no credential-file read.
         manager.add_provider(provider)
         manager.initialize_all('session-a')
+        if document_read:
+            check_document_read(manager, endpoint, profile, document_read)
+            return
         if media_text_only:
             check_media_text(manager, endpoint, profile)
             return
@@ -348,10 +404,11 @@ if __name__ == '__main__':
     parser.add_argument('--audio-provenance', action='store_true', help='Candidate host structured STT capture, injection and replay checks.')
     parser.add_argument('--memory-echo-only', action='store_true', help='Only native memory tool echo/replay capture checks; no model.')
     parser.add_argument('--media-text-only', action='store_true', help='Native local text-file enrichment and adjacent-media evidence; no model.')
+    parser.add_argument('--document-read', type=Path, help='Native reader regression with the prepared synthetic meeting PDF; no model.')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     if args.child:
-        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance, args.memory_echo_only, args.media_text_only)
+        check(args.host.resolve(), repo, args.evidence_only, args.audio_provenance, args.memory_echo_only, args.media_text_only, args.document_read)
     else:
         with tempfile.TemporaryDirectory(prefix='noldomem-hermes-check-') as scratch:
             env = {'PATH': os.defpath + ':/opt/homebrew/bin:/usr/local/bin', 'HOME': scratch,
@@ -361,6 +418,7 @@ if __name__ == '__main__':
                                      *(['--evidence-only'] if args.evidence_only else []),
                                      *(['--audio-provenance'] if args.audio_provenance else []),
                                      *(['--memory-echo-only'] if args.memory_echo_only else []),
-                                     *(['--media-text-only'] if args.media_text_only else [])],
+                                     *(['--media-text-only'] if args.media_text_only else []),
+                                     *(['--document-read', str(args.document_read.resolve())] if args.document_read else [])],
                                     cwd=scratch, env=env)
             raise SystemExit(result.returncode)

@@ -493,7 +493,9 @@ class NoldoMemProvider(MemoryProvider):
                 last_user = next((i for i in range(len(messages) - 1, -1, -1)
                                   if messages[i].get("role") == "user"), len(messages))
                 captured = []
+                extracted_file_paths = set()
                 memory_call_ids = set()
+                file_calls = {}
                 memory_tools = {"noldomem_recall", "noldomem_store", "noldomem_forget",
                                 "noldomem_relearn_source", "noldomem_pin"}
                 for message in messages[last_user:]:
@@ -503,6 +505,16 @@ class NoldoMemProvider(MemoryProvider):
                             if not isinstance(call, dict):
                                 continue
                             function = call.get("function")
+                            if (isinstance(function, dict) and function.get("name") == "read_file"
+                                    and isinstance(call.get("id"), str)):
+                                arguments = function.get("arguments")
+                                if isinstance(arguments, str):
+                                    try:
+                                        arguments = json.loads(arguments)
+                                    except ValueError:
+                                        arguments = None
+                                if isinstance(arguments, dict):
+                                    file_calls[call["id"]] = arguments.get("path")
                             if (isinstance(function, dict) and function.get("name") in memory_tools
                                     and isinstance(call.get("id"), str)):
                                 memory_call_ids.add(call["id"])
@@ -530,6 +542,29 @@ class NoldoMemProvider(MemoryProvider):
                         content = _without_failed_voice_prefix(content)
                         if not content.strip():
                             continue
+                    file_derivative = False
+                    file_reference = None
+                    if role == "tool" and message.get("tool_call_id") in file_calls:
+                        try:
+                            result = json.loads(content)
+                        except ValueError:
+                            result = None
+                        if isinstance(result, dict):
+                            # Stable read_file errors are operational failures, not
+                            # observations from a document or new user facts.
+                            if result.get("error") and not result.get("content"):
+                                continue
+                            if result.get("extracted_document") is True and isinstance(result.get("content"), str):
+                                content = re.sub(r"(?m)^\d+\|", "", result["content"])
+                                if not content.strip():
+                                    continue
+                                file_derivative = True
+                                reference = file_calls[message["tool_call_id"]]
+                                if (isinstance(reference, str) and len(reference) <= 1000
+                                        and not any(c in reference for c in "\r\n")
+                                        and not re.match(r"[A-Za-z][A-Za-z0-9+.-]*:", reference)):
+                                    file_reference = reference
+                                    extracted_file_paths.add(reference)
                     audio_parts = []
                     if role == "user":
                         content, audio_parts = _audio_capture_parts(message, content)
@@ -538,7 +573,7 @@ class NoldoMemProvider(MemoryProvider):
                     vision_derivative = content.startswith("[The user sent an image~ Here's what I can see:\n")
                     # The stable Cloud adapter labels text read from attachments.
                     # A raw media block next to text alone proves no extraction.
-                    document_derivative = bool(re.search(r"(?:^|\n)\[Content of [^\]\n]+\]:\n\S", content))
+                    document_derivative = file_derivative or bool(re.search(r"(?:^|\n)\[Content of [^\]\n]+\]:\n\S", content))
                     known_derivative = vision_derivative or document_derivative
                     has_media = has_media or known_derivative
                     parts = audio_parts + ([{
@@ -555,6 +590,12 @@ class NoldoMemProvider(MemoryProvider):
                     for part in parts:
                         part["session"] = body.get("session_id", "")
                         evidence = part["evidence"]
+                        if file_derivative:
+                            if file_reference:
+                                evidence["reference"] = file_reference
+                            call_id = message["tool_call_id"]
+                            if len(call_id) <= 200 and not any(c in call_id for c in "\r\n"):
+                                evidence["event_id"] = call_id
                         event_id = message.get("platform_message_id")
                         if "event_id" not in evidence and isinstance(event_id, str) and len(event_id) <= 200:
                             evidence["event_id"] = event_id
@@ -563,6 +604,22 @@ class NoldoMemProvider(MemoryProvider):
                                 and math.isfinite(timestamp) and timestamp >= 0):
                             evidence["observed_at"] = timestamp
                         captured.append(part)
+                # Once a native read actually extracted this document, its
+                # one-turn "read it before answering" notice is obsolete. Do not
+                # replay that host instruction as if the user supplied it.
+                for part in captured:
+                    if part["role"] != "user":
+                        continue
+                    for reference in extracted_file_paths:
+                        prefix = r"\[The user sent a document: '[^'\r\n]{1,200}'\. It is saved at: "
+                        suffix = (
+                            ". Its text is not inlined here (it's a binary format such as PDF or DOCX). "
+                            "To read it, extract the document's text yourself — for example with the "
+                            "terminal tool or the ocr-and-documents skill — before answering, instead "
+                            "of asking the user to paste the contents.]"
+                        )
+                        part["text"] = re.sub(prefix + re.escape(reference + suffix), "", part["text"]).strip()
+                captured = [part for part in captured if part["text"].strip()]
                 if captured:
                     with self._network_operation(expected_generation=lifecycle_generation) as client:
                         if client is not None:

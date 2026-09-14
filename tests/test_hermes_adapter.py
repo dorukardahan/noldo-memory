@@ -1996,3 +1996,53 @@ console.log(JSON.stringify(factories.map(f => f({agentId:'alpha'})).find(t => t.
         assert calls[-1]["valid_from"] == timestamp
         assert calls[-1]["text"] == "Aurora visits start Friday at 19:30."
     provider.shutdown()
+
+
+def test_native_document_read_extraction_excludes_failures_and_stale_guidance(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+    class CaptureClient:
+        def capture(self, body):
+            calls.append(body)
+    provider._client = CaptureClient()
+    path = '/synthetic/plan.pdf'
+    note = ("[The user sent a document: 'plan.pdf'. It is saved at: " + path +
+            ". Its text is not inlined here (it's a binary format such as PDF or DOCX). "
+            "To read it, extract the document's text yourself — for example with the "
+            "terminal tool or the ocr-and-documents skill — before answering, instead "
+            "of asking the user to paste the contents.]")
+    messages = [
+        {'role':'user', 'content':note + '\n\nFor the visit, bring a yellow folder.'},
+        {'role':'assistant', 'content':'', 'tool_calls':[
+            {'id':'read-plan', 'function':{'name':'read_file', 'arguments':json.dumps({'path':path})}},
+            {'id':'read-missing', 'function':{'name':'read_file', 'arguments':json.dumps({'path':'/synthetic/missing.pdf'})}},
+        ]},
+        {'role':'tool', 'name':'read_file', 'tool_call_id':'read-plan', 'timestamp':1700000000,
+         'content':json.dumps({'content':'1|The visit meets at the west pavilion.', 'extracted_document':True, 'total_lines':1})},
+        {'role':'tool', 'name':'read_file', 'tool_call_id':'read-missing',
+         'content':json.dumps({'error':'No such file: /synthetic/missing.pdf'})},
+        {'role':'assistant', 'content':'The meeting point is the west pavilion.'},
+    ]
+    provider.sync_turn(messages[0]['content'], messages[-1]['content'], session_id='s1', messages=messages)
+    parts = calls[0]['messages']
+    document = next(part for part in parts if part['role']=='tool')
+    assert document['text']=='The visit meets at the west pavilion.'
+    assert document['evidence']['assertion']=='derived'
+    assert document['evidence']['modality']=='document'
+    assert document['evidence']['representation']=='extracted_text'
+    assert document['evidence']['reference']==path
+    assert document['evidence']['event_id']=='read-plan'
+    assert document['evidence']['observed_at']==1700000000
+    assert len(parts)==3
+    assert parts[0]['text']=='For the visit, bring a yellow folder.'
+    # Without a successful, bound extraction, retain the source notice rather
+    # than claiming that its missing contents have already been captured.
+    messages[2]['content']=json.dumps({'error':'Extraction failed'})
+    provider.sync_turn(messages[0]['content'], messages[-1]['content'], session_id='s2', messages=messages)
+    assert note in calls[-1]['messages'][0]['text']
+    assert all(part['role']!='tool' for part in calls[-1]['messages'])
+
+    messages[2]['content']=json.dumps({'content':'1|', 'extracted_document':True})
+    provider.sync_turn(messages[0]['content'], messages[-1]['content'], session_id='s3', messages=messages)
+    assert note in calls[-1]['messages'][0]['text']
+    assert all(part['role']!='tool' for part in calls[-1]['messages'])

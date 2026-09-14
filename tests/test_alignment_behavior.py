@@ -81,7 +81,11 @@ def test_openclaw_implicit_recall_and_latest_turn_capture():
 import assert from 'node:assert/strict';
 import { registerAutoRecall, registerAutoCapture } from './plugin/src/hooks.js';
 const hooks = {}, recalls = [], stores = [];
-const api = {on(name, callback) {hooks[name] = callback;}};
+const api = {on(name, callback) {
+  // The real host supports several listeners for the same lifecycle event.
+  const previous = hooks[name];
+  hooks[name] = async (...args) => ({...(await previous?.(...args)), ...(await callback(...args))});
+}};
 const client = {
   recall: async body => {recalls.push(body); return {results: []};},
   store: async body => {stores.push(body); return {};},

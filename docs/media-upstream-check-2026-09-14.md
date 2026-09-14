@@ -1,5 +1,7 @@
 # Remaining media prerequisites checked against upstream
 
+Latest follow-up: [authorized native audio/document results and derivative corrections](media-audio-document-results-2026-09-14.md). Earlier pending-install/budget statements below describe the earlier checkpoint; they are not a new approval request.
+
 This is a narrow follow-up to the [successful real PNG scenario](media-native-proof-2026-09-14.md),
 not a new research cutoff or a change to the tested host targets. No model,
 transcription provider, login, package installation or production mutation was

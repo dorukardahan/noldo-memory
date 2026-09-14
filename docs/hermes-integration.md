@@ -148,3 +148,13 @@ scope; original transcripts and other stores remain separate.
 
 For explicit forgetting and relearning, see [source replay protection](forgetting-sources.md).
 The source-session block is agent-local; unkeyed legacy data has no replay guarantee.
+
+### Native file-reader evidence
+
+Successful `read_file` results with `extracted_document: true` and a matching
+current-turn call retain extracted document text, derived trust, file reference
+and tool-call identity. Failed reads without content are not captured. Once that
+exact binary document was successfully read, its obsolete host-generated
+"extract before answering" notice is removed from capture. This does not label
+raw paths, successful plain audio quotations or missing legacy sources as
+verified extraction. See the [native media results and model-free regression](media-audio-document-results-2026-09-14.md).

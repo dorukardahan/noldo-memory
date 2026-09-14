@@ -131,8 +131,16 @@ and a configured numeric `gateway.port`, the plugin can make
 one bounded native history request for an image-bearing run to recover only the
 exact source's metadata. Run/session/source identity checks and existing capture
 guards remain mandatory. Unavailable or mismatched history fails closed.
-The resulting correction passed native event replay; another model run has not
-yet tested it.
+The [real PNG check](../docs/media-native-proof-2026-09-14.md) subsequently passed.
+
+Successful native document chunks omitted from a Codex completion snapshot can
+also be recovered from the official `before_prompt_build` input, with the same
+local-only history/source checks and explicit conversation access. Only bounded
+extracted chunks are held until completion (128 run entries, 32,000-character
+input limit, existing item/text bounds); the composite model prompt is never
+stored. They remain derived and must match a unique managed attachment in that
+exact source. Already-extracted completion rows and preprocessed capture are not
+duplicated. See the [PDF result and repair boundary](../docs/media-audio-document-results-2026-09-14.md).
 
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official
@@ -160,7 +168,8 @@ The `preprocessed` mode does not cover CLI-only ingress; choose the
 capture surface for the profile deliberately. `message_sent` still observes
 confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
 provider call or background process is introduced. Pending image-run hints contain
-only identities and are bounded to 128 entries, consumed on completion. See the
+only identities and are bounded to 128 entries, consumed on completion. Document
+chunks use a separate bounded map and are also consumed on failed completion. See the
 [verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md) and
 [media-path follow-up](../docs/media-path-follow-up-2026-09-13.md).
 

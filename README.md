@@ -41,6 +41,11 @@ history. The correction passed native event replay and then a
 [real two-session PNG check](docs/media-native-proof-2026-09-14.md): automatic
 capture and injection carried the entrance detail into the next answer without
 the other agent's guide name. Audio/PDF and source-explanation limits remain.
+The [bounded native audio/PDF follow-up](docs/media-audio-document-results-2026-09-14.md)
+records Hermes's actual PNG/local-WAV/PDF learning and fresh-session answer,
+OpenClaw's audio HTTP 429, and PDF capture recovery through a documented native
+replay boundary. Failed file-read noise and document evidence were corrected;
+post-fix models were not silently rerun.
 The [upstream prerequisite check](docs/media-upstream-check-2026-09-14.md)
 distinguishes supported OAuth audio from account access and unmerged Hermes voice
 work, with a resolved isolated local-STT preparation path.

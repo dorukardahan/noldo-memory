@@ -245,3 +245,13 @@ derived trust. No raw attachment is fetched by this adapter. Generated assistant
 text and external tool derivatives are not proof of external delivery. See the
 [media-path follow-up](../../../docs/media-path-follow-up-2026-09-13.md) for the
 verified channel-specific path, source limits and models-free test boundary.
+
+### Native file-reader evidence
+
+Successful `read_file` results with `extracted_document: true` and a matching
+current-turn call retain extracted document text, derived trust, file reference
+and tool-call identity. Failed reads without content are not captured. Once that
+exact binary document was successfully read, its obsolete host-generated
+"extract before answering" notice is removed from capture. This does not label
+raw paths, successful plain audio quotations or missing legacy sources as
+verified extraction. See the [native media results and model-free regression](../../../docs/media-audio-document-results-2026-09-14.md).

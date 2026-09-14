@@ -1,5 +1,7 @@
 # Bounded incoming raw-media acceptance plan
 
+Latest follow-up: [authorized native audio/document results and derivative corrections](media-audio-document-results-2026-09-14.md). Earlier pending-install/budget statements below describe the earlier checkpoint; they are not a new approval request.
+
 Status: authorized and partially executed on **2026-09-13**;
 [results and remaining limits](raw-media-results-2026-09-13.md) recorded on
 2026-09-14. OpenClaw used both application turns; Hermes stopped at preflight
