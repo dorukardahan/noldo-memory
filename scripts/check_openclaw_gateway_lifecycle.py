@@ -75,6 +75,7 @@ def check(host, node, media_file=False):
                             "hooks": {"allowConversationAccess": True, "allowPromptInjection": True},
                             "config": {"baseUrl": endpoint, "apiKeyFile": "/dev/null",
                                 "enableAutoRecall": True, "enableAutoCapture": True,
+                                "defaultNamespace": "synthetic-archive",
                                 "enableOperationalCapture": False, "enableCompactionCapture": False,
                                 "enableSubagentCapture": False}}}},
         }
@@ -95,6 +96,8 @@ def check(host, node, media_file=False):
             result = json.loads(lines[0].split("=", 1)[1])
             assert [r["path"] for r in requests] == ["/v1/store", "/v1/recall", "/v1/recall"], requests
             assert requests[0]["body"]["agent"] == "alpha"
+            assert requests[0]["body"]["namespace"] == "synthetic-archive"
+            assert all("namespace" not in r["body"] for r in requests[1:])
             assert requests[1]["body"]["agent"] == "alpha"
             assert requests[2]["body"]["agent"] == "beta"
             result["http_requests"] = requests

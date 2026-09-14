@@ -96,6 +96,8 @@ registerAutoCapture(api, client, cfg);
 const ctx = {agentId: 'alpha', sessionKey: 'agent:alpha:session-a'};
 await hooks.before_prompt_build({prompt: 'Plan the observatory visit around the quiet hours', messages: []}, ctx);
 assert.equal(recalls.length, 1, 'declarative contextual request needs no recall command');
+assert.equal(recalls[0].agent, 'alpha');
+assert.equal(Object.hasOwn(recalls[0], 'namespace'), false, 'implicit recall must cover all own-agent namespaces');
 await hooks.before_prompt_build({prompt: 'Thanks, that is all.', messages: []}, ctx);
 assert.equal(recalls.length, 1, 'acknowledgement should not search');
 await hooks.agent_end({success: true, messages: [

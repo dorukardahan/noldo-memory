@@ -266,7 +266,8 @@ export function registerAutoRecall(api, client, cfg) {
         query: userQuery,
         limit: cfg.recallLimit,
         agent,
-        namespace: cfg.defaultNamespace,
+        // Search every namespace in this agent's DB, as explicit recall does.
+        // defaultNamespace controls capture placement, not historical visibility.
         max_tokens: cfg.recallMaxTokens,
         ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });

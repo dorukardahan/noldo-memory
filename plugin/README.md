@@ -91,6 +91,10 @@ the native loader rejects those hook registrations; tools alone can still load.
 The example above enables capture/lifecycle access while retaining the
 prompt-injection prohibition. For automatic recall, deliberately enable both
 `enableAutoRecall` and `hooks.allowPromptInjection` in the selected profile.
+Automatic recall searches every namespace within the current agent database.
+`defaultNamespace` selects where automatic capture writes; it does not restrict
+historical recall. Other agents remain excluded.
+
 Declarative prompts can recall history; trivial acknowledgements skip search. An optional
 `recallMinSemanticScore` filters automatic context using a model-calibrated floor;
 there is no universal default. Explicit recall remains available in degraded mode.
@@ -175,7 +179,12 @@ chunks use a separate bounded map and are also consumed on failed completion. Se
 
 The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
 the same typed plugin capture/injection events can duplicate storage, retrieval
-and context. JSONL sync is an archive/legacy path, not a reader for the current
+and context. In a typed-plugin deployment, disable overlapping legacy
+`realtime-capture` and `session-end-capture` writers. The latter does not preserve
+the source-session identity required for replay protection. Also disable
+`post-compaction-restore` when enforcing NoldoMem forgetting: it injects local
+snapshots without consulting NoldoMem source blocks. Keep original transcripts
+and backups separate from claims about memory-tool deletion. JSONL sync is an archive/legacy path, not a reader for the current
 stable host's canonical SQLite sessions. Do not infer live coverage from its
 successful scan.
 
