@@ -39,7 +39,7 @@ NoldoMem can retain content while its exact clip origin or delivery status is
 unknown. It does not infer missing metadata or claim an unsent draft was delivered.
 
 Python consumers of the Turkish morphology helpers should read the
-[unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search
+[2.0.0 helper migration](docs/turkish-helper-migration.md). The HTTP search
 path no longer requires Zeyrek/NLTK; lexical normalization is not lemmatization.
 Neither system has proven universal superiority. Avoid two independent writers
 for the same durable fact unless update and deletion propagation are implemented.

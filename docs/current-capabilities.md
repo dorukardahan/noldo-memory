@@ -1,8 +1,8 @@
 # Current capabilities and evidence
 
 This guide consolidates the evidence recorded through **2026-09-14**. It applies
-to the identified NoldoMem candidates and host versions, not an already published
-release or a production deployment. Earlier failures remain in the linked reports;
+to the identified NoldoMem candidates and host versions. Publishing 2.0.0 does
+not turn these tests into production validation. Earlier failures remain in the linked reports;
 later corrections do not retroactively turn those applications into successes.
 
 ## Existing integrations do not require unpublished host changes
@@ -65,4 +65,4 @@ The [Turkish helper transition](turkish-helper-migration.md) removes Zeyrek/NLTK
 without replacing them with an optional extra. Capture/index/recall comparisons
 preserved quality in the tested corpus. External Python morphology callers have
 a documented breaking transition reflected in the coordinated 2.0.0 manifests
-and [release preparation](release-2.0.0.md); publication is a separate step.
+and [upgrade notes](release-2.0.0.md).
