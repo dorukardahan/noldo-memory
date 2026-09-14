@@ -1,5 +1,5 @@
 name: noldomem
-version: 2.0.0
+version: 2.0.1
 type: memory_provider
 description: NoldoMem external memory provider for Hermes Agent.
 entrypoint: __init__.py
