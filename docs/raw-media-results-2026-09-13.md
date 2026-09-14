@@ -60,6 +60,30 @@ it cannot infer pixel contents from attachment presence. Retaining source-linked
 model interpretations is still an implementation/design gap, distinct from the
 question-filter bug and host delivery metadata work.
 
+A focused source check on 2026-09-14 ruled out a count-only capture shortcut.
+In stable
+[`buildLlmInputEvent`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/app-server/run-attempt-turn-request.ts),
+`imagesCount` combines current input images with `prompt.contextImages`.
+[`run-attempt-prompt.ts`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/app-server/run-attempt-prompt.ts)
+can prepare those images from restored/assembled history. A positive count alone
+therefore cannot identify a fresh source or distinguish it from a replayed one.
+The host's existing failed-turn regression also shows that `llm_output` can fire
+on failure; that notification alone is not successful capture or delivery.
+Saving every answer after a positive image count could misattribute old content
+to a new source and undermine source-replay protection. No such writer was added.
+This does **not** establish that a host change is required: source correlation
+through supported message/session surfaces still needs a bounded design and
+behavior check before adding persistence.
+
+The existing `registerAutoCapture` `message_sent` handler can retain successful
+outgoing text as derived, delivered assistant evidence; its bounded-content,
+failure and scope regressions remain applicable. This run used `deliver:false`
+and only NoldoMem's advertised memory tools, so it did not exercise that channel
+receipt or native session-search fallback. Its failure must not be generalized
+to every production channel or the recommended combination of native helpers.
+The unmet target is still automatic, source-grounded cross-session use of media
+content, not simply writing more assistant text to make this fixture pass.
+
 The native audio implementation is
 [`transcribeOpenAiAudioWithContext`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/openai/audio-transcription.ts).
 It supports subscription selection through native auth, but that source capability
