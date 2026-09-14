@@ -1,7 +1,7 @@
-# NoldoMem 2.0.0 preparation
+# NoldoMem 2.0.0 upgrade notes
 
-Prepared on 2026-09-14. This version is not yet tagged, published or deployed.
-The previous published release is
+Release date: 2026-09-14. Publication does not update existing installations.
+The previous release is
 [v1.27.16](https://github.com/dorukardahan/noldo-memory/releases/tag/v1.27.16).
 
 ## What changes
@@ -64,7 +64,7 @@ old code is insufficient for this upgrade. Do not weaken that updater's guards.
 - Keep all seven runtime versions listed in `CONTRIBUTING.md` at `2.0.0`.
 - Build and inspect the sdist and wheel; verify neither declares Zeyrek/NLTK.
 - Complete the release PR's exact-head CI and direct review.
-- After approval, merge the preparation PR, verify the resulting commit, then
-  tag and publish manually. Replace the changelog's unreleased marker with the
-  actual publication date as part of that approved publication work.
+- After approval, merge the publication-notes PR, verify its resulting commit
+  includes the finalized changelog date, then
+  tag and publish manually using the actual publication date in the changelog.
 - Deploy only through a separately authorized, verified rollout and recovery plan.

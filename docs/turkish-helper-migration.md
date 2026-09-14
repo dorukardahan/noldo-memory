@@ -1,4 +1,4 @@
-# Turkish helper transition in 2.0.0 (unreleased)
+# Turkish helper transition in 2.0.0
 
 NoldoMem's real capture/index/recall path uses embeddings and SQLite FTS5
 trigrams. It does not call `lemmatize`, `lemmatize_tokens`, `normalize_text` or
@@ -10,8 +10,7 @@ NLP extra, replacement model download, tokenizer service or audit waiver.
 Successful package-provided morphological analysis is a removed capability of
 the Python helpers. This is a breaking helper transition, not a claim that a
 dependency-free stemmer is equivalent to a lemmatizer. The 2.0.0 manifests and
-[release notes](release-2.0.0.md) reflect this major-version transition;
-release preparation does not publish a release.
+[release notes](release-2.0.0.md) reflect this major-version transition.
 
 - `normalize_text(text)` now performs lexical lowercasing, folding, stopword
   removal and deduplication. Its default `use_lemma` changes to `False`.
