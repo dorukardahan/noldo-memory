@@ -116,7 +116,14 @@ production service PIDs/start times were unchanged. The isolated profile and
 OAuth entry are deliberately retained at the user's request until related
 verification finishes; no logout/revoke was performed.
 
-## Remaining acceptance
+## Follow-up status
+
+The subsequently authorized [two real applications](media-native-proof-2026-09-14.md)
+completed the image capture/cross-session answer check described below. This
+section records the plan at this earlier checkpoint, not another permission
+request. The earlier failed allowance remains consumed.
+
+### Original follow-up plan
 
 No fresh login is needed while this isolated access remains usable. The smallest
 remaining complete model check is **two additional applications**, at most

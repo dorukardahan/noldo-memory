@@ -37,8 +37,10 @@ The [source-linked response follow-up](docs/media-response-follow-up-2026-09-14.
 adds inferred/generated media-response episodes with model-free native
 capture, injection and forgetting evidence. The [subsequent real run and fix](docs/media-history-follow-up-2026-09-14.md)
 identified completion metadata missing from hooks but available through native
-history. The correction passed native event replay; model acceptance after that
-correction remains pending.
+history. The correction passed native event replay and then a
+[real two-session PNG check](docs/media-native-proof-2026-09-14.md): automatic
+capture and injection carried the entrance detail into the next answer without
+the other agent's guide name. Audio/PDF and source-explanation limits remain.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search
