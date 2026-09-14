@@ -64,6 +64,7 @@ old code is insufficient for this upgrade. Do not weaken that updater's guards.
 - Keep all seven runtime versions listed in `CONTRIBUTING.md` at `2.0.0`.
 - Build and inspect the sdist and wheel; verify neither declares Zeyrek/NLTK.
 - Complete the release PR's exact-head CI and direct review.
-- After approval, merge the preparation PR, verify the resulting commit, then
+- After approval, merge the publication-notes PR, verify its resulting commit
+  includes the finalized changelog date, then
   tag and publish manually using the actual publication date in the changelog.
 - Deploy only through a separately authorized, verified rollout and recovery plan.
