@@ -64,5 +64,5 @@ memory choice was changed.
 The [Turkish helper transition](turkish-helper-migration.md) removes Zeyrek/NLTK
 without replacing them with an optional extra. Capture/index/recall comparisons
 preserved quality in the tested corpus. External Python morphology callers have
-a documented breaking transition that requires coordinated major-version release
-handling; preparing this contribution does not itself publish that release.
+a documented breaking transition reflected in the coordinated 2.0.0 manifests
+and [release preparation](release-2.0.0.md); publication is a separate step.

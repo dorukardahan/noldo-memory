@@ -1,17 +1,17 @@
-# Turkish helper transition (unreleased)
+# Turkish helper transition in 2.0.0 (unreleased)
 
 NoldoMem's real capture/index/recall path uses embeddings and SQLite FTS5
 trigrams. It does not call `lemmatize`, `lemmatize_tokens`, `normalize_text` or
 `tokenize_for_search`; the API imports only `parse_temporal` from this module.
 That does not prove external Python consumers never call the other helpers.
 
-The next release removes Zeyrek and its NLTK dependency entirely. There is no
+Version 2.0.0 removes Zeyrek and its NLTK dependency entirely. There is no
 NLP extra, replacement model download, tokenizer service or audit waiver.
 Successful package-provided morphological analysis is a removed capability of
 the Python helpers. This is a breaking helper transition, not a claim that a
-dependency-free stemmer is equivalent to a lemmatizer. It must be included in
-the next major-version release notes and coordinated manifest version update;
-this PR does not publish a release.
+dependency-free stemmer is equivalent to a lemmatizer. The 2.0.0 manifests and
+[release notes](release-2.0.0.md) reflect this major-version transition;
+release preparation does not publish a release.
 
 - `normalize_text(text)` now performs lexical lowercasing, folding, stopword
   removal and deduplication. Its default `use_lemma` changes to `False`.
