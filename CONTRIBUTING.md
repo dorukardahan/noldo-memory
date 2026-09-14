@@ -51,6 +51,8 @@ Before tagging a release:
    - `plugin/package.json`
    - `hooks/package.json`
    - `plugin/index.js`
+   - `plugin/openclaw.plugin.json`
+   - `adapters/hermes/noldomem/plugin.yaml`
 2. Update `CHANGELOG.md`.
 3. Run CI locally where practical:
    ```bash

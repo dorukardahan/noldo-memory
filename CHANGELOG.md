@@ -4,10 +4,13 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [2.0.0] - Unreleased
 
-### Breaking Python helper transition (next major release)
-- Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
+Release preparation only; no tag or deployment is implied. See the
+[upgrade and recovery notes](docs/release-2.0.0.md).
+
+### Breaking Python helper transition
+- Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. All runtime manifests are coordinated at 2.0.0.
 
 ### Fixed
 - Re-read queued worker records before embedding and stop stale sub-batches/fallbacks after cache invalidation, preventing forgotten text from repopulating caches through a previously loaded backlog.
