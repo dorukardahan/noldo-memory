@@ -1591,6 +1591,11 @@ class MemoryStorage:
             conn.execute("DELETE FROM search_result_cache WHERE expires_at <= ?", (now,))
         self._commit()
 
+    def clear_embedding_cache(self) -> None:
+        """Clear cached vectors without changing memories or source markers."""
+        self._get_conn().execute("DELETE FROM embedding_cache")
+        self._commit()
+
     def cache_embedding(self, text_hash: str, embedding_blob: bytes) -> None:
         """Store an embedding in the persistent cache."""
         conn = self._get_conn()

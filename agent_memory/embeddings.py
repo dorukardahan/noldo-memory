@@ -74,10 +74,12 @@ class OpenRouterEmbeddings:
         self._storage: Optional[MemoryStorage] = None
 
     def clear_cache(self):
-        """Forget volatile vectors and fence admission by requests already in flight."""
+        """Clear both cache layers and fence requests already in flight."""
         self._cache_generation += 1
         self._cache.clear()
         self._cache_order.clear()
+        if self._storage is not None:
+            self._storage.clear_embedding_cache()
 
     def set_storage(self, storage: MemoryStorage) -> None:
         """Set the storage reference for persistent caching."""

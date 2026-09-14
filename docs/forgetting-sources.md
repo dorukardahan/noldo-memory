@@ -76,9 +76,13 @@ This remains a legacy-data limitation, not a guarantee that old unlinked graph
 content was erased.
 
 Forgetting clears the agent DB's search/embedding cache and advances recall
-invalidation. The API also clears the volatile embedding cache and fences its
-in-flight requests. Replacement writes also remove their old vector/FTS entries, so later forgetting
-does not miss those copies. A late background worker cannot attach a vector to a
+invalidation. The API also clears the embedder's volatile cache and actual
+persistent backing cache (currently in the main DB), and fences its in-flight
+requests. This invalidates shared cached vectors even when forgetting from a
+non-main agent. Other agents' memory records and source markers remain unchanged;
+their next embedding request may need recomputation. Replacement writes also
+remove their old vector/FTS entries, so later forgetting does not miss those
+copies. A late background worker cannot attach a vector to a
 deleted row. Previously orphaned, unlinked vectors cannot be attributed
 retroactively. This is logical product deletion, not forensic erasure of SQLite free pages,
 backups, already emitted context or host transcripts. No live database was opened

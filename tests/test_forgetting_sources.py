@@ -60,6 +60,57 @@ async def test_capture_forget_replay_relearn_and_agent_isolation(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('selector,batch', [('id', False), ('query', True)])
+async def test_non_main_forget_clears_embedder_backing_cache(client, monkeypatch, selector, batch):
+    import agent_memory.embeddings as embeddings
+
+    monkeypatch.setattr(embeddings, 'load_config', lambda: api._config)
+    api._config.embed_worker_enabled = False
+    embedder = embeddings.OpenRouterEmbeddings(api_key='synthetic', dimensions=4)
+    main = api._storage_pool.get('main')
+    embedder.set_storage(main)  # Match the API lifespan's shared backing cache.
+    calls = []
+
+    def synthetic_vectors(texts):
+        calls.extend(texts)
+        return [[1., 0., 0., 0.] for _ in texts]
+
+    monkeypatch.setattr(embedder, '_call_api', synthetic_vectors)
+    monkeypatch.setattr(api, '_embedder', embedder)
+    for agent in ('main', 'alpha', 'beta'):
+        response = await client.post('/v1/store', json={
+            'agent': agent, 'text': TEXT, 'session_id': 'source-a',
+        })
+        assert response.status_code == 200
+        if agent == 'alpha':
+            target = response.json()['id']
+    key = embedder._cache_key(TEXT)
+    assert main.get_cached_embedding(key) is not None
+    assert calls == [TEXT]
+
+    receipt = await client.request('DELETE', '/v1/forget', json={
+        'agent': 'alpha', selector: target if selector == 'id' else 'violet observatory',
+    })
+    assert receipt.status_code == 200 and receipt.json()['deleted']
+    assert main.get_cached_embedding(key) is None
+    assert not embedder._cache and not embedder._cache_order
+    assert api._storage_pool.get('alpha').get_memory(target) is None
+    assert api._storage_pool.get('alpha').source_is_forgotten('source-a')
+    for agent in ('main', 'beta'):
+        rows = (await client.get('/v1/export', params={'agent': agent})).json()
+        assert len(rows) == 1 and rows[0]['text'] == TEXT
+        assert not api._storage_pool.get(agent).source_is_forgotten('source-a')
+
+    # A new embedding request must recompute, not reload a forgotten cache entry.
+    if batch:
+        await embedder.embed_batch([TEXT])
+    else:
+        await embedder.embed(TEXT)
+    assert calls == [TEXT, TEXT]
+    assert api._storage_pool.get('alpha').get_memory(target) is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('endpoint', ['/v1/capture', '/v1/store', '/v1/import'])
 async def test_forget_wins_against_embedding_in_flight(client, endpoint):
     old = (await client.post('/v1/store', json={'text': TEXT, 'session_id': 'source-a'})).json()['id']
