@@ -1,0 +1,14 @@
+{
+  "description": "Independently authored synthetic episodes. No operator or user history.",
+  "episodes": [
+    {"id": "preference", "text": "I prefer quiet evening visits to the observatory, after the school groups leave.", "query": "Plan a peaceful trip to watch the stars", "kind": "implicit_preference"},
+    {"id": "image", "text": "The image caption describes the Aurora observatory with a violet dome and a spiral staircase.", "query": "Which color should the Aurora invitation use", "kind": "image_derivative"},
+    {"id": "audio", "text": "The recorded tour announcement says the Aurora observatory workshop begins at 19:30 on Friday.", "query": "Schedule Friday's workshop arrival", "kind": "audio_derivative"},
+    {"id": "document", "text": "The Aurora visitor guide states that the telescope deck is reached using the east elevator.", "query": "Find a step-free route to the telescope deck", "kind": "document_derivative"},
+    {"id": "link", "text": "The saved Aurora booking page says ticket changes are allowed until noon on the day before the visit.", "query": "Can we adjust the Aurora reservation at eleven tomorrow", "kind": "link_derivative"},
+    {"id": "outgoing", "text": "The assistant delivered a checklist for the Aurora visit: bring a red flashlight and a warm jacket.", "query": "Pack for our night at Aurora", "kind": "delivered_text"},
+    {"id": "typo", "text": "The synthetic project name is Starling Lantern. Its display background is charcoal gray.", "query": "Choose the Starling Lanterrn backdrop", "kind": "typo"},
+    {"id": "decision", "text": "We decided to use the west entrance for the Aurora group because the north gate closes early.", "query": "Tell the Aurora group where to meet", "kind": "decision_continuation"}
+  ],
+  "unrelated": ["How do I bake sourdough bread", "Explain hexadecimal arithmetic", "What causes ocean tides", "Translate good morning into Italian"]
+}

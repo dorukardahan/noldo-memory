@@ -1,0 +1,670 @@
+{
+  "host_version": "2026.9.3",
+  "node": "v24.19.0",
+  "input_episodes": 8,
+  "unrelated_queries": 4,
+  "native_provider": "none",
+  "native_fts": {
+    "enabled": true,
+    "available": true
+  },
+  "external_fetch_attempts": 0,
+  "model_calls": 0,
+  "embedding_calls": 0,
+  "input_mode": "native Markdown files versus NoldoMem HTTP store; no automatic capture or model answer claim",
+  "latency_scope": "native in-process search versus NoldoMem loopback HTTP; descriptive samples only, not a speedup claim",
+  "samples": [
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Plan a peaceful trip to watch the stars",
+      "expected": "preference",
+      "retrieved": [],
+      "expected_rank": 0,
+      "returned_chars": 0,
+      "elapsed_ms": 29.747
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Plan a peaceful trip to watch the stars",
+      "expected": "preference",
+      "retrieved": [],
+      "expected_rank": 0,
+      "returned_chars": 0,
+      "elapsed_ms": 332.327
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Which color should the Aurora invitation use",
+      "expected": "image",
+      "retrieved": [
+        "decision",
+        "image",
+        "document",
+        "audio",
+        "outgoing"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 475,
+      "elapsed_ms": 18.118
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Which color should the Aurora invitation use",
+      "expected": "image",
+      "retrieved": [
+        "document",
+        "link",
+        "decision",
+        "image",
+        "outgoing"
+      ],
+      "expected_rank": 4,
+      "returned_chars": 477,
+      "elapsed_ms": 82.728
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Schedule Friday's workshop arrival",
+      "expected": "audio",
+      "retrieved": [
+        "audio"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 95,
+      "elapsed_ms": 10.746
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Schedule Friday's workshop arrival",
+      "expected": "audio",
+      "retrieved": [
+        "audio"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 94,
+      "elapsed_ms": 125.174
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Find a step-free route to the telescope deck",
+      "expected": "document",
+      "retrieved": [
+        "document"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 92,
+      "elapsed_ms": 11.607
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Find a step-free route to the telescope deck",
+      "expected": "document",
+      "retrieved": [
+        "document"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 91,
+      "elapsed_ms": 51.54
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Can we adjust the Aurora reservation at eleven tomorrow",
+      "expected": "link",
+      "retrieved": [
+        "audio",
+        "decision",
+        "image",
+        "document",
+        "outgoing"
+      ],
+      "expected_rank": 0,
+      "returned_chars": 475,
+      "elapsed_ms": 13.029
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Can we adjust the Aurora reservation at eleven tomorrow",
+      "expected": "link",
+      "retrieved": [
+        "document",
+        "link",
+        "decision",
+        "image",
+        "audio"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 472,
+      "elapsed_ms": 57.139
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Pack for our night at Aurora",
+      "expected": "outgoing",
+      "retrieved": [
+        "audio",
+        "outgoing",
+        "decision",
+        "image",
+        "document"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 475,
+      "elapsed_ms": 13.723
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Pack for our night at Aurora",
+      "expected": "outgoing",
+      "retrieved": [
+        "link",
+        "decision",
+        "document",
+        "outgoing",
+        "audio"
+      ],
+      "expected_rank": 4,
+      "returned_chars": 478,
+      "elapsed_ms": 56.181
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Choose the Starling Lanterrn backdrop",
+      "expected": "typo",
+      "retrieved": [
+        "typo"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 89,
+      "elapsed_ms": 10.453
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Choose the Starling Lanterrn backdrop",
+      "expected": "typo",
+      "retrieved": [
+        "typo"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 88,
+      "elapsed_ms": 59.225
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Tell the Aurora group where to meet",
+      "expected": "decision",
+      "retrieved": [
+        "decision",
+        "image",
+        "document",
+        "audio",
+        "outgoing"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 475,
+      "elapsed_ms": 13.106
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Tell the Aurora group where to meet",
+      "expected": "decision",
+      "retrieved": [
+        "preference",
+        "link",
+        "decision",
+        "document",
+        "image"
+      ],
+      "expected_rank": 3,
+      "returned_chars": 458,
+      "elapsed_ms": 48.514
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "How do I bake sourdough bread",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 14.322
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "How do I bake sourdough bread",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 13.995
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Explain hexadecimal arithmetic",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 9.558
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Explain hexadecimal arithmetic",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 9.167
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "What causes ocean tides",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 8.199
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "What causes ocean tides",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 49.843
+    },
+    {
+      "system": "native",
+      "pass": "first-query",
+      "query": "Translate good morning into Italian",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 8.073
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "query": "Translate good morning into Italian",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 10.935
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Plan a peaceful trip to watch the stars",
+      "expected": "preference",
+      "retrieved": [],
+      "expected_rank": 0,
+      "returned_chars": 0,
+      "elapsed_ms": 7.505
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Plan a peaceful trip to watch the stars",
+      "expected": "preference",
+      "retrieved": [],
+      "expected_rank": 0,
+      "returned_chars": 0,
+      "elapsed_ms": 47.406
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Which color should the Aurora invitation use",
+      "expected": "image",
+      "retrieved": [
+        "decision",
+        "image",
+        "document",
+        "audio",
+        "outgoing"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 475,
+      "elapsed_ms": 17.286
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Which color should the Aurora invitation use",
+      "expected": "image",
+      "retrieved": [
+        "document",
+        "link",
+        "decision",
+        "image",
+        "audio"
+      ],
+      "expected_rank": 4,
+      "returned_chars": 472,
+      "elapsed_ms": 43.071
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Schedule Friday's workshop arrival",
+      "expected": "audio",
+      "retrieved": [
+        "audio"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 95,
+      "elapsed_ms": 8.214
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Schedule Friday's workshop arrival",
+      "expected": "audio",
+      "retrieved": [
+        "audio"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 94,
+      "elapsed_ms": 24.304
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Find a step-free route to the telescope deck",
+      "expected": "document",
+      "retrieved": [
+        "document"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 92,
+      "elapsed_ms": 10.996
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Find a step-free route to the telescope deck",
+      "expected": "document",
+      "retrieved": [
+        "document"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 91,
+      "elapsed_ms": 17.59
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Can we adjust the Aurora reservation at eleven tomorrow",
+      "expected": "link",
+      "retrieved": [
+        "audio",
+        "decision",
+        "image",
+        "document",
+        "outgoing"
+      ],
+      "expected_rank": 0,
+      "returned_chars": 475,
+      "elapsed_ms": 8.783
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Can we adjust the Aurora reservation at eleven tomorrow",
+      "expected": "link",
+      "retrieved": [
+        "document",
+        "link",
+        "decision",
+        "image",
+        "audio"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 472,
+      "elapsed_ms": 39.534
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Pack for our night at Aurora",
+      "expected": "outgoing",
+      "retrieved": [
+        "audio",
+        "outgoing",
+        "decision",
+        "image",
+        "document"
+      ],
+      "expected_rank": 2,
+      "returned_chars": 475,
+      "elapsed_ms": 8.014
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Pack for our night at Aurora",
+      "expected": "outgoing",
+      "retrieved": [
+        "link",
+        "decision",
+        "document",
+        "outgoing",
+        "audio"
+      ],
+      "expected_rank": 4,
+      "returned_chars": 478,
+      "elapsed_ms": 74.544
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Choose the Starling Lanterrn backdrop",
+      "expected": "typo",
+      "retrieved": [
+        "typo"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 89,
+      "elapsed_ms": 10.886
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Choose the Starling Lanterrn backdrop",
+      "expected": "typo",
+      "retrieved": [
+        "typo"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 88,
+      "elapsed_ms": 17.624
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Tell the Aurora group where to meet",
+      "expected": "decision",
+      "retrieved": [
+        "decision",
+        "image",
+        "document",
+        "audio",
+        "outgoing"
+      ],
+      "expected_rank": 1,
+      "returned_chars": 475,
+      "elapsed_ms": 9.982
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Tell the Aurora group where to meet",
+      "expected": "decision",
+      "retrieved": [
+        "preference",
+        "link",
+        "decision",
+        "document",
+        "image"
+      ],
+      "expected_rank": 3,
+      "returned_chars": 458,
+      "elapsed_ms": 35.678
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "How do I bake sourdough bread",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 6.849
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "How do I bake sourdough bread",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 7.328
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Explain hexadecimal arithmetic",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 8.665
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Explain hexadecimal arithmetic",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 48.362
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "What causes ocean tides",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 10.719
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "What causes ocean tides",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 7.949
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "query": "Translate good morning into Italian",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 8.169
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "query": "Translate good morning into Italian",
+      "expected": null,
+      "retrieved": [],
+      "expected_rank": null,
+      "returned_chars": 0,
+      "elapsed_ms": 47.085
+    }
+  ],
+  "date": "2026-09-10",
+  "noldomem_product_head": "f863e25fe397999baa98a20763b0b723209476ed",
+  "native_source_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "native_plugin_loader": true,
+  "real_native_keyed_state_store": true,
+  "temporary_area_removed": true,
+  "gateway_process_unchanged_ready": true,
+  "candidate_sources": {
+    "scripts/compare_openclaw_native.mjs": "abee1b249ffb689d74ffa304c012c232d4a5609f5a564e2616f9a17fbb82d282",
+    "scripts/runtime_test_api.py": "83815acd6a6b839f60f5cc02a31cb370c1c783351f123a668e1a3423b15287d9",
+    "agent_memory/api.py": "9b49f5f2156b4df1da965ffb83d8f0fcb1adb6a13ff3dc1769525efb6f36726f",
+    "agent_memory/storage.py": "0437c8e0fd35e4afd63cc81158fafab8f16b10eac944a8825af9a59abcb28277",
+    "agent_memory/search.py": "e12d9e16ebd9d3cf77d6e5c9209a52a7daa32ec3a8aa11f63b59a4d4b498b0ac"
+  },
+  "summary": [
+    {
+      "system": "native",
+      "pass": "first-query",
+      "related_found_in_top_5": 6,
+      "unrelated_nonempty": 0,
+      "sample_count": 12,
+      "median_ms": 12.318,
+      "max_ms": 29.747
+    },
+    {
+      "system": "native",
+      "pass": "repeated-query",
+      "related_found_in_top_5": 6,
+      "unrelated_nonempty": 0,
+      "sample_count": 12,
+      "median_ms": 8.724,
+      "max_ms": 17.286
+    },
+    {
+      "system": "noldomem",
+      "pass": "first-query",
+      "related_found_in_top_5": 7,
+      "unrelated_nonempty": 0,
+      "sample_count": 12,
+      "median_ms": 53.861,
+      "max_ms": 332.327
+    },
+    {
+      "system": "noldomem",
+      "pass": "repeated-query",
+      "related_found_in_top_5": 7,
+      "unrelated_nonempty": 0,
+      "sample_count": 12,
+      "median_ms": 37.606,
+      "max_ms": 74.544
+    }
+  ]
+}

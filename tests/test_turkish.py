@@ -1,5 +1,7 @@
 """Tests for Turkish NLP utilities."""
 
+import pytest
+
 
 from agent_memory.turkish import (
     ascii_fold,
@@ -26,17 +28,24 @@ class TestASCIIFolding:
 
 
 class TestLemmatize:
-    def test_basic_lemmatize(self):
-        result = lemmatize("hatırlıyorum")
-        # zeyrek should produce something like "hatırla"
-        assert "hatırla" in result or "hatırlıyorum" in result
+    def test_no_analyzer_is_explicit_passthrough_not_lemma_success(self):
+        with pytest.warns(FutureWarning, match="unchanged text"):
+            assert lemmatize("hatırlıyorum") == "hatırlıyorum"
+
+    def test_caller_analyzer_preserves_legacy_stem_adapter(self):
+        class Analyzer:
+            def lemmatize(self, token):
+                return [(token, ["hatırlamak"])]
+        assert lemmatize("hatırlıyorum", analyzer=Analyzer()) == "hatırla"
+        # This proves the adapter contract, not the quality of any NLP model.
 
     def test_empty(self):
-        assert lemmatize("") == ""
+        with pytest.warns(FutureWarning):
+            assert lemmatize("") == ""
 
     def test_english_passthrough(self):
-        result = lemmatize("remember")
-        assert "remember" in result
+        with pytest.warns(FutureWarning):
+            assert lemmatize("remember") == "remember"
 
 
 class TestTemporalParsing:
@@ -84,6 +93,14 @@ class TestStopwords:
 
 
 class TestNormalization:
+    def test_turkish_uppercase_dotted_and_dotless_letters(self):
+        assert normalize_text("IŞIL İNCİ IĞDIR") == "ışıl inci ığdır isil igdir"
+        assert tokenize_for_search("İNCİ") == ["inci", "inci"]
+
+    def test_legacy_morphology_flag_warns_without_an_analyzer(self):
+        with pytest.warns(FutureWarning, match="unchanged text"):
+            assert normalize_text("kitaplıkların", use_lemma=True) == "kitaplıkların kitapliklarin"
+
     def test_normalize(self):
         result = normalize_text("Bu çok güzel bir toplantı")
         # Should remove stopwords like "bu", "çok", "bir"

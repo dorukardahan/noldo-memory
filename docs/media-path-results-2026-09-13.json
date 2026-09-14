@@ -1,0 +1,91 @@
+{
+  "date": "2026-09-13",
+  "starting_pr_head": "a0097d8045bdbfffc773c08a74b8fb308c8f3a80",
+  "tested_source_sha256": {
+    "plugin/src/hooks.js": "6d620511983c01eeabb7575b07e78b66ef8b46673e26287a72073434b95265c2",
+    "adapters/hermes/noldomem/__init__.py": "3672297c06331d32a08445c9dd4859fe502cd60b03e3e8abb442b0258144a1a8",
+    "scripts/check_openclaw_gateway_lifecycle.py": "c64f65f1d8a5c86e5d56943bb1d75a8de8836cbde746d49d6f6b1c73f4d576a7",
+    "scripts/check_openclaw_gateway_lifecycle.mjs": "c961c89fa3cbde21eeba80d387f88eeff5a9af8a828125123138c2dde9d87d34",
+    "scripts/check_hermes_stable.py": "e860ea74d8aae64a807b0a546800a78ca3b7e01381141e21f45e8a9dad9b5027"
+  },
+  "new_model_calls": 0,
+  "new_embedding_calls": 0,
+  "new_paid_media_calls": 0,
+  "external_channel_sends": 0,
+  "prior_model_acceptance_restarted": false,
+  "hermes": {
+    "version": "v2026.9.7",
+    "stable_commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "execution": "verified stable checkout, isolated HOME/API/DB",
+    "python": "3.13.7",
+    "native_cloud_utf8_file_read": true,
+    "native_row_builder_memory_manager": true,
+    "derived_document_and_event_id_preserved": true,
+    "cross_session_document_injection": true,
+    "adjacent_raw_image_not_extraction": true,
+    "other_agent_export_empty": true,
+    "full_model_or_channel_loop": false
+  },
+  "openclaw": {
+    "installed_version": "2026.9.3",
+    "stable_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "api_python": "3.12.3",
+    "native_gateway_update_rehearsal_startup": true,
+    "native_apply_media_understanding_utf8_file": true,
+    "file_envelope": "actual native formatter, not handcrafted",
+    "public_sdk_completion_and_prompt_dispatch": true,
+    "default_agent_end_capture": true,
+    "captured_id": "db2bfe56eedb4dbc",
+    "captured_text": "The Aurora observatory roof opens at sunrise.",
+    "capture_source_session": "agent:alpha:learning",
+    "evidence": {
+      "role": "user",
+      "assertion": "derived",
+      "delivery": "received",
+      "modality": "document",
+      "representation": "extracted_text"
+    },
+    "cross_session_prompt_contains_same_id_text_evidence": true,
+    "other_agent_prompt_has_no_memory": true,
+    "http_post_sequence": [
+      {
+        "path": "/v1/store",
+        "agent": "alpha"
+      },
+      {
+        "path": "/v1/recall",
+        "agent": "alpha"
+      },
+      {
+        "path": "/v1/recall",
+        "agent": "beta"
+      }
+    ],
+    "direct_store_or_search": false,
+    "model_answer_test": false,
+    "raw_image_or_audio_decode": false,
+    "owned_fixture_removed": true,
+    "selected_production_service_pid_and_state_unchanged": true
+  },
+  "validation": {
+    "focused_pytest_passed": 130,
+    "focused_pytest_skipped": 1,
+    "new_stronger_capture_count_assertion_passed": true,
+    "ruff": "passed"
+  },
+  "failures_not_counted_as_success": [
+    "New adjacent-media representation regressions failed against starting candidate.",
+    "First native file-chain run did not capture the document.",
+    "One diagnostic native run confirmed the real blank line rejected by the existing parser.",
+    "A transient undefined-versus-null derivative classifier regression was fixed before the passing focused suite."
+  ],
+  "limits": [
+    "Synthetic SDK completion is not a model completion.",
+    "Utility file preprocessing is not universal in harness-owned interpretation.",
+    "No new PDF-to-answer, raw image/ASR or real delivery evidence.",
+    "Hermes audio metadata candidate and OpenClaw settled-media design remain upstream dependencies.",
+    "Absent legacy provenance cannot be reconstructed.",
+    "Automated review unavailable, not clean."
+  ]
+}

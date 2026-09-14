@@ -15,6 +15,8 @@ def test_openclaw_plugin_pack_is_installable():
         "noldomem_recall",
         "noldomem_store",
         "noldomem_pin",
+        "noldomem_forget",
+        "noldomem_relearn_source",
     ]
     assert manifest["activation"]["onStartup"] is True
 
@@ -44,7 +46,7 @@ def test_plugin_recall_omits_default_namespace_for_cross_namespace_search():
 
     assert "namespace: params.namespace || cfg.defaultNamespace" not in recall_source
     assert "if (namespace) body.namespace = namespace;" in recall_source
-    assert 'if (normalized === "all") return "all";' in recall_source
+    assert 'Use all for cross-agent recall' not in recall_source
 
 
 def test_native_plugin_registers_current_openclaw_typed_hooks():

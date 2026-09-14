@@ -1,0 +1,12 @@
+{
+  "episodes": [
+    {"id": "suffix", "text": "Kütüphanemizdeki kitaplıkların rafları ceviz ağacından yapıldı.", "queries": ["Kitaplık raflarının malzemesi neydi?", "Kutuphane kitaplik raf malzemesi"]},
+    {"id": "case", "text": "Işıl, IĞDIR sergisindeki İNCİ koleksiyonunun mavi kutusunu hazırladı.", "queries": ["Işıl'ın Iğdır sergisindeki inci kutusu hangi renkti?", "ISIL IGDIR inci kutusu"]},
+    {"id": "name", "text": "Gökçe'nin Deniz Feneri projesinde açılış saati 18.30 olarak belirlendi.", "queries": ["Gökçe için Deniz Feneri açılışını takvime ekleyeceğim."]},
+    {"id": "typo", "text": "Bisiklet gezisinin buluşma noktası lavanta bahçesinin giriş kapısıdır.", "queries": ["Bisikelt gezisi için nerede buluşacağız?"]},
+    {"id": "indirect", "text": "Yağmur başlayınca açık hava kukla gösterisini eski değirmenin içine taşıdık.", "queries": ["Islanmamak için taşındığımız gösteri mekânına tekrar gidelim."]},
+    {"id": "preference", "text": "Toplantılarımda şekersiz adaçayını tercih ediyorum.", "queries": ["Toplantı ikramını benim tercihlerime göre hazırla."]}
+  ],
+  "unrelated": ["Satürn'ün halkaları neden oluşur?", "Bir üçgenin iç açılarını hesapla."],
+  "other_agent": "Işıl, IĞDIR sergisindeki İNCİ koleksiyonunu turuncu bir sandığa yerleştirdi."
+}

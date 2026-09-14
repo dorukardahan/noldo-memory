@@ -1,0 +1,1069 @@
+{
+  "report_date": "2026-09-12",
+  "trace_utc_start": "2026-09-11T12:09:12.777188+00:00",
+  "trace_utc_end": "2026-09-11T12:24:28.215052+00:00",
+  "candidate_base_head": "92de23f3c9251ea8d56ab7131f138af52f693747",
+  "schema_fix": {
+    "file": "plugin/src/tools.js",
+    "sha256": "1dc53b95a741c75473756974c37c290c164bcb7b4fac4394a46885ae309215a0",
+    "base_head": "92de23f3c9251ea8d56ab7131f138af52f693747",
+    "first_fixed_turn_number": 3
+  },
+  "host": "OpenClaw 2026.9.3",
+  "stable_source_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "node": "24.19.0",
+  "native_entrypoint": "official agent exec CLI",
+  "configured_runtime": "codex",
+  "configured_transport": "stdio",
+  "model": "gpt-5.6-sol",
+  "provider": "openai",
+  "retrieval_mode": "keyword_only; no embedding or reranker calls",
+  "preflight": {
+    "candidate_source_verified": true,
+    "imported": true,
+    "status": "loaded",
+    "toolNames": [
+      "noldomem_recall",
+      "noldomem_store",
+      "noldomem_pin",
+      "noldomem_forget",
+      "noldomem_relearn_source"
+    ],
+    "typedHooks": [
+      {
+        "name": "agent_end"
+      },
+      {
+        "name": "before_prompt_build"
+      },
+      {
+        "name": "message_sent"
+      }
+    ],
+    "policy": {
+      "allowPromptInjection": true,
+      "allowConversationAccess": true,
+      "allowedModels": [],
+      "hasAllowedModelsConfig": false
+    }
+  },
+  "previous_application_turns": 1,
+  "previous_wall_seconds": 5.906240866985172,
+  "new_application_turns": 4,
+  "new_wall_seconds": 174.5515283383429,
+  "total_application_turns": 5,
+  "total_wall_seconds": 180.45776920532808,
+  "remaining_application_turns": 0,
+  "per_turn_limit_seconds": 120,
+  "host_limit_seconds": 600,
+  "physical_model_requests": "unknown",
+  "native_usage_totals": {
+    "input": 32309,
+    "output": 2969,
+    "cacheRead": 51200,
+    "cacheWrite": 0,
+    "reasoningTokens": 1177,
+    "total": 86478
+  },
+  "native_reported_cost_usd": 0,
+  "billing_verified": false,
+  "planned_scenarios": [
+    {
+      "prompt": "My Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "expected": "Persist the booking and preference through native memory capture/store."
+    },
+    {
+      "prompt": "My Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "expected": "Persist the booking and preference through native memory capture/store.",
+      "reason": "Distinct validation after repairing optional tool schema; earlier failure retained"
+    },
+    {
+      "prompt": "About my Aurora observatory visit: that is no longer right, I now prefer guided group visits instead of going without a group. The booking time stays the same.",
+      "expected": "Relate the correction to the earlier preference and preserve its previous validity."
+    },
+    {
+      "prompt": "For my Aurora observatory booking, what time am I going and what kind of visit suits me now? How was my preference different before? Who is my guide?",
+      "expected": "In a fresh session use Friday 19:30, guided group now, quiet/non-group before; do not invent the guide or reveal the other agent's Kestrel fact."
+    }
+  ],
+  "turns": [
+    {
+      "number": 2,
+      "prompt": "My Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "status": "exited",
+      "wall_seconds": 62.711507694097236,
+      "exit_code": 0,
+      "native": {
+        "ok": true,
+        "status": "ok",
+        "final": "Got it: Aurora Observatory this Friday at 19:30, and you prefer quiet, group-free visits.",
+        "usage": {
+          "input": 8585,
+          "output": 1124,
+          "cacheRead": 23040,
+          "cacheWrite": 0,
+          "reasoningTokens": 439,
+          "total": 32749,
+          "cost": {
+            "total": 0
+          }
+        },
+        "costUsd": 0,
+        "assistantTurns": 9,
+        "toolSummary": {
+          "calls": 10,
+          "tools": [
+            "noldomem_store",
+            "noldomem_recall"
+          ],
+          "failures": 9
+        },
+        "model": "gpt-5.6-sol",
+        "provider": "openai",
+        "sessionId": "ef7620b5-c982-446b-b563-ce4bbbe01f82"
+      },
+      "memory_rows": []
+    },
+    {
+      "number": 3,
+      "prompt": "My Aurora observatory booking is Friday at 19:30. I prefer quiet visits without a group.",
+      "status": "exited",
+      "wall_seconds": 25.18706932105124,
+      "exit_code": 0,
+      "native": {
+        "ok": true,
+        "status": "ok",
+        "final": "Got it — Aurora observatory, Friday at 19:30, with a preference for a quiet, non-group visit.",
+        "usage": {
+          "input": 3157,
+          "output": 211,
+          "cacheRead": 2688,
+          "cacheWrite": 0,
+          "reasoningTokens": 48,
+          "total": 6056,
+          "cost": {
+            "total": 0
+          }
+        },
+        "costUsd": 0,
+        "assistantTurns": 2,
+        "toolSummary": {
+          "calls": 2,
+          "tools": [
+            "noldomem_store"
+          ],
+          "failures": 0
+        },
+        "model": "gpt-5.6-sol",
+        "provider": "openai",
+        "sessionId": "3dc7d875-498b-4895-89b6-63e060ca5268"
+      },
+      "memory_rows": [
+        {
+          "id": "44adbf24403c4707",
+          "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8447495,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        },
+        {
+          "id": "a8e7b7ece1f1421d",
+          "text": "The user prefers quiet visits without a group.",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8549964,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "prompt": "About my Aurora observatory visit: that is no longer right, I now prefer guided group visits instead of going without a group. The booking time stays the same.",
+      "status": "exited",
+      "wall_seconds": 57.27132597519085,
+      "exit_code": 0,
+      "native": {
+        "ok": true,
+        "status": "ok",
+        "final": "Updated: you prefer a guided group visit for Aurora. The booking stays at 19:30 on Friday, September 11, 2026.",
+        "usage": {
+          "input": 13244,
+          "output": 1260,
+          "cacheRead": 16128,
+          "cacheWrite": 0,
+          "reasoningTokens": 632,
+          "total": 30632,
+          "cost": {
+            "total": 0
+          }
+        },
+        "costUsd": 0,
+        "assistantTurns": 8,
+        "toolSummary": {
+          "calls": 7,
+          "tools": [
+            "noldomem_recall",
+            "noldomem_store"
+          ],
+          "failures": 2
+        },
+        "model": "gpt-5.6-sol",
+        "provider": "openai",
+        "sessionId": "e0679c18-425f-4093-a120-ccb2b0ed4213"
+      },
+      "memory_rows": [
+        {
+          "id": "44adbf24403c4707",
+          "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8447495,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        },
+        {
+          "id": "a8e7b7ece1f1421d",
+          "text": "The user prefers quiet visits without a group.",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8549964,
+          "valid_from": null,
+          "valid_to": 1799659270.0,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        },
+        {
+          "id": "e29c021410354a33",
+          "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129281.4942193,
+          "valid_from": 1799659270.0,
+          "valid_to": null,
+          "supersedes": "a8e7b7ece1f1421d",
+          "source_session": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+          "evidence": {}
+        },
+        {
+          "id": "acc5d3673e2f43f6",
+          "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+          "memory_type": "fact",
+          "namespace": "default",
+          "created_at": 1789129317.4680243,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "prompt": "For my Aurora observatory booking, what time am I going and what kind of visit suits me now? How was my preference different before? Who is my guide?",
+      "status": "exited",
+      "wall_seconds": 29.38162534800358,
+      "exit_code": 0,
+      "native": {
+        "ok": true,
+        "status": "ok",
+        "final": "Your Aurora observatory booking is **today, Friday, September 11, 2026, at 19:30** (Istanbul time).\n\n- **Current preference:** a **guided group visit**\n- **Previous preference:** a **quiet visit without a group**\n- **Guide:** I don’t have a guide’s name in the booking details I can access.",
+        "usage": {
+          "input": 7323,
+          "output": 374,
+          "cacheRead": 9344,
+          "cacheWrite": 0,
+          "reasoningTokens": 58,
+          "total": 17041,
+          "cost": {
+            "total": 0
+          }
+        },
+        "costUsd": 0,
+        "assistantTurns": 5,
+        "toolSummary": {
+          "calls": 4,
+          "tools": [
+            "noldomem_recall"
+          ],
+          "failures": 0
+        },
+        "model": "gpt-5.6-sol",
+        "provider": "openai",
+        "sessionId": "9689b631-218b-4711-b322-5f09faf1bd35"
+      },
+      "memory_rows": [
+        {
+          "id": "44adbf24403c4707",
+          "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8447495,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        },
+        {
+          "id": "a8e7b7ece1f1421d",
+          "text": "The user prefers quiet visits without a group.",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129237.8549964,
+          "valid_from": null,
+          "valid_to": 1799659270.0,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+          "evidence": {}
+        },
+        {
+          "id": "e29c021410354a33",
+          "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+          "memory_type": "conversation",
+          "namespace": "default",
+          "created_at": 1789129281.4942193,
+          "valid_from": 1799659270.0,
+          "valid_to": null,
+          "supersedes": "a8e7b7ece1f1421d",
+          "source_session": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+          "evidence": {}
+        },
+        {
+          "id": "acc5d3673e2f43f6",
+          "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+          "memory_type": "fact",
+          "namespace": "default",
+          "created_at": 1789129317.4680243,
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "source_session": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+          "evidence": {}
+        }
+      ]
+    }
+  ],
+  "primary_tool_api_trace": [
+    {
+      "time": 1789128713.514422,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.0620167120359838
+    },
+    {
+      "time": 1789128713.515399,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user prefers quiet observatory visits without a group.",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.052183732157573104
+    },
+    {
+      "time": 1789128718.5728512,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.006441716104745865
+    },
+    {
+      "time": 1789128718.5732124,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user prefers quiet observatory visits without a group.",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.003687357995659113
+    },
+    {
+      "time": 1789128723.362871,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": "none",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Previous memory not found in this namespace",
+        "status_code": 404
+      },
+      "status": 404,
+      "wall_seconds": 0.013318985002115369
+    },
+    {
+      "time": 1789128727.4680903,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": ">",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Previous memory not found in this namespace",
+        "status_code": 404
+      },
+      "status": 404,
+      "wall_seconds": 0.0035752691328525543
+    },
+    {
+      "time": 1789128733.6618743,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.0020214389078319073
+    },
+    {
+      "time": 1789128740.5798392,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user's Aurora observatory booking is Friday, 2026-09-11 at 19:30 (Europe/Istanbul).",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.0028201360255479813
+    },
+    {
+      "time": 1789128745.5128438,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Aurora observatory booking Friday 19:30 quiet visits without a group",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true,
+        "as_of": 1789148460,
+        "namespace": "default"
+      },
+      "response": {
+        "count": 0,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": []
+      },
+      "status": 200,
+      "wall_seconds": 0.01275892392732203
+    },
+    {
+      "time": 1789128753.92522,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user prefers quiet observatory visits without a group.",
+        "supersedes": "",
+        "valid_from": 1789148460,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:ef7620b5-c982-446b-b563-ce4bbbe01f82",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Validation error",
+        "detail": [
+          {
+            "type": "string_too_short",
+            "loc": [
+              "body",
+              "supersedes"
+            ],
+            "msg": "String should have at least 1 character"
+          }
+        ]
+      },
+      "status": 422,
+      "wall_seconds": 0.00237125507555902
+    },
+    {
+      "time": 1789129237.8624108,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "id": "44adbf24403c4707",
+        "stored": true,
+        "merged": false,
+        "similarity": null,
+        "agent": "synthetic-memory"
+      },
+      "status": 200,
+      "wall_seconds": 0.02069724816828966
+    },
+    {
+      "time": 1789129237.862753,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "The user prefers quiet visits without a group.",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:3dc7d875-498b-4895-89b6-63e060ca5268",
+        "source": "user",
+        "namespace": "default"
+      },
+      "response": {
+        "id": "a8e7b7ece1f1421d",
+        "stored": true,
+        "merged": false,
+        "similarity": null,
+        "agent": "synthetic-memory"
+      },
+      "status": 200,
+      "wall_seconds": 0.020762125961482525
+    },
+    {
+      "time": 1789129275.3525217,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Aurora observatory visit preference booking time going without a group",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true
+      },
+      "response": {
+        "count": 2,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "a8e7b7ece1f1421d",
+            "text": "The user prefers quiet visits without a group.",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.5225247868802398
+    },
+    {
+      "time": 1789129281.5164788,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+        "supersedes": "a8e7b7ece1f1421d",
+        "valid_from": 1799659270,
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+        "source": "user-correction",
+        "namespace": "default"
+      },
+      "response": {
+        "action": "inserted",
+        "id": "e29c021410354a33",
+        "supersedes": "a8e7b7ece1f1421d",
+        "stored": true,
+        "merged": false,
+        "agent": "synthetic-memory"
+      },
+      "status": 200,
+      "wall_seconds": 0.02964902389794588
+    },
+    {
+      "time": 1789129290.43998,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true,
+        "namespace": "default"
+      },
+      "response": {
+        "count": 2,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "a8e7b7ece1f1421d",
+            "text": "The user prefers quiet visits without a group.",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": 1799659270.0,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.08544733701273799
+    },
+    {
+      "time": 1789129296.4236858,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Aurora observatory guided group visit booking remains 19:30",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true,
+        "as_of": 1799659271,
+        "namespace": "default"
+      },
+      "response": {
+        "count": 2,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "e29c021410354a33",
+            "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": 1799659270.0,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 1.223775987047702
+    },
+    {
+      "time": 1789129300.0536308,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+        "supersedes": "e29c021410354a33",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+        "source": "user-correction",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Replacement predates the previous validity interval",
+        "status_code": 409
+      },
+      "status": 409,
+      "wall_seconds": 0.005609986837953329
+    },
+    {
+      "time": 1789129309.0783668,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "For the Aurora observatory visit, the user now prefers a guided group visit instead of visiting without a group. The booking remains Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+        "supersedes": "a8e7b7ece1f1421d",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+        "source": "user-correction",
+        "namespace": "default"
+      },
+      "response": {
+        "error": "Previous memory is missing or already superseded",
+        "status_code": 409
+      },
+      "status": 409,
+      "wall_seconds": 0.003877521026879549
+    },
+    {
+      "time": 1789129317.5179713,
+      "path": "/v1/store",
+      "method": "POST",
+      "request": {
+        "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:explicit:e0679c18-425f-4093-a120-ccb2b0ed4213",
+        "source": "user-correction",
+        "namespace": "default"
+      },
+      "response": {
+        "id": "acc5d3673e2f43f6",
+        "stored": true,
+        "merged": false,
+        "similarity": null,
+        "agent": "synthetic-memory"
+      },
+      "status": 200,
+      "wall_seconds": 0.05513030104339123
+    },
+    {
+      "time": 1789129454.584929,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Aurora observatory booking time visit type current preference previous preference guide",
+        "limit": 10,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true
+      },
+      "response": {
+        "count": 3,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "acc5d3673e2f43f6",
+            "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+            "memory_type": "fact",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "a8e7b7ece1f1421d",
+            "text": "The user prefers quiet visits without a group.",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": 1799659270.0,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.06122229900211096
+    },
+    {
+      "time": 1789129457.2968028,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Aurora observatory guide name booking September 11 2026 19:30",
+        "limit": 10,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true
+      },
+      "response": {
+        "count": 2,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "acc5d3673e2f43f6",
+            "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+            "memory_type": "fact",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.05453085899353027
+    },
+    {
+      "time": 1789129459.9644604,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "Who is my guide observatory Aurora visit guide",
+        "limit": 20,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true
+      },
+      "response": {
+        "count": 3,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "acc5d3673e2f43f6",
+            "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+            "memory_type": "fact",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "a8e7b7ece1f1421d",
+            "text": "The user prefers quiet visits without a group.",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": 1799659270.0,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.023435160983353853
+    },
+    {
+      "time": 1789129463.9761026,
+      "path": "/v1/recall",
+      "method": "POST",
+      "request": {
+        "query": "guide assigned to my booking guide name host tour leader",
+        "limit": 20,
+        "agent": "synthetic-memory",
+        "max_tokens": 2000,
+        "include_history": true
+      },
+      "response": {
+        "count": 2,
+        "triggered": false,
+        "search_mode": "keyword_only",
+        "degraded": true,
+        "results": [
+          {
+            "id": "acc5d3673e2f43f6",
+            "text": "Current Aurora observatory preference: the user prefers a guided group visit, not a visit without a group. Booking time is unchanged: Friday, September 11, 2026 at 19:30 (Europe/Istanbul).",
+            "memory_type": "fact",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          },
+          {
+            "id": "44adbf24403c4707",
+            "text": "The user has an Aurora observatory booking on Friday, September 11, 2026 at 19:30 (Europe/Istanbul time).",
+            "memory_type": "conversation",
+            "valid_from": null,
+            "valid_to": null,
+            "evidence": {}
+          }
+        ]
+      },
+      "status": 200,
+      "wall_seconds": 0.017626503948122263
+    }
+  ],
+  "model_free_regression": {
+    "native_loader": true,
+    "native_schema_projection": true,
+    "real_tool_http_db": true,
+    "null_new_store": true,
+    "current_and_previous": true,
+    "invalid_revision_rejected": true,
+    "agent_isolation": true,
+    "receipt_relearning": true,
+    "model_requests": 0
+  },
+  "assessment": {
+    "new_store_after_null_schema_fix": "passed",
+    "implicit_cross_session_tool_recall": "observed",
+    "correct_prior_id_selected": "observed",
+    "natural_correction_current_validity": "failed: future timestamp supplied, then independent current record inserted",
+    "current_previous_preference_in_answer": "observed from independent current record plus still-current old family row",
+    "unknown_guide_abstention": "observed; no other-agent Kestrel disclosure",
+    "fully_evidence_grounded_answer": "not passed: calendar date and timezone not supplied by synthetic user",
+    "automatic_hook_capture_injection": "not observed in these native CLI turns",
+    "native_http_tool_calls": 23,
+    "successful_tool_calls": 12,
+    "failed_tool_calls": 11
+  },
+  "cleanup": {
+    "temporary_api_stopped": true,
+    "test_root_removed": true,
+    "logout_or_revoke_invoked": false,
+    "production_pids_unchanged": true,
+    "installed_codex_plugin_preserved": true
+  }
+}

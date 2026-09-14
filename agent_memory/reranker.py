@@ -135,14 +135,9 @@ class CrossEncoderReranker:
         return self._model is not None
 
     def _cache_key(self, query: str, doc_id: Optional[str], text: str) -> str:
-        h = hashlib.sha1()
-        h.update(query.encode("utf-8", errors="ignore"))
-        h.update(b"\n")
-        if doc_id:
-            h.update(str(doc_id).encode("utf-8", errors="ignore"))
-        else:
-            h.update(text.encode("utf-8", errors="ignore"))
-        return h.hexdigest()
+        # Caller supplies scoped IDs; text also matters after an in-place edit.
+        identity = json.dumps([query, doc_id, text], ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha1(identity.encode("utf-8", errors="ignore")).hexdigest()
 
     def _cache_get(self, key: str) -> Optional[float]:
         item = self._cache.get(key)
@@ -289,14 +284,9 @@ class APIReranker:
             return []
 
     def _cache_key(self, query: str, doc_id: Optional[str], text: str) -> str:
-        h = hashlib.sha1()
-        h.update(query.encode("utf-8", errors="ignore"))
-        h.update(b"\n")
-        if doc_id:
-            h.update(str(doc_id).encode("utf-8", errors="ignore"))
-        else:
-            h.update(text.encode("utf-8", errors="ignore"))
-        return h.hexdigest()
+        # Caller supplies scoped IDs; text also matters after an in-place edit.
+        identity = json.dumps([query, doc_id, text], ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha1(identity.encode("utf-8", errors="ignore")).hexdigest()
 
     def _cache_get(self, key: str) -> Optional[float]:
         item = self._cache.get(key)

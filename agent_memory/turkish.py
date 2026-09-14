@@ -1,6 +1,6 @@
 """Turkish NLP utilities.
 
-* **zeyrek** — morphological analysis & lemmatization
+* Dependency-free lexical normalisation; caller-supplied morphology is optional
 * **dateparser** — temporal expression parsing (Turkish + English)
 * ASCII folding for Turkish special characters
 * Turkish stopwords
@@ -11,30 +11,11 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Lazy-loaded heavy deps
-# ---------------------------------------------------------------------------
-
-_zeyrek_analyzer = None
-
-
-def _get_zeyrek():
-    """Lazy-load zeyrek morphological analyzer."""
-    global _zeyrek_analyzer
-    if _zeyrek_analyzer is None:
-        try:
-            import zeyrek
-            _zeyrek_analyzer = zeyrek.MorphAnalyzer()
-            logger.info("zeyrek MorphAnalyzer loaded")
-        except ImportError:
-            logger.warning("zeyrek not installed — lemmatization disabled")
-    return _zeyrek_analyzer
-
 
 # ---------------------------------------------------------------------------
 # Turkish stopwords
@@ -86,17 +67,24 @@ def ascii_fold(text: str) -> str:
 # Lemmatisation
 # ---------------------------------------------------------------------------
 
-def lemmatize(text: str) -> str:
-    """Lemmatize Turkish text using zeyrek.
+def lemmatize(text: str, *, analyzer=None) -> str:
+    """Legacy morphology adapter; no bundled analyzer or model downloads.
 
-    Returns the lemmatized form of each word joined by spaces.
-    Falls back to the original word if zeyrek is unavailable or fails.
+    Without an explicit analyzer, returns the input unchanged and warns. This
+    preserves the former dependency-unavailable fallback, not successful
+    morphological analysis. Supply an object with ``lemmatize(token)`` returning
+    ``[(token, [lemma, ...])]`` to retain that caller-owned integration.
 
-    >>> lemmatize("hatırlıyorum")  # doctest: +SKIP
-    'hatırla'
+    The legacy algorithm strips infinitive endings: its output can be a stem,
+    not a linguistic lemma. The name is retained for source compatibility.
     """
-    analyzer = _get_zeyrek()
     if analyzer is None:
+        warnings.warn(
+            "NoldoMem no longer supplies morphological analysis; lemmatize returns "
+            "unchanged text. Use normalize_text for lexical normalization or pass "
+            "a caller-owned analyzer explicitly.",
+            FutureWarning, stacklevel=2,
+        )
         return text
 
     tokens = re.findall(r"[\w']+", text, re.UNICODE)
@@ -122,9 +110,9 @@ def lemmatize(text: str) -> str:
     return " ".join(lemmas)
 
 
-def lemmatize_tokens(text: str) -> List[str]:
-    """Return a list of lemmatized tokens (useful for FTS indexing)."""
-    return lemmatize(text).split()
+def lemmatize_tokens(text: str, *, analyzer=None) -> List[str]:
+    """Split the legacy adapter output; see :func:`lemmatize` migration notes."""
+    return lemmatize(text, analyzer=analyzer).split()
 
 
 # ---------------------------------------------------------------------------
@@ -266,17 +254,19 @@ def parse_temporal(
 # ---------------------------------------------------------------------------
 
 _TOKEN_RE = re.compile(r"[\w']+", re.UNICODE)
+_TR_LOWER_TABLE = str.maketrans({"I": "ı", "İ": "i"})
 
 
-def normalize_text(text: str, use_lemma: bool = True) -> str:
-    """Full normalisation: lowercase → lemmatize → ASCII fold → remove stopwords.
+def normalize_text(text: str, use_lemma: bool = False, *, analyzer=None) -> str:
+    """Lexical normalisation: lowercase, ASCII fold and remove stopwords.
 
-    The result is suitable for FTS5 indexing or query expansion.
+    No stemming/lemmatisation is implied. Legacy ``use_lemma=True`` requires a
+    caller-owned analyzer for morphology; otherwise it warns and passes through.
     """
-    text = text.lower()
+    text = text.translate(_TR_LOWER_TABLE).lower()
 
     if use_lemma:
-        text = lemmatize(text)
+        text = lemmatize(text, analyzer=analyzer)
 
     # ASCII fold produces an extra copy for matching
     folded = ascii_fold(text)
@@ -288,10 +278,11 @@ def normalize_text(text: str, use_lemma: bool = True) -> str:
     return " ".join(dict.fromkeys(filtered))  # dedupe preserving order
 
 
-def tokenize_for_search(text: str) -> List[str]:
+def tokenize_for_search(text: str, *, analyzer=None) -> List[str]:
     """Tokenize and normalize for search queries (no dedup)."""
-    text = text.lower()
-    text = lemmatize(text)
+    text = text.translate(_TR_LOWER_TABLE).lower()
+    if analyzer is not None:
+        text = lemmatize(text, analyzer=analyzer)
     folded = ascii_fold(text)
     combined = f"{text} {folded}"
     tokens = _TOKEN_RE.findall(combined)

@@ -605,8 +605,15 @@ class KnowledgeGraph:
         text: str,
         source: str = "",
         timestamp: str = "",
+        source_memory_id: Optional[str] = None,
     ) -> ExtractedEntities:
         """Extract entities and persist to storage + create co-occurrence links."""
+        if source_memory_id is not None:
+            with self.storage.graph_source(source_memory_id):
+                return self._persist_text(text, source, timestamp, source_memory_id)
+        return self._persist_text(text, source, timestamp, None)
+
+    def _persist_text(self, text, source, timestamp, source_memory_id):
         entities = self.extractor.extract(text, source, timestamp)
         all_ents = entities.all_entities()
 
@@ -697,7 +704,7 @@ class KnowledgeGraph:
                 object_value=obj_val,
                 confidence=rel["confidence"],
                 valid_from=None,  # defaults to now
-                source_memory_id=None # passed if available (todo: pass from caller?)
+                source_memory_id=source_memory_id
             )
 
         return entities

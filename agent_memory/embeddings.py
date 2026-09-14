@@ -67,10 +67,19 @@ class OpenRouterEmbeddings:
             self._headers["X-Embedding-Token"] = f"Bearer {_embed_token}"
 
         # Build an LRU cache keyed on text hash
+        self._cache_generation = 0
         self._cache_size = cache_size
         self._cache: dict[str, List[float]] = {}
         self._cache_order: list[str] = []
         self._storage: Optional[MemoryStorage] = None
+
+    def clear_cache(self):
+        """Clear both cache layers and fence requests already in flight."""
+        self._cache_generation += 1
+        self._cache.clear()
+        self._cache_order.clear()
+        if self._storage is not None:
+            self._storage.clear_embedding_cache()
 
     def set_storage(self, storage: MemoryStorage) -> None:
         """Set the storage reference for persistent caching."""
@@ -164,6 +173,7 @@ class OpenRouterEmbeddings:
         Text is truncated to ``max_embed_chars`` (default 3500) before embedding
         to avoid exceeding the llama-server per-slot context window.
         """
+        generation = self._cache_generation
         cfg = load_config()
         text = text[:cfg.max_embed_chars]
 
@@ -185,6 +195,9 @@ class OpenRouterEmbeddings:
         vectors = await asyncio.to_thread(self._call_api, [text])
         vec = vectors[0]
 
+        if generation != self._cache_generation:
+            return vec
+
         # 4. Store in both caches
         self._cache_put(text, vec)
         if self._storage:
@@ -198,6 +211,7 @@ class OpenRouterEmbeddings:
 
         Texts are truncated to ``max_embed_chars`` before embedding.
         """
+        generation = self._cache_generation
         cfg = load_config()
         texts = [t[:cfg.max_embed_chars] for t in texts]
         results: List[Optional[List[float]]] = [None] * len(texts)
@@ -229,6 +243,8 @@ class OpenRouterEmbeddings:
             vectors = await asyncio.to_thread(self._call_api, uncached_texts)
             for idx, vec in zip(uncached_indices, vectors):
                 results[idx] = vec
+                if generation != self._cache_generation:
+                    continue
                 self._cache_put(texts[idx], vec)
                 if self._storage:
                     key = self._cache_key(texts[idx])
@@ -264,10 +280,13 @@ class OpenRouterEmbeddings:
         if not texts:
             return []
 
+        generation = self._cache_generation
         results: List[Optional[List[float]]] = [None] * len(texts)
 
         # Process in sub-batches to avoid timeouts on large batches
         for sub_start in range(0, len(texts), max_sub_batch):
+            if generation != self._cache_generation:
+                return results
             sub_end = min(sub_start + max_sub_batch, len(texts))
             sub_indices = list(range(sub_start, sub_end))
             sub_texts = texts[sub_start:sub_end]
@@ -286,6 +305,8 @@ class OpenRouterEmbeddings:
 
             # Fallback: embed individually
             for idx, text in zip(sub_indices, sub_texts):
+                if generation != self._cache_generation:
+                    return results
                 try:
                     vec = await self.embed(text)
                     results[idx] = vec

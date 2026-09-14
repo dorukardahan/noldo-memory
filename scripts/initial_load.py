@@ -226,6 +226,7 @@ async def main() -> None:
                     kg.process_text(
                         chunk.text,
                         source=chunk.session_id,
+                        source_memory_id=chunk.md5,
                         timestamp=chunk.timestamp,
                     )
                 except Exception as exc:

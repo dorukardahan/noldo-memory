@@ -1,0 +1,483 @@
+{
+  "date": "2026-09-13",
+  "tested_head": "8d9c8afe590b2c2e9ce358d6e403cda0fc992057",
+  "host": {
+    "version": "2026.9.3",
+    "commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "harness": "codex",
+    "plugin": "@openclaw/codex@2026.9.3",
+    "install_trust": "trusted-official",
+    "lifecycle": "normal Gateway startup, startupSettled awaited"
+  },
+  "budget": {
+    "newly_authorized_applications": 2,
+    "started_applications": 2,
+    "per_application_limit_seconds": 120,
+    "total_limit_seconds": 240,
+    "wall_seconds": 24.23104874812998,
+    "physical_model_requests": "not independently measured",
+    "native_reported_usage_sum": {
+      "input": 5195,
+      "output": 332,
+      "cacheRead": 19584,
+      "cacheWrite": 0,
+      "reasoningTokens": 108,
+      "total": 25111
+    },
+    "prior_allowances_not_reset": true
+  },
+  "initial_learning": "Three model-free public SDK completion events; no script-issued revision or hand-written model memory context.",
+  "turns": [
+    {
+      "number": 1,
+      "prompt": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+      "seconds": 16.47382482001558,
+      "exit_code": 0,
+      "timeout": false,
+      "answer": "Updated: you now prefer a **guided group** for the Aurora observatory visit. Your booking remains **Friday at 19:30**.",
+      "native_usage": {
+        "input": 3860,
+        "output": 211,
+        "cacheRead": 15232,
+        "cacheWrite": 0,
+        "reasoningTokens": 44,
+        "total": 19303
+      },
+      "successful_tools": [
+        "noldomem_store"
+      ],
+      "run_id": "6888d98c-3ec9-4327-a908-6708be9717cd",
+      "rows": [
+        {
+          "id": "1f4b1f399b8945b1",
+          "text": "My Aurora observatory booking is Friday at 19:30.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:seed-booking",
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "created_at": 1789272564.8397517
+        },
+        {
+          "id": "355af4d82322437d",
+          "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:seed-preference",
+          "valid_from": null,
+          "valid_to": 1789272578.930856,
+          "supersedes": null,
+          "created_at": 1789272564.8543003
+        },
+        {
+          "id": "9702bfaf4d694cf0",
+          "text": "For the Aurora observatory visit, the user prefers a guided group.",
+          "source": "explicit-revision",
+          "source_session": "agent:synthetic-memory:acceptance-1",
+          "valid_from": 1789272578.930856,
+          "valid_to": null,
+          "supersedes": "355af4d82322437d",
+          "created_at": 1789272578.9309738
+        },
+        {
+          "id": "5d960c2a4fc24eb9",
+          "text": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:acceptance-1",
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "created_at": 1789272581.6408987
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "prompt": "What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?",
+      "seconds": 7.757223928114399,
+      "exit_code": 0,
+      "timeout": false,
+      "answer": "- **Time:** Friday at **19:30**\n- **Preference change:** You now prefer a **guided group**, whereas before you preferred a **quiet visit without a group**\n- **Guide:** No guide’s name is recorded in the available information.",
+      "native_usage": {
+        "input": 1335,
+        "output": 121,
+        "cacheRead": 4352,
+        "cacheWrite": 0,
+        "reasoningTokens": 64,
+        "total": 5808
+      },
+      "successful_tools": [],
+      "run_id": "3475bbc7-ee54-4eff-8790-dff84c7adc62",
+      "rows": [
+        {
+          "id": "1f4b1f399b8945b1",
+          "text": "My Aurora observatory booking is Friday at 19:30.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:seed-booking",
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "created_at": 1789272564.8397517
+        },
+        {
+          "id": "355af4d82322437d",
+          "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:seed-preference",
+          "valid_from": null,
+          "valid_to": 1789272578.930856,
+          "supersedes": null,
+          "created_at": 1789272564.8543003
+        },
+        {
+          "id": "9702bfaf4d694cf0",
+          "text": "For the Aurora observatory visit, the user prefers a guided group.",
+          "source": "explicit-revision",
+          "source_session": "agent:synthetic-memory:acceptance-1",
+          "valid_from": 1789272578.930856,
+          "valid_to": null,
+          "supersedes": "355af4d82322437d",
+          "created_at": 1789272578.9309738
+        },
+        {
+          "id": "5d960c2a4fc24eb9",
+          "text": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:acceptance-1",
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "created_at": 1789272581.6408987
+        },
+        {
+          "id": "ec5601cc98744650",
+          "text": "What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?",
+          "source": "plugin-auto-capture",
+          "source_session": "agent:synthetic-memory:acceptance-2",
+          "valid_from": null,
+          "valid_to": null,
+          "supersedes": null,
+          "created_at": 1789272589.442583
+        }
+      ]
+    }
+  ],
+  "http_trace": [
+    {
+      "phase": "seed",
+      "time": 1789272564.8168962,
+      "path": "/v1/store",
+      "request": {
+        "text": "My Aurora observatory booking is Friday at 19:30.",
+        "agent": "synthetic-memory",
+        "source": "plugin-auto-capture",
+        "session_id": "agent:synthetic-memory:seed-booking",
+        "evidence": {
+          "role": "user",
+          "assertion": "reported",
+          "delivery": "received",
+          "modality": "text",
+          "representation": "text"
+        },
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    },
+    {
+      "phase": "seed",
+      "time": 1789272564.8525088,
+      "path": "/v1/store",
+      "request": {
+        "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+        "agent": "synthetic-memory",
+        "source": "plugin-auto-capture",
+        "session_id": "agent:synthetic-memory:seed-preference",
+        "evidence": {
+          "role": "user",
+          "assertion": "reported",
+          "delivery": "received",
+          "modality": "text",
+          "representation": "text"
+        },
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    },
+    {
+      "phase": "seed",
+      "time": 1789272564.8681796,
+      "path": "/v1/store",
+      "request": {
+        "text": "The Aurora observatory guide is Kestrel.",
+        "agent": "synthetic-other",
+        "source": "plugin-auto-capture",
+        "session_id": "agent:synthetic-other:seed-guide",
+        "evidence": {
+          "role": "user",
+          "assertion": "reported",
+          "delivery": "received",
+          "modality": "text",
+          "representation": "text"
+        },
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    },
+    {
+      "phase": "turn-1",
+      "time": 1789272570.1724496,
+      "path": "/v1/recall",
+      "request": {
+        "query": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "namespace": "default",
+        "max_tokens": 2000
+      },
+      "status": 200,
+      "recalled_ids": [
+        "355af4d82322437d",
+        "1f4b1f399b8945b1"
+      ],
+      "search_mode": "keyword_only",
+      "degraded": true
+    },
+    {
+      "phase": "turn-1",
+      "time": 1789272578.9287517,
+      "path": "/v1/store",
+      "request": {
+        "text": "For the Aurora observatory visit, the user prefers a guided group.",
+        "supersedes": "355af4d82322437d",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:acceptance-1",
+        "source": "agent-tool",
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    },
+    {
+      "phase": "turn-1",
+      "time": 1789272581.6393063,
+      "path": "/v1/store",
+      "request": {
+        "text": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+        "agent": "synthetic-memory",
+        "source": "plugin-auto-capture",
+        "session_id": "agent:synthetic-memory:acceptance-1",
+        "evidence": {
+          "role": "user",
+          "assertion": "reported",
+          "delivery": "received",
+          "modality": "text",
+          "representation": "text"
+        },
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    },
+    {
+      "phase": "turn-2",
+      "time": 1789272583.4254787,
+      "path": "/v1/recall",
+      "request": {
+        "query": "What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?",
+        "limit": 5,
+        "agent": "synthetic-memory",
+        "namespace": "default",
+        "max_tokens": 2000
+      },
+      "status": 200,
+      "recalled_ids": [
+        "5d960c2a4fc24eb9",
+        "1f4b1f399b8945b1",
+        "9702bfaf4d694cf0"
+      ],
+      "search_mode": "keyword_only",
+      "degraded": true
+    },
+    {
+      "phase": "turn-2",
+      "time": 1789272589.4405806,
+      "path": "/v1/store",
+      "request": {
+        "text": "What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?",
+        "agent": "synthetic-memory",
+        "source": "plugin-auto-capture",
+        "session_id": "agent:synthetic-memory:acceptance-2",
+        "evidence": {
+          "role": "user",
+          "assertion": "reported",
+          "delivery": "received",
+          "modality": "text",
+          "representation": "text"
+        },
+        "namespace": "default"
+      },
+      "status": 200,
+      "recalled_ids": [],
+      "search_mode": null,
+      "degraded": null
+    }
+  ],
+  "observed_native_hooks": [
+    {
+      "at": 1789272564802,
+      "kind": "agent_end",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:seed-booking",
+      "success": true,
+      "message_count": 2
+    },
+    {
+      "at": 1789272564850,
+      "kind": "agent_end",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:seed-preference",
+      "success": true,
+      "message_count": 2
+    },
+    {
+      "at": 1789272564865,
+      "kind": "agent_end",
+      "agent": "synthetic-other",
+      "session": "agent:synthetic-other:seed-guide",
+      "success": true,
+      "message_count": 2
+    },
+    {
+      "at": 1789272570415,
+      "kind": "before_prompt_build",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-1"
+    },
+    {
+      "at": 1789272570589,
+      "kind": "llm_input",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-1",
+      "run": "6888d98c-3ec9-4327-a908-6708be9717cd",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "memory_boundary": true,
+      "memory_ids": [
+        "355af4d82322437d",
+        "1f4b1f399b8945b1"
+      ],
+      "has_booking": true,
+      "has_prior_preference": true,
+      "has_other_agent_guide": false,
+      "new_validity_contract": true
+    },
+    {
+      "at": 1789272581362,
+      "kind": "agent_end",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-1",
+      "success": true,
+      "message_count": 5
+    },
+    {
+      "at": 1789272583443,
+      "kind": "before_prompt_build",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-2"
+    },
+    {
+      "at": 1789272583544,
+      "kind": "llm_input",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-2",
+      "run": "3475bbc7-ee54-4eff-8790-dff84c7adc62",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "memory_boundary": true,
+      "memory_ids": [
+        "5d960c2a4fc24eb9",
+        "1f4b1f399b8945b1",
+        "9702bfaf4d694cf0"
+      ],
+      "has_booking": true,
+      "has_prior_preference": false,
+      "has_other_agent_guide": false,
+      "new_validity_contract": true
+    },
+    {
+      "at": 1789272589362,
+      "kind": "agent_end",
+      "agent": "synthetic-memory",
+      "session": "agent:synthetic-memory:acceptance-2",
+      "success": true,
+      "message_count": 2
+    }
+  ],
+  "checks": {
+    "model_selected_existing_revision_id": true,
+    "undated_validity_omitted": true,
+    "validity_uses_server_write_time": true,
+    "prior_revision_closed_at_new_validity": true,
+    "retrieval_ids_match_native_injection": true,
+    "distinct_session_answer_grounded": true,
+    "no_invented_calendar_date_or_timezone": true,
+    "other_agent_guide_absent_from_injection_and_answers": true,
+    "model_triggered_auto_capture_observed": true,
+    "question_capture_defect_observed": true
+  },
+  "qualification": "The second answer can recover the previous preference from the captured correction text. It did not issue a historical recall tool call or inject the closed revision itself.",
+  "post_model_fix": {
+    "behavior": "Exclude bounded English/Turkish question-only turns before capture length/keyword admission.",
+    "models_rerun": false,
+    "focused_tests_passed": 29,
+    "regression_failed_before_fix": true,
+    "installed_model_free_lifecycle": {
+      "host": "2026.9.3",
+      "node": "24.19.0",
+      "question_not_stored": true,
+      "fact_stored": true,
+      "cross_session_injection": true,
+      "other_agent_excluded": true,
+      "http_paths": [
+        "/v1/store",
+        "/v1/recall",
+        "/v1/recall"
+      ],
+      "model_calls": 0,
+      "update_rehearsal": true
+    },
+    "source_sha256": {
+      "plugin/src/hooks.js": "f3752a1ef6a868cad777e0126aaa95c75591ecae715e8be2077def0a80865e12",
+      "scripts/check_openclaw_gateway_lifecycle.mjs": "b9ee1167188dda0a044484ccadd3775648b8e66444f16112d47e47fdbc09b142"
+    }
+  },
+  "cleanup": {
+    "owned_native_processes_remaining": 0,
+    "test_gateway_port_closed": true,
+    "test_root_and_runner_removed": true,
+    "selected_production_process_ids_unchanged": true,
+    "logout_or_revoke": false,
+    "ssh_observation_exit": 255,
+    "native_results_and_process_termination_reverified": true
+  },
+  "tested_source_sha256": {
+    "plugin/src/hooks.js": "01692efaad02b5c77592625a3a9b8aae663e660de682cdb423bf57ea65c2af35",
+    "plugin/src/tools.js": "0e29a58c1ff262bbfd624167085cbe345bbc11004bc7f0fa4994abb68362518a",
+    "agent_memory/api.py": "9b49f5f2156b4df1da965ffb83d8f0fcb1adb6a13ff3dc1769525efb6f36726f"
+  }
+}

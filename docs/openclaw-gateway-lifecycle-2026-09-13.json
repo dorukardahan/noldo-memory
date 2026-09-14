@@ -1,0 +1,64 @@
+{
+  "date": "2026-09-13",
+  "base_head": "150b3d06ecfe6358da865d73aba04bd780e8c936",
+  "host": "OpenClaw 2026.9.3",
+  "node": "24.19.0",
+  "stable_source_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "startup": "startGatewayServer; updateCanary=true; normal plugin startup, autonomous jobs suppressed",
+  "dispatch": "public agent-harness-runtime SDK with synthetic completion/prompt events",
+  "capture": {
+    "id": "92af12dbebe5484a",
+    "source_session": "agent:alpha:learning",
+    "source": "plugin-auto-capture",
+    "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+    "evidence": {
+      "role": "user",
+      "assertion": "reported",
+      "delivery": "received",
+      "modality": "text",
+      "representation": "text"
+    }
+  },
+  "injection": {
+    "session": "agent:alpha:later",
+    "contains_captured_id": true,
+    "contains_exact_captured_text": true,
+    "untrusted_boundary": true
+  },
+  "other_agent": {
+    "session": "agent:beta:later",
+    "prompt": "Plan the Aurora observatory visit around my preference.",
+    "contains_captured_text": false,
+    "export_count": 0
+  },
+  "http_requests": [
+    {
+      "path": "/v1/store",
+      "agent": "alpha",
+      "source": "plugin-auto-capture"
+    },
+    {
+      "path": "/v1/recall",
+      "agent": "alpha"
+    },
+    {
+      "path": "/v1/recall",
+      "agent": "beta"
+    }
+  ],
+  "manual_store_or_recall": false,
+  "model_calls": 0,
+  "embedding_calls": 0,
+  "full_model_loop": false,
+  "owned_fixture_removed": true,
+  "production_process_identities_unchanged": true,
+  "harness_failures": [
+    "First attempt stopped before Gateway startup: export resolver did not handle unaliased installed exports.",
+    "Second attempt passed assertions but cleanup closed SQLite connections from the wrong thread; fixed cleanup in the API worker thread."
+  ],
+  "file_sha256": {
+    "plugin/src/tools.js": "0e29a58c1ff262bbfd624167085cbe345bbc11004bc7f0fa4994abb68362518a",
+    "scripts/check_openclaw_gateway_lifecycle.py": "a16c8ce8ffa0f58aa447b416d1916e2a8143d307bfd73653a0b80a9568f7845c",
+    "scripts/check_openclaw_gateway_lifecycle.mjs": "fb60ea36811d2071c206b88296097aee8cea8dadd0cad1be414d23be8adc8907"
+  }
+}

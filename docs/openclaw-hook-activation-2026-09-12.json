@@ -1,0 +1,29 @@
+{
+  "date": "2026-09-12",
+  "candidate_head": "2c7665d20cc85c1ee0fb11714af9552fb9fc2399",
+  "host": "2026.9.3",
+  "stable_source_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+  "node": "v24.19.0",
+  "tools": [
+    "noldomem_recall",
+    "noldomem_store",
+    "noldomem_pin",
+    "noldomem_forget",
+    "noldomem_relearn_source"
+  ],
+  "standalone": {
+    "runner_present": false,
+    "recall": false,
+    "capture": false
+  },
+  "activated": {
+    "runner_present": true,
+    "recall": true,
+    "capture": true
+  },
+  "model_calls": 0,
+  "hook_callbacks_invoked": 0,
+  "api_calls": 0,
+  "owned_fixture_removed": true,
+  "scope": "Installed native registry/tool loading comparison; not an end-to-end agent/model hook test"
+}

@@ -1,0 +1,101 @@
+{
+  "date": "2026-09-14",
+  "baseline_commit": "b1abd4090e2f82c37e4ca91b1511430abeb3b8c6",
+  "embedding_mode": "temporary 4-dimensional SQLite stores, lexical degraded retrieval; no embedding requests",
+  "hermes": {
+    "host": "v2026.9.7 (0.21.1)",
+    "host_commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "provider": "openai-codex",
+    "transport": "codex_responses",
+    "model": "gpt-5.6-sol",
+    "gateway_preprocessing": true,
+    "gateway_dispatch_or_channel_delivery": false,
+    "native_agent_memory_tool_loop": true,
+    "applications": 2,
+    "wall_seconds": 80.01807866990566,
+    "native_logical_api_calls": 8,
+    "physical_provider_requests": "unknown",
+    "native_total_tokens": 33188,
+    "local_stt": {
+      "engine": "faster-whisper1.2.1",
+      "model": "base",
+      "device": "cpu",
+      "compute_type": "int8",
+      "native_silence_confidence_guards_preserved": true
+    },
+    "first_input_files": [
+      "entrance.png",
+      "packing.wav",
+      "meeting.pdf"
+    ],
+    "second_input_files": [],
+    "first_answer": "### Aurora visit\n- **Meet:** At the **east arch**\n- **Entrance:** Use the **blue door**\n- **Bring:** A **red notebook**",
+    "second_answer": "- **Entrance:** Use the **blue door**\n- **Bring:** A **red notebook**\n- **Meet:** At the **east arch** of the Aurora observatory\n- **Guide:** The available notes don’t identify the guide.",
+    "injected_memory_ids": [
+      "5e6fbfe5f91e4cee",
+      "0278616159034bc6",
+      "4ce9885269a74bfd"
+    ],
+    "actual_api_content_contains_memory": true,
+    "other_agent_guide_absent": true,
+    "tool_attempts_second": 17,
+    "records_after_first": 3,
+    "records_after_second_before_fix": 22,
+    "post_fix_real_model_rerun": false
+  },
+  "openclaw": {
+    "host": "2026.9.3",
+    "host_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "provider": "openai",
+    "transport": "native codex harness, openai-chatgpt-responses",
+    "model": "gpt-5.6-sol",
+    "applications": 2,
+    "wall_seconds": 63.46023999713361,
+    "physical_provider_requests": "unknown",
+    "native_total_tokens": 94223,
+    "first_input_files": [
+      "packing.wav",
+      "meeting.pdf"
+    ],
+    "second_input_files": [],
+    "audio_http_status": 429,
+    "audio_error_code": "not observed",
+    "external_audio_retry_or_provider_switch": false,
+    "first_pdf_extracted_and_answered": true,
+    "first_auto_capture": false,
+    "repair_capture": "recorded real first-turn events replayed through public SDK with normal Gateway activation; zero model calls",
+    "duplicate_prevented": true,
+    "forget_blocks_replay": true,
+    "explicit_api_relearning": true,
+    "other_agent_isolation": true,
+    "second_native_injection_record_id": "506470c3fa444fdd",
+    "second_native_injection_source_event": "61fd9fea-f8b0-42e7-bece-7772aa5df8d8:user",
+    "second_images": 0,
+    "second_history_messages": 0,
+    "second_answer": "Meet: East arch of the Aurora Observatory. Bring: Not specified in the available notes. Guide: Not specified.",
+    "second_additional_recall_tool_calls": 1,
+    "fully_native_post_fix_learning_turn": false
+  },
+  "model_free_hermes_regression": {
+    "native_pdf_reader": true,
+    "native_loader_manager_http": true,
+    "failed_reads_excluded": true,
+    "derived_document_reference_preserved": true,
+    "obsolete_read_instruction_removed_after_success_only": true,
+    "duplicate_prevented": true,
+    "cross_session_injection": true,
+    "other_agent_empty": true,
+    "forget_blocks_source_replay": true
+  },
+  "final_source_sha256": {
+    "plugin/src/hooks.js": "a4bfda963ce3b932a7150c90ff59cd0f42864a363fc5e9363d5cb254d3ef60fb",
+    "adapters/hermes/noldomem/__init__.py": "d9317060d3b32af046df97057c21e678e0e21ba1bc433528d7d22cb374792622"
+  },
+  "cleanup": {
+    "owned_temporary_roots_and_named_profile_removed": true,
+    "production_service_pid_comparisons": 5,
+    "production_service_pids_unchanged": true,
+    "logout_or_revoke": false
+  }
+}

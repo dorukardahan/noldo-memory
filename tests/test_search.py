@@ -101,3 +101,33 @@ class TestHybridSearch:
         results = await search.search('What did "Alice" do?', limit=5)
 
         assert any(r.id == memory_id for r in results)
+
+
+@pytest.mark.asyncio
+async def test_degraded_recall_requires_content_match_not_articles_or_substrings(storage):
+    """A natural query must not retrieve flour through 'the' or 'our'."""
+    preference = storage.store_memory(text="For Aurora observatory visits, I prefer quiet evenings.")
+    unrelated = storage.store_memory(text="The synthetic baking club uses seven cups of rye flour.")
+    morphology = storage.store_memory(text="Kitaplıktaki katalogların yerini değiştirdim.")
+    # Capture can extract a title-cased entity including an article.
+    storage.store_entity("The Aurora", entity_type="person")
+    search = HybridSearch(storage=storage, embedder=None)
+    result = await search.search(
+        "Plan our Aurora observatory visit via the spiral staircase. Which time suits me?", limit=10)
+    assert result.degraded
+    assert preference in {r.id for r in result}
+    assert unrelated not in {r.id for r in result}
+    assert unrelated not in {r.id for r in await search.search("Where is our telescope?", limit=10)}
+    # Preserve trigram morphology matching; a stem need not be a whole word.
+    assert morphology in {r.id for r in await search.search("kitaplık katalog", limit=10)}
+
+
+@pytest.mark.asyncio
+async def test_degraded_recall_keeps_direct_graph_evidence_within_namespace(storage):
+    source = storage.store_memory(text="A telescope is reserved for the evening tour.", namespace="observations")
+    entity = storage.store_entity("Aurora", entity_type="place")
+    storage.store_temporal_fact(entity, "Reserved instrument", source_memory_id=source)
+    search = HybridSearch(storage=storage, embedder=None)
+    result = await search.search("Aurora", namespace="observations")
+    assert source in {r.id for r in result}  # No lexical overlap, but a direct source link.
+    assert not await search.search("Aurora", namespace="other")

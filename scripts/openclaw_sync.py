@@ -251,7 +251,7 @@ async def sync(args: argparse.Namespace) -> Dict[str, Any]:
                 # Knowledge graph
                 for chunk in new_chunks:
                     try:
-                        kg.process_text(chunk.text, source=sid, timestamp=chunk.timestamp)
+                        kg.process_text(chunk.text, source=sid, timestamp=chunk.timestamp, source_memory_id=chunk.md5)
                     except Exception:
                         pass
 

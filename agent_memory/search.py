@@ -29,6 +29,7 @@ from .metrics import collector
 from .reranker import BaseReranker
 from .storage import MemoryStorage
 from .triggers import get_confidence_tier
+from .turkish import TURKISH_STOPWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,18 @@ def _tokenize_for_rerank(text: str) -> set[str]:
     return {t for t in toks if len(t) >= 3}
 
 
+def _content_terms(text: str) -> set[str]:
+    return _tokenize_for_rerank(text) - TURKISH_STOPWORDS - {
+        "our", "your", "their", "what", "which", "where", "when", "how",
+    }
+
+
+def _has_content_match(terms: set[str], text: str) -> bool:
+    normalized = normalize_query(text)
+    # Keep substring matching for inflected words supported by trigram FTS.
+    return any(term in normalized for term in terms)
+
+
 def _lexical_overlap(query: str, text: str) -> float:
     """Query coverage score in [0, 1] for lightweight reranking."""
     q = _tokenize_for_rerank(query)
@@ -158,7 +171,8 @@ def _build_cache_query_norm(
     memory_type: Optional[str],
 ) -> str:
     """Namespace/filter-aware cache key without changing public API."""
-    parts = [query_norm]
+    # v2 excludes lexical-only/degraded entries that lacked status metadata.
+    parts = ["semantic-cache-v2", query_norm]
     if namespace:
         parts.append(f"ns:{namespace}")
     if memory_type:
@@ -197,6 +211,11 @@ class SearchResult:
     importance_score: float = 0.0
     rerank_score: float = 0.0
     confidence_tier: str = "LOW"
+    evidence: Optional[Dict[str, Any]] = None
+    source_session: Optional[str] = None
+    valid_from: Optional[float] = None
+    valid_to: Optional[float] = None
+    supersedes: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -215,6 +234,8 @@ class SearchResult:
             "importance_score": round(self.importance_score, 4),
             "rerank_score": round(self.rerank_score, 4),
             "confidence_tier": self.confidence_tier,
+            "evidence": self.evidence, "source_session": self.source_session,
+            "valid_from": self.valid_from, "valid_to": self.valid_to, "supersedes": self.supersedes,
         }
 
 
@@ -288,6 +309,15 @@ def _rrf_fuse(
     return scores
 
 
+class SearchResults(list[SearchResult]):
+    """List-compatible search results carrying request-local completion status."""
+
+    def __init__(self, items=(), *, degraded=False, mode="full"):
+        super().__init__(items)
+        self.degraded = degraded
+        self.mode = mode
+
+
 class HybridSearch:
     """Five-layer hybrid search engine with RRF fusion."""
 
@@ -354,6 +384,7 @@ class HybridSearch:
                     min_score=min_score,
                     agent=agent,
                     seed_results=snapshot,
+                    cache_generation=self.storage.cache_generation,
                 )
             )
         except RuntimeError:
@@ -370,6 +401,7 @@ class HybridSearch:
         min_score: float,
         agent: str,
         seed_results: List[SearchResult],
+        cache_generation: Optional[int] = None,
     ) -> None:
         if self.bg_reranker is None:
             return
@@ -389,7 +421,7 @@ class HybridSearch:
                     return
 
                 docs = [r.text for r in cands[:top_n]]
-                ids = [r.id for r in cands[:top_n]]
+                ids = [f"{agent}:{r.id}" for r in cands[:top_n]]
 
                 ce_scores = await asyncio.to_thread(
                     self.bg_reranker.score,
@@ -423,6 +455,8 @@ class HybridSearch:
                 if len(cands) > limit:
                     cands = cands[:limit]
 
+                if cache_generation is not None and self.storage.cache_generation != cache_generation:
+                    return
                 results_json = json.dumps([r.to_dict() for r in cands])
                 self.storage.cache_search_result(
                     query_norm=cache_query_norm,
@@ -456,33 +490,54 @@ class HybridSearch:
         namespace: Optional[str] = None,
         memory_type: Optional[str] = None,
         rerank: bool = True,
-    ) -> List[SearchResult]:
+        include_history: bool = False,
+        as_of: Optional[float] = None,
+        record_access: bool = True,
+    ) -> SearchResults:
         """Run hybrid search and return fused, ranked results.
 
         Graceful degradation: if the embedding API is unavailable,
         lexical + non-vector layers (keyword/recency/strength/importance)
         are still used.
         """
-        # Reset degradation flags
-        self.last_search_degraded = False
-        self.last_search_mode = "full"
+        # Status belongs to this call, not the shared per-agent search object.
+        validity_time = time.time()  # One clock snapshot across every awaited lane.
+        degraded = use_semantic and self.embedder is None
+        search_mode = "keyword_only" if degraded else "full"
+
+        def finish(items):
+            # Legacy diagnostics expose the last completed call only. Concurrent
+            # callers must use the status carried by their returned batch.
+            self.last_search_degraded = degraded
+            self.last_search_mode = search_mode
+            return SearchResults(items, degraded=degraded, mode=search_mode)
+
+        cache_generation = self.storage.cache_generation
+        has_versions = self.storage._get_conn().execute(
+            "SELECT 1 FROM memories WHERE valid_from IS NOT NULL OR valid_to IS NOT NULL LIMIT 1"
+        ).fetchone()
+        cache_allowed = time_range is None and not has_versions and use_semantic
 
         # 1. Query normalization + intent-aware filter selection + cache check
         q_norm = normalize_query(query)
         effective_memory_type = memory_type or _detect_memory_type_intent(q_norm)
         cache_query_norm = _build_cache_query_norm(q_norm, namespace, effective_memory_type)
+        if include_history or as_of is not None:
+            cache_query_norm += f"|history={include_history}|as_of={as_of}"
+        validity, validity_params = self.storage.validity_filter(include_history=include_history, as_of=as_of, validity_time=validity_time)
 
         # Skip cache for temporal queries — time_range changes daily
-        if time_range is None:
+        if cache_allowed:
             cached_json = self.storage.get_cached_search_result(
                 query_norm=cache_query_norm, limit_val=limit, min_score=min_score, agent=agent
             )
             if cached_json:
                 try:
                     cached_data = json.loads(cached_json)
-                    self.last_search_mode = "cache_hit"
+                    cached_results = [SearchResult(**r) for r in cached_data]
+                    search_mode = "cache_hit"
                     collector.inc_cache_hit()
-                    return [SearchResult(**r) for r in cached_data]
+                    return finish(cached_results)
                 except Exception as exc:
                     logger.warning("Failed to parse cached search results: %s", exc)
                     collector.inc_cache_miss()
@@ -496,6 +551,7 @@ class HybridSearch:
         semantic_ids: List[str] = []
         keyword_ids: List[str] = []
         all_candidates: Dict[str, Dict[str, Any]] = {}
+        grounded_kg_ids: Set[str] = set()
 
         # Only hard-filter at DB level when caller explicitly passed memory_type.
         # Inferred types use soft-boost in RRF, not DB-level exclusion.
@@ -508,6 +564,7 @@ class HybridSearch:
                 query_vec, limit=candidate_limit, min_score=0.0,
                 namespace=namespace,
                 memory_type=db_filter_type,
+                include_history=include_history, as_of=as_of, validity_time=validity_time,
             )
 
         async def _keyword_search() -> List[Dict[str, Any]]:
@@ -517,6 +574,7 @@ class HybridSearch:
                 candidate_limit,
                 namespace,
                 memory_type=db_filter_type,
+                include_history=include_history, as_of=as_of, validity_time=validity_time,
             )
 
         async def _kg_entity_search() -> List[Dict[str, Any]]:
@@ -568,6 +626,7 @@ class HybridSearch:
                     (eid, candidate_limit),
                 ).fetchall():
                     _add_memory_id(row["source_memory_id"])
+                    grounded_kg_ids.add(row["source_memory_id"])
 
                 rel_rows = conn.execute(
                     "SELECT context FROM relationships WHERE source_id = ? OR target_id = ? ORDER BY confidence DESC, created_at DESC LIMIT ?",
@@ -588,8 +647,13 @@ class HybridSearch:
                         candidate_limit,
                         namespace,
                         memory_type=db_filter_type,
+                        include_history=include_history, as_of=as_of, validity_time=validity_time,
                     ):
                         _add_memory_id(mem.get("id"))
+                        # A graph fallback is still an FTS query. An article
+                        # inside the entity name is not a relationship proof.
+                        if _has_content_match(_content_terms(phrase), mem.get("text", "")):
+                            grounded_kg_ids.add(mem["id"])
                         if len(seen_memory_ids) >= candidate_limit:
                             break
 
@@ -598,7 +662,8 @@ class HybridSearch:
 
             placeholders = ",".join("?" for _ in memory_ids)
             where_parts = [f"id IN ({placeholders})", "deleted_at IS NULL"]
-            params: List[Any] = list(memory_ids)
+            where_parts.append(validity)
+            params: List[Any] = list(memory_ids) + validity_params
             if namespace is not None:
                 where_parts.append("namespace = ?")
                 params.append(namespace)
@@ -640,7 +705,8 @@ class HybridSearch:
                     "importance >= 0.05",
                     "COALESCE(memory_type, 'other') = ?",
                 ]
-                params: List[Any] = [explicit_type]
+                where_parts.append(validity)
+                params: List[Any] = [explicit_type] + validity_params
                 if namespace is not None:
                     where_parts.append("namespace = ?")
                     params.append(namespace)
@@ -679,8 +745,8 @@ class HybridSearch:
                 sem_results = await sem_task
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
-                self.last_search_degraded = True
-                self.last_search_mode = "keyword_only"
+                degraded = True
+                search_mode = "keyword_only"
 
             try:
                 kw_results = await kw_task
@@ -692,8 +758,8 @@ class HybridSearch:
                 sem_results = await _semantic_search()
             except Exception as exc:
                 logger.warning("Semantic search failed (BM25 fallback): %s", exc)
-                self.last_search_degraded = True
-                self.last_search_mode = "keyword_only"
+                degraded = True
+                search_mode = "keyword_only"
 
         elif use_keyword:
             try:
@@ -743,8 +809,21 @@ class HybridSearch:
             if mid not in all_candidates:
                 all_candidates[mid] = r
 
+        if degraded:
+            # Trigram FTS can match only an article or a pronoun inside an
+            # unrelated word (e.g. "our" in "flour"). Without semantic evidence,
+            # those keyword-only candidates must not gain authority from recency
+            # or strength. Keep actual KG/type evidence and Turkish inflections.
+            content_terms = _content_terms(q_norm)
+            independently_linked = grounded_kg_ids | {r["id"] for r in metadata_results}
+            all_candidates = {
+                mid: cand for mid, cand in all_candidates.items()
+                if mid in independently_linked or _has_content_match(content_terms, cand.get("text", ""))
+            }
+            keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
+
         if not all_candidates:
-            return []
+            return finish([])
 
         # Type filtering strategy:
         # - Explicit memory_type parameter (caller intent) → hard filter
@@ -759,7 +838,7 @@ class HybridSearch:
             semantic_ids = [mid for mid in semantic_ids if mid in all_candidates]
             keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
             if not all_candidates:
-                return []
+                return finish([])
 
         # Temporal filter: remove candidates outside time_range
         if time_range is not None:
@@ -774,7 +853,7 @@ class HybridSearch:
             keyword_ids = [mid for mid in keyword_ids if mid in all_candidates]
             if before > 0 and len(all_candidates) == 0:
                 logger.debug("Temporal filter removed all %d candidates", before)
-                return []
+                return finish([])
 
         # Layer 3 — Recency: rank all candidates by created_at
         recency_ranked = sorted(
@@ -848,7 +927,7 @@ class HybridSearch:
             weights_list.append(self.weights.importance)
 
         if not ranked_lists:
-            return []
+            return finish([])
 
         rrf_scores = _rrf_fuse(ranked_lists, weights_list)
         for mid, bonus in memory_type_bonus.items():
@@ -875,6 +954,10 @@ class HybridSearch:
 
             sr = SearchResult(
                 id=mid,
+                evidence=json.loads(cand.get("evidence") or "{}"),
+                source_session=cand.get("source_session"),
+                valid_from=cand.get("valid_from"), valid_to=cand.get("valid_to"),
+                supersedes=cand.get("supersedes"),
                 text=cand.get("text", ""),
                 category=cand.get("category", "other"),
                 importance=cand.get("importance", 0.5),
@@ -927,7 +1010,7 @@ class HybridSearch:
                             self.reranker.score,
                             q_norm,
                             [r.text for r in cands],
-                            [r.id for r in cands],
+                            [f"{agent}:{r.id}" for r in cands],
                         )
                         if ce_scores and len(ce_scores) == len(cands):
                             used_cross_encoder = True
@@ -968,8 +1051,12 @@ class HybridSearch:
             except Exception as exc:
                 logger.debug("Reranker skipped: %s", exc)
 
+        # A write/forget during an awaited embed/rerank invalidates the snapshot.
+        if self.storage.cache_generation != cache_generation:
+            return finish([])
+
         # Two-pass refresh: run heavy quality reranker in background and update cache.
-        if rerank and time_range is None:
+        if rerank and cache_allowed and not degraded:
             self._schedule_background_quality_rerank(
                 q_norm=q_norm,
                 cache_query_norm=cache_query_norm,
@@ -989,14 +1076,14 @@ class HybridSearch:
             results = results[:limit]
 
         # Spaced repetition: boost strength on top hits
-        for r in results[:3]:
+        for r in (results[:3] if record_access else []):
             try:
                 self.storage.boost_strength(r.id)
             except Exception:
                 pass
 
-        # 3. Store Results in Cache (skip for temporal queries)
-        if time_range is None:
+        # Do not turn an outage into a supposedly semantic cache hit later.
+        if cache_allowed and not degraded:
             try:
                 results_json = json.dumps([r.to_dict() for r in results])
                 self.storage.cache_search_result(
@@ -1009,4 +1096,4 @@ class HybridSearch:
             except Exception as exc:
                 logger.warning("Failed to cache search results: %s", exc)
 
-        return results
+        return finish(results)

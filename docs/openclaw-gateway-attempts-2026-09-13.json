@@ -1,0 +1,182 @@
+{
+  "date": "2026-09-13",
+  "candidate_head": "da36ebdcf3f9600377b7aafb265596d8774ee0d1",
+  "host": {
+    "version": "2026.9.3",
+    "commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "selected_provider": "openai",
+    "selected_model": "gpt-5.6-sol",
+    "selected_harness": "codex",
+    "model_execution_observed": false
+  },
+  "budget": {
+    "application_attempts_authorized": 2,
+    "application_attempts_started": 2,
+    "max_seconds_per_attempt": 120,
+    "max_total_seconds": 240,
+    "observed_application_wall_seconds": 9.815874727908522,
+    "physical_model_requests": "not measured; neither attempt reached an observed llm_input event",
+    "token_usage": "unavailable"
+  },
+  "before_fix": {
+    "candidate_head": "4bdebdc58519e851757334412eaf53c87571420b",
+    "synthetic_agent_end_events": 3,
+    "auto_capture_http_calls": 1,
+    "application_attempts_started": 0
+  },
+  "after_fix_model_free": {
+    "synthetic_agent_end_events": 3,
+    "auto_capture_requests": [
+      {
+        "path": "/v1/store",
+        "status": 200,
+        "source": "plugin-auto-capture",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:seed-booking",
+        "text": "My Aurora observatory booking is Friday at 19:30.",
+        "memory_id": "f3d8f04f84884f83"
+      },
+      {
+        "path": "/v1/store",
+        "status": 200,
+        "source": "plugin-auto-capture",
+        "agent": "synthetic-memory",
+        "session_id": "agent:synthetic-memory:seed-preference",
+        "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+        "memory_id": "3582ce0d34854ee6"
+      },
+      {
+        "path": "/v1/store",
+        "status": 200,
+        "source": "plugin-auto-capture",
+        "agent": "synthetic-other",
+        "session_id": "agent:synthetic-other:seed-guide",
+        "text": "The Aurora observatory guide is Kestrel.",
+        "memory_id": "7304dadd9964415c"
+      }
+    ],
+    "primary_rows": [
+      {
+        "id": "f3d8f04f84884f83",
+        "text": "My Aurora observatory booking is Friday at 19:30.",
+        "source": "plugin-auto-capture",
+        "source_session": "agent:synthetic-memory:seed-booking",
+        "valid_from": null,
+        "supersedes": null
+      },
+      {
+        "id": "3582ce0d34854ee6",
+        "text": "For the Aurora observatory visit, I prefer quiet visits without a group.",
+        "source": "plugin-auto-capture",
+        "source_session": "agent:synthetic-memory:seed-preference",
+        "valid_from": null,
+        "supersedes": null
+      }
+    ],
+    "other_agent_row_count_asserted": 1
+  },
+  "attempts": [
+    {
+      "number": 1,
+      "prompt": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.",
+      "seconds": 2.811466485960409,
+      "exit_code": 1,
+      "timeout": false,
+      "result": "failed before model execution",
+      "error_code": "published-reply-runtime-missing",
+      "lifecycle": "updateCanary startup",
+      "observed_model_input_events": 0
+    },
+    {
+      "number": 2,
+      "prompt": "For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed. What time is the visit, how does my current preference compare with before, and who is guiding it?",
+      "seconds": 7.004408241948113,
+      "exit_code": 1,
+      "timeout": false,
+      "result": "failed before model execution",
+      "error_code": "trusted-plugin-state-origin-path",
+      "lifecycle": "normal Gateway startup awaited startupSettled",
+      "observed_model_input_events": 0
+    }
+  ],
+  "final_attempt": {
+    "memory_http_calls": 0,
+    "observed_hook_events": 0
+  },
+  "limitations": [
+    "No model-chosen revision or grounded answer was observed.",
+    "No model-triggered capture or injection was observed.",
+    "Model-free seed events are not native model turns.",
+    "Local plugin linkage does not grant trusted native keyed-store access.",
+    "The separate earlier Hermes/native evidence and historical OpenClaw failures remain unchanged."
+  ],
+  "candidate_source_sha256": {
+    "plugin/src/hooks.js": "01692efaad02b5c77592625a3a9b8aae663e660de682cdb423bf57ea65c2af35",
+    "plugin/src/tools.js": "0e29a58c1ff262bbfd624167085cbe345bbc11004bc7f0fa4994abb68362518a",
+    "agent_memory/api.py": "9b49f5f2156b4df1da965ffb83d8f0fcb1adb6a13ff3dc1769525efb6f36726f"
+  },
+  "cleanup": {
+    "owned_gateway_and_api_stopped": true,
+    "owned_test_root_and_runner_removed": true,
+    "test_gateway_port_closed": true,
+    "selected_production_process_ids_unchanged": true,
+    "logout_or_revoke_used": false,
+    "installed_codex_artifact_not_removed": true
+  },
+  "official_install_model_free_followup": {
+    "candidate_head": "4c250bd9817cb882ee7b516825e4ddb38d139644",
+    "package": "@openclaw/codex@2026.9.3",
+    "install_exit_code": 0,
+    "install_origin": "global",
+    "install_source": "npm",
+    "trust_reason": "trusted-official",
+    "registry_published_at": "2026-09-08T11:47:29.826Z",
+    "scoped_age_exception_explicitly_approved": true,
+    "lifecycle_scripts_disabled": true,
+    "lock_registry_integrity_match": true,
+    "attestation_signature_independently_verified": false,
+    "npm_audit": {
+      "exit_code": 0,
+      "reported_vulnerabilities": 0
+    },
+    "new_oauth_logins": 0,
+    "new_model_application_turns": 0,
+    "inference_initiated": false,
+    "physical_request_and_token_metering": "not instrumented; catalog-only preflight",
+    "catalog_queries": [
+      {
+        "exit_code": 1,
+        "seconds": 3.531,
+        "result": "unknown session catalog: codex",
+        "cause": "temporary sessionCatalog.enabled=false"
+      },
+      {
+        "exit_code": 0,
+        "seconds": 5.475,
+        "result": {
+          "hosts": [
+            {
+              "kind": "gateway",
+              "connected": true,
+              "sessions": []
+            }
+          ]
+        },
+        "change": "official CLI enabled catalog in temporary profile"
+      }
+    ],
+    "lifecycle": "normal gateway run; readiness before official catalog RPC",
+    "native_state_path": "listCodexSessionCatalog -> managedThreads.snapshot -> openSyncKeyedStore",
+    "production_memory_or_sessions_used": false,
+    "cleanup": {
+      "temporary_gateway_stopped": true,
+      "residual_owned_processes": 0,
+      "test_port_closed": true,
+      "temporary_root_and_runner_removed": true,
+      "selected_production_pids_unchanged": true,
+      "logout_or_revoke_used": false
+    },
+    "acceptance_limit": "Catalog/state access passed; no correction, answer, or model-triggered memory-hook acceptance inferred."
+  }
+}

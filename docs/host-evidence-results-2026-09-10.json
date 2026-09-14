@@ -1,0 +1,71 @@
+{
+  "date": "2026-09-10",
+  "starting_pr_head": "1ab313184b7e1dbaf2d9debae5341bd5662978ef",
+  "tested_source_sha256": {
+    "plugin/src/hooks.js": "5276f356f1b9babab7afc57b99be1b398468394d44444c61dd8ae9bc350feaf9",
+    "plugin/index.js": "92861cdbbf952205d9d1a6d5bfa67a1f9bae2899ec2692a43c48939fa7c0e083",
+    "plugin/openclaw.plugin.json": "6509b1933737f6055540cb217bddc85ae73e9ba2c76b6a045000d34fd7cd53d5",
+    "scripts/check_openclaw_evidence.mjs": "8327b75b5206dee8db36fefc04896b190721ea35cb2514d19b300c120b928d53",
+    "scripts/runtime_test_api.py": "3c316cda1dd1c1e8984509eff41b63c8ffd347188ce037abce6ee06ffd4fb31c",
+    "adapters/hermes/noldomem/__init__.py": "66fe8cdffb76fc06586845cc7d6338e11881603f6a09a3305aeff0256ed8ff44",
+    "scripts/check_hermes_stable.py": "996fad6c63e4c196ae325dda85397f1b936a7b34c2d6652ce33ebfb538df74dd"
+  },
+  "new_model_requests": 0,
+  "prior_model_requests_consumed": 8,
+  "new_embedding_requests": 0,
+  "new_paid_media_requests": 0,
+  "hermes": {
+    "upstream_stable_commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "execution": "verified stable source checkout; temporary profile/API/DB",
+    "native_stt_formatter_with_synthetic_backend": true,
+    "native_row_builder_and_memory_manager": true,
+    "event_id_timestamp_capture": true,
+    "cross_session_injection": true,
+    "audio_origin_retained": false,
+    "raw_audio_decode": false
+  },
+  "openclaw": {
+    "installed_version": "2026.9.3",
+    "upstream_stable_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "temporary_api_python": "3.12.3",
+    "candidate_native_loader": true,
+    "native_internal_hook_dispatch": true,
+    "real_temporary_api": true,
+    "concurrent_duplicate_events": 3,
+    "rows_after_duplicates": 1,
+    "derived_audio_evidence": true,
+    "cross_session_injection": true,
+    "agent_isolation": true,
+    "forget_replay_and_cache": true,
+    "explicit_relearning": true,
+    "independent_source": true,
+    "native_utf8_file_decode": true,
+    "file_envelope": "independently supplied pinned-host format",
+    "file_context_and_deduplication": true,
+    "native_sent_emitter_media_projection": "lossy",
+    "native_transcript_media_mirror": "basename-only; distinct resources collide",
+    "channel_transport_send": false,
+    "full_model_loop": false,
+    "raw_image_audio_pdf_decode": false,
+    "external_fetches": 0
+  },
+  "validation": {
+    "local_pytest_passed": 527,
+    "local_pytest_skipped": 1,
+    "ruff": "passed",
+    "sdist_wheel": "built",
+    "wheel_declares_nltk_or_zeyrek": false,
+    "full_existing_hash_pins_pip_audit": "no known vulnerabilities; no exceptions added"
+  },
+  "failed_harness_attempts_not_success": [
+    "delivery projection script syntax error; corrected and checked before rerun",
+    "installed private file-outcome renderer unavailable; retained actual native UTF-8 decoder with an explicitly synthetic envelope"
+  ],
+  "limits": [
+    "No production installation changed",
+    "No host repository edited",
+    "No new independent automated review; prior quota unavailable",
+    "No general answer-accuracy or latency improvement claim"
+  ]
+}

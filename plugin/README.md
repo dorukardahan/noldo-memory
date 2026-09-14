@@ -5,12 +5,25 @@ This native OpenClaw plugin exposes NoldoMem as agent tools:
 - `noldomem_recall` - search long-term memory
 - `noldomem_store` - store important facts, preferences, decisions, and lessons
 - `noldomem_pin` - protect critical memories from decay and cleanup
+- `noldomem_forget` - delete an assertion and its connected revision history
+- `noldomem_relearn_source` - explicitly unblock one forgotten source for future ingestion
 - native typed hooks for operational tool capture, compaction capture, and
   subagent failure capture
 
 It is intentionally separate from OpenClaw `memory-core`. NoldoMem stays a REST
 service backed by SQLite/sqlite-vec, while this plugin gives agents explicit
 tool access to that service.
+
+Optional tool arguments accept omission or `null`, including on transports that
+require every argument key. For a new assertion, leave `supersedes` and
+`valid_from` unspecified; use a recalled ID only for a confirmed correction.
+`valid_from` describes when the assertion became valid, not its event's scheduled
+time or record creation time. If the user gave no effective date, omit `valid_from`
+or use `null`; do not calculate a Unix timestamp for “now”. Explicit past/future
+effective dates remain supported. Store only source-supported calendar dates and
+timezones; the current clock or locale does not supply missing event details.
+Unspecified recall `as_of` selects current memory. Empty/invented revision
+IDs still fail API validation, and required content/identifiers do not accept null.
 
 The plugin is dependency-free and declares `openclaw.extensions`, so a local
 `openclaw plugins install -l ./plugin` uses the current OpenClaw 2026.5.2+
@@ -34,6 +47,7 @@ Then enable it in `openclaw.json`:
       "noldomem": {
         "enabled": true,
         "hooks": {
+          "allowConversationAccess": true,
           "allowPromptInjection": false,
           "timeoutMs": 5000,
           "timeouts": {
@@ -69,17 +83,114 @@ Restart OpenClaw after installing.
 
 ## Plugin vs Hook Pack
 
-Use both pieces for the full custom-memory workflow:
+Use the typed plugin for current-turn automatic recall (`enableAutoRecall`) and
+capture (`enableAutoCapture`). Both remain opt-in. Automatic recall runs only when `hooks.allowPromptInjection` is also `true`. OpenClaw 2026.9.3
+requires explicit `hooks.allowConversationAccess: true` for non-bundled
+conversation hooks, including `agent_end` and `message_sent`. Without that grant
+the native loader rejects those hook registrations; tools alone can still load.
+The example above enables capture/lifecycle access while retaining the
+prompt-injection prohibition. For automatic recall, deliberately enable both
+`enableAutoRecall` and `hooks.allowPromptInjection` in the selected profile.
+Declarative prompts can recall history; trivial acknowledgements skip search. An optional
+`recallMinSemanticScore` filters automatic context using a model-calibrated floor;
+there is no universal default. Explicit recall remains available in degraded mode.
 
-- `plugin/` gives agents active tools for recall/store/pin.
-- `hooks/` handles lifecycle capture and bootstrap injection, especially
-  `agent:bootstrap`, `message:received`, `message:sent`, and `/new` session
-  transitions.
+Automatic capture remains selective. Alongside preferences, decisions and longer
+messages, it recognizes short declared booking, appointment and event-contact
+details in a bounded set of English/Turkish sentence forms. It retains the source
+text without adding dates or timezones. Recognized question and speculation markers
+exclude statements from this additional short-event rule; it is not general fact
+extraction or a guarantee that every short statement will be captured. Existing
+prompt-injection, role and agent-scope checks still apply.
+Recognized English/Turkish question-only turns are excluded before length and
+keyword admission, even when they mention preferences or decisions. Mixed turns
+that also supply facts and explicit memory requests retain the existing capture
+rules. Short English topic prefixes such as "For the visit, which...?" also count
+as question-only; prefixes containing a recognizable clause retain the existing
+capture rules. This bounded check does not classify every possible question form.
 
-Keep `enableAutoRecall=false` unless you explicitly want the native plugin to
-run a recall check before prompt build. The hook pack already handles bootstrap
-recall and is cheaper for normal operation.
+For raw PDF input on OpenClaw 2026.9.3, keep the host's existing
+`document-extract` plugin enabled and included in an explicit plugin allowlist.
+NoldoMem consumes the resulting text; enabling NoldoMem alone does not enable
+PDF extraction. Native image interpretation can affect the current answer
+without creating a reusable text derivative or memory record. See the
+[bounded raw-media results](../docs/raw-media-results-2026-09-13.md); pixel access,
+extracted text, generated answers and cross-session recall are separate evidence.
 
-If the agent has an explicit tool allow list, remove OpenClaw's native
-`memory_search` and `memory_get` tools when NoldoMem is the intended memory
-system. Keep `noldomem_recall`, `noldomem_store`, and `noldomem_pin` allowed.
+Automatic capture can now retain one bounded **generated response episode** for
+a current, source-bound local/WebChat image input. It preserves the model's answer and its
+uncertainty as `inferred`/`generated`, never as verified extraction, a user fact
+or delivered content. Missing source/terminal evidence, suppressed media,
+NoldoMem context/tool echoes and failed turns are skipped. This applies alongside
+either inbound capture mode within the completion item bound. See the
+[mechanism, conservative limits and model-free native evidence](../docs/media-response-follow-up-2026-09-14.md).
+The [real follow-up](../docs/media-history-follow-up-2026-09-14.md) found that stable
+Codex completion snapshots can omit media retained in `chat.history`. With
+explicit conversation access, `gateway.mode: "local"`, `gateway.bind: "loopback"`
+and a configured numeric `gateway.port`, the plugin can make
+one bounded native history request for an image-bearing run to recover only the
+exact source's metadata. Run/session/source identity checks and existing capture
+guards remain mandatory. Unavailable or mismatched history fails closed.
+The [real PNG check](../docs/media-native-proof-2026-09-14.md) subsequently passed.
+
+Successful native document chunks omitted from a Codex completion snapshot can
+also be recovered from the official `before_prompt_build` input, with the same
+local-only history/source checks and explicit conversation access. Only bounded
+extracted chunks are held until completion (128 run entries, 32,000-character
+input limit, existing item/text bounds); the composite model prompt is never
+stored. They remain derived and must match a unique managed attachment in that
+exact source. Already-extracted completion rows and preprocessed capture are not
+duplicated. See the [PDF result and repair boundary](../docs/media-audio-document-results-2026-09-14.md).
+
+For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
+with `autoCaptureSource: "preprocessed"` selects the official
+`message:preprocessed` event **instead of** inbound `agent_end` capture. The
+completion hook may still capture qualified generated episodes. Internal hooks
+must be enabled and the explicit conversation-access grant above is required.
+This mode captures accepted inbound prepared text without waiting for a successful
+model completion. It keeps available event IDs/times and audio/file derivative
+origin; successful file extraction wrappers are normalized without promoting their
+contents into instructions. Unlabelled prepared text stays `derived` because the
+host may have appended link-understanding output. A typed caption is not labelled
+as image extraction. Missing, pending and multi-file references are not guessed.
+
+The default `autoCaptureSource: "agent_end"` includes CLI turns. It now also
+normalizes successful native file envelopes, including the stable formatter’s
+blank line, and drops failed/path-only file notices. Both capture modes keep
+extracted content derived and untrusted. A raw image/audio/file block next to
+text is not extraction evidence: that text retains a `text` representation and
+conservative derived trust. Completion capture preserves a supplied native row
+idempotency key and observation timestamp. An already recognized text derivative
+can retain a matching single local or opaque `media://inbound/` reference; multiple,
+suppressed, remote-only or mismatched attachments are not attributed. Row time
+is not an event date or revision-validity time. Missing legacy fields stay absent.
+The `preprocessed` mode does not cover CLI-only ingress; choose the
+capture surface for the profile deliberately. `message_sent` still observes
+confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
+provider call or background process is introduced. Pending image-run hints contain
+only identities and are bounded to 128 entries, consumed on completion. Document
+chunks use a separate bounded map and are also consumed on failed completion. See the
+[verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md) and
+[media-path follow-up](../docs/media-path-follow-up-2026-09-13.md).
+
+The older hook pack supplies bootstrap and channel hooks. Enabling it alongside
+the same typed plugin capture/injection events can duplicate storage, retrieval
+and context. JSONL sync is an archive/legacy path, not a reader for the current
+stable host's canonical SQLite sessions. Do not infer live coverage from its
+successful scan.
+
+The plugin binds tools to the host's factory context. Missing/mismatched agent
+identity fails closed; a model cannot select another agent through tool arguments.
+Use a distinct scoped API key per agent as the server-side boundary. Subtask
+capture accepts only the same agent's target session. Confirmed `message_sent`
+text is labeled delivered; `agent_end` alone is not delivery proof.
+
+See [platform evidence](../docs/platform-memory-alignment-2026-09-09.md) for the
+native/coexistence choices and remaining stable-host test limitations.
+
+`noldomem_forget` accepts a recalled `memory_id` for an explicit user forgetting
+request. It deletes that assertion and its revision family in the current agent
+scope; original transcripts and other stores remain separate.
+
+For source-session granularity, opaque relearning receipts and legacy limits, see
+[source replay protection](../docs/forgetting-sources.md).

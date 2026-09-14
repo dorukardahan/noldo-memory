@@ -1,0 +1,135 @@
+{
+  "recorded_date": "2026-09-14",
+  "baseline_head": "0e7c58450e851441d9e35f4d6d4feff2ad334796",
+  "host": {
+    "openclaw": "2026.9.3",
+    "stable_commit": "1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7",
+    "node": "24.19.0",
+    "codex_plugin": "2026.9.3",
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "harness": "codex"
+  },
+  "input": {
+    "type": "independently generated synthetic PNG",
+    "sha256": "21a472f0781776e91e38094fbaac3bc12d83256c0a526b5941a7aed023c58b34",
+    "first_prompt": "Here is the Aurora visit sign. What practical arrival detail can you read?",
+    "expected_answer_not_seeded": true
+  },
+  "applications": {
+    "started": 2,
+    "maximum": 2,
+    "wall_seconds": 10.899626919999719,
+    "per_application_limit_seconds": 120,
+    "total_limit_seconds": 240,
+    "attempt_one": {
+      "exit": 1,
+      "wall_seconds": 1.2081151730380952,
+      "failure": "GatewayCredentialsRequiredError before WebSocket/model submission; CLI config and temporary server auth mode differed",
+      "counted_against_allowance": true
+    },
+    "attempt_two": {
+      "exit": 0,
+      "native_turn_wall_ms": 8505,
+      "run_id": "fb7383b2-b154-442b-8dfa-ced8f46de7bf",
+      "response": [
+        "Use the **blue door** as the entrance."
+      ],
+      "images_count": 1,
+      "native_usage": {
+        "input": 6576,
+        "output": 14,
+        "cacheRead": 4352,
+        "cacheWrite": 0,
+        "reasoningTokens": 0,
+        "total": 10942,
+        "contextUsage": {
+          "state": "available",
+          "promptTokens": 10928,
+          "totalTokens": 10942
+        }
+      },
+      "automatic_recall_observed": true,
+      "agent_end_observed": true,
+      "automatic_capture_records": 0,
+      "capture_failed": true
+    },
+    "physical_provider_calls": "unknown; one successful native application can include transport continuations/retries",
+    "extra_oauth_logins": 0
+  },
+  "observed_boundary": {
+    "completion_source_id": "fb7383b2-b154-442b-8dfa-ced8f46de7bf:user",
+    "completion_has_media_metadata": false,
+    "same_source_history_has_media_metadata": true,
+    "history_reference": "media://inbound/484005bd-1a14-4a09-8cc6-57e0502c42ef.png",
+    "image_count_not_fresh_source_proof": true
+  },
+  "model_free_candidate_replay": {
+    "new_model_calls": 0,
+    "normal_gateway_startup": true,
+    "original_synthetic_events_replayed_through_public_harness_sdk": true,
+    "public_gateway_history_used_by_candidate": true,
+    "captured_id": "c350bf083a674da2",
+    "captured_text": "Assistant response to media input (unverified interpretation):\nUse the **blue door** as the entrance.\nUser request:\nHere is the Aurora visit sign. What practical arrival detail can you read?",
+    "evidence": {
+      "assertion": "inferred",
+      "delivery": "generated",
+      "event_id": "fb7383b2-b154-442b-8dfa-ced8f46de7bf:user",
+      "modality": "image",
+      "observed_at": 1789361450.533,
+      "reference": "media://inbound/484005bd-1a14-4a09-8cc6-57e0502c42ef.png",
+      "representation": "text",
+      "role": "assistant"
+    },
+    "cross_session_injection": true,
+    "other_agent_isolation": true,
+    "repeat_deduplicated": true,
+    "forget_blocks_history_reprocessing": true,
+    "explicit_api_relearn": true,
+    "capture_wall_ms": [
+      216.75698700000066,
+      41.69727799999964,
+      51.217287999999826,
+      63.44487300000037
+    ],
+    "timing_limit": "Four observations only, not p95 or a speedup benchmark; cold includes lazy SDK import.",
+    "real_model_after_fix": false
+  },
+  "checks": {
+    "baseline_new_positive_case_fails": true,
+    "focused_tests": 34,
+    "neighbor_api_alignment_ingestion_tests": 205,
+    "ruff": "passed",
+    "wheel": {
+      "version": "1.27.16",
+      "offline_no_dependency_install": true,
+      "sha256": "d31f2b3d24539224771dec4f05d1e5bde6851d1c9440670dfcfc7a429b86b380",
+      "changed_evidence_module_matches_source": true,
+      "nltk_or_zeyrek_requires_dist": false,
+      "validation_note": "Initial whole-METADATA substring assertion also matched README prose; inspected Requires-Dist to check actual dependencies."
+    },
+    "secret_scan": {
+      "tracked_only_filename_only": true,
+      "protected_profile": "workspace-no-secrets",
+      "flagged_files": 37,
+      "new_flagged_file": "tests/test_media_history_capture.py",
+      "review": "Deliberately invalid token-bearing synthetic reference strings; no new credential found in changed content. Existing heuristic findings retained, no ignore/exception added."
+    }
+  },
+  "source_hashes": {
+    "plugin/src/hooks.js": "bbd82519bd9f9b68971016810dc0434e7834351f79df89061b3c75698322b2bc",
+    "agent_memory/evidence.py": "65b55b4c7c0abe26cf610df2612413a4ba45e6fd41917cae7bdd1354c8e8fce1"
+  },
+  "cleanup": {
+    "temporary_processes_stopped": true,
+    "temporary_gateway_port_closed": true,
+    "selected_production_service_pid_and_start_time_unchanged": true,
+    "isolated_profile_and_oauth_retained_by_user_request": true,
+    "logout_or_revoke": false
+  },
+  "remaining": [
+    "No actual second-session model answer in this allowance.",
+    "Candidate fix verified by native event replay, not another model run.",
+    "Earlier Hermes STT, OpenClaw audio/PDF, outbound delivery, host maintainer and legacy provenance limits remain separate."
+  ]
+}

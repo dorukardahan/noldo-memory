@@ -1,0 +1,6 @@
+{
+  "cases": [
+    {"id": "image", "modality": "image", "kind": "image.description", "body": "[Image]\nDescription:\nThe Aurora observatory has a violet dome and a spiral staircase.", "derivative": "The Aurora observatory has a violet dome and a spiral staircase.", "query": "Plan our route through Aurora's spiral staircase."},
+    {"id": "audio", "modality": "audio", "kind": "audio.transcription", "body": "[Audio]\nTranscript:\nThe Aurora observatory workshop begins at 19:30 on Friday.", "derivative": "The Aurora observatory workshop begins at 19:30 on Friday.", "query": "Schedule Friday's workshop arrival"}
+  ]
+}
