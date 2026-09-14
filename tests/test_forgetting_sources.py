@@ -111,6 +111,68 @@ async def test_non_main_forget_clears_embedder_backing_cache(client, monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('phase', ['inter_batch_sleep', 'sub_batch', 'fallback'])
+async def test_worker_does_not_embed_forgotten_queued_rows(client, monkeypatch, phase):
+    from threading import Event
+    import agent_memory.embeddings as embeddings
+    from agent_memory.embed_worker import EmbedWorker
+
+    monkeypatch.setattr(embeddings, 'load_config', lambda: api._config)
+    api._config.embed_worker_enabled = True
+    embedder = embeddings.OpenRouterEmbeddings(api_key='synthetic', dimensions=4)
+    main = api._storage_pool.get('main')
+    embedder.set_storage(main)
+    monkeypatch.setattr(api, '_embedder', embedder)
+    ids = []
+    for text in ('The synthetic first dome is blue.', TEXT, 'The synthetic last dome is green.'):
+        response = await client.post('/v1/store', json={
+            'agent': 'alpha', 'text': text, 'session_id': f'source-{len(ids)}',
+        })
+        assert response.status_code == 200
+        ids.append(response.json()['id'])
+    entered, release = Event(), Event()
+    calls = []
+
+    def synthetic_vectors(texts):
+        first = not calls
+        calls.extend(texts)
+        if first and phase != 'inter_batch_sleep':
+            entered.set()
+            assert release.wait(5)
+            if phase == 'fallback':
+                raise embeddings.EmbeddingError('Synthetic batch failure')
+        return [[1., 0., 0., 0.] for _ in texts]
+
+    monkeypatch.setattr(embedder, '_call_api', synthetic_vectors)
+    worker = EmbedWorker(api._storage_pool, embedder,
+                         batch_size=1 if phase == 'inter_batch_sleep' else 3, max_sub_batch=1)
+
+    async def pause_between_batches(seconds):
+        if not release.is_set():
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 5)
+        return False
+
+    monkeypatch.setattr(worker, '_sleep_or_stop', pause_between_batches)
+    pending = asyncio.create_task(worker._process_agent('alpha'))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        receipt = await client.request('DELETE', '/v1/forget', json={'agent': 'alpha', 'id': ids[1]})
+        assert receipt.status_code == 200 and receipt.json()['deleted']
+    finally:
+        release.set()
+        await pending
+    assert TEXT not in calls
+    assert main.get_cached_embedding(embedder._cache_key(TEXT)) is None
+    assert embedder._cache_get(TEXT) is None
+    # Surviving work can complete on the next pass; deletion is not a global stop.
+    await worker._process_agent('alpha')
+    storage = api._storage_pool.get('alpha')
+    assert storage.get_memory(ids[1]) is None
+    assert all(storage.get_memory(mid)['vector_rowid'] is not None for mid in (ids[0], ids[2]))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('endpoint', ['/v1/capture', '/v1/store', '/v1/import'])
 async def test_forget_wins_against_embedding_in_flight(client, endpoint):
     old = (await client.post('/v1/store', json={'text': TEXT, 'session_id': 'source-a'})).json()['id']

@@ -280,10 +280,13 @@ class OpenRouterEmbeddings:
         if not texts:
             return []
 
+        generation = self._cache_generation
         results: List[Optional[List[float]]] = [None] * len(texts)
 
         # Process in sub-batches to avoid timeouts on large batches
         for sub_start in range(0, len(texts), max_sub_batch):
+            if generation != self._cache_generation:
+                return results
             sub_end = min(sub_start + max_sub_batch, len(texts))
             sub_indices = list(range(sub_start, sub_end))
             sub_texts = texts[sub_start:sub_end]
@@ -302,6 +305,8 @@ class OpenRouterEmbeddings:
 
             # Fallback: embed individually
             for idx, text in zip(sub_indices, sub_texts):
+                if generation != self._cache_generation:
+                    return results
                 try:
                     vec = await self.embed(text)
                     results[idx] = vec

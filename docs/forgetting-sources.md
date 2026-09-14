@@ -83,7 +83,11 @@ non-main agent. Other agents' memory records and source markers remain unchanged
 their next embedding request may need recomputation. Replacement writes also
 remove their old vector/FTS entries, so later forgetting does not miss those
 copies. A late background worker cannot attach a vector to a
-deleted row. Previously orphaned, unlinked vectors cannot be attributed
+deleted row. Before each batch it re-reads queued memory IDs, discarding missing,
+archived or already embedded rows and using current text. Cache invalidation
+also stops the remaining sub-batches and single-item fallbacks of an old embedding
+request; surviving work can resume on the worker's next pass. Previously orphaned,
+unlinked vectors cannot be attributed
 retroactively. This is logical product deletion, not forensic erasure of SQLite free pages,
 backups, already emitted context or host transcripts. No live database was opened
 or migrated during this work.

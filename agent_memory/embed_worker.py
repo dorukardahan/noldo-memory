@@ -128,7 +128,11 @@ class EmbedWorker:
             if self._stop_event.is_set():
                 return
 
-            batch = vectorless[start:start + self.batch_size]
+            # Backlog rows may have been forgotten or replaced during an await.
+            batch = [storage.get_memory(item["id"]) for item in vectorless[start:start + self.batch_size]]
+            batch = [item for item in batch if item and item["deleted_at"] is None and item["vector_rowid"] is None]
+            if not batch:
+                continue
             texts = [item["text"] for item in batch]
 
             try:
