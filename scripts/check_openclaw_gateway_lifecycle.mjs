@@ -60,9 +60,11 @@ try {
   assert.deepEqual(await exported('alpha'), []);
   // No plugin callback or hook runner is called directly. These are the same
   // SDK entry points used by the native Codex harness after/before model turns.
-  if (!mediaFile) await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'question'), event: {
-    success: true, messages: [{role: 'user', content:
-      'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?'},
+  if (!mediaFile) for (const question of [
+    'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?',
+    'For the Aurora visit, which entrance should I use, what should I bring, where should I meet, and who is the guide?',
+  ]) await sdk.awaitAgentHarnessAgentEndHook({ctx: ctx('alpha', 'question'), event: {
+    success: true, messages: [{role: 'user', content: question},
     {role: 'assistant', content: 'The guide is unknown.'}], durationMs: 1,
   }});
   assert.deepEqual(await exported('alpha'), [], 'Question-only completion became a reported fact');

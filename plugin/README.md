@@ -105,7 +105,17 @@ prompt-injection, role and agent-scope checks still apply.
 Recognized English/Turkish question-only turns are excluded before length and
 keyword admission, even when they mention preferences or decisions. Mixed turns
 that also supply facts and explicit memory requests retain the existing capture
-rules. This bounded check does not classify every possible question form.
+rules. Short English topic prefixes such as "For the visit, which...?" also count
+as question-only; prefixes containing a recognizable clause retain the existing
+capture rules. This bounded check does not classify every possible question form.
+
+For raw PDF input on OpenClaw 2026.9.3, keep the host's existing
+`document-extract` plugin enabled and included in an explicit plugin allowlist.
+NoldoMem consumes the resulting text; enabling NoldoMem alone does not enable
+PDF extraction. Native image interpretation can affect the current answer
+without creating a reusable text derivative or memory record. See the
+[bounded raw-media results](../docs/raw-media-results-2026-09-13.md); pixel access,
+extracted text, generated answers and cross-session recall are separate evidence.
 
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official

@@ -62,9 +62,17 @@ function isQuestionOnly(text) {
   // Reject recognizable information-seeking questions before length/keyword
   // admission. Preserve mixed declarative turns and explicit memory requests.
   const sentences = text.trim().split(/(?<=[.!?？])\s+|\n+/u).filter(Boolean);
-  return sentences.length > 0 && sentences.every(sentence =>
-    /^(?:what|when|where|which|who|whose|why|how|ne|nerede|hangi|kim|kimin|neden|nasıl)\s/iu.test(sentence) &&
-    /[?？]$/u.test(sentence.trim()));
+  return sentences.length > 0 && sentences.every(sentence => {
+    if (!/[?？]$/u.test(sentence.trim())) return false;
+    // A short topic phrase is not a declarative sentence: "For the visit, who...?".
+    // Keep prefixes containing a clause, so a supplied change is not discarded.
+    const topic = /^(?:for|about|regarding|concerning|as for)\s+([^,;:.!?]{1,120}),\s*/iu.exec(sentence);
+    if (topic) {
+      if (/\b(?:i|we|you|he|she|they|that|which|who|is|are|was|were|has|have|had|will|would|can|could|must|should)\b/iu.test(topic[1])) return false;
+      sentence = sentence.slice(topic[0].length);
+    }
+    return /^(?:what|when|where|which|who|whose|why|how|ne|nerede|hangi|kim|kimin|neden|nasıl)\s/iu.test(sentence);
+  });
 }
 
 function shouldCapture(text) {

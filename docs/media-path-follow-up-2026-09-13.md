@@ -129,3 +129,8 @@ pinned to their recorded source hashes; they were not rerun for this local fix.
 A separate [bounded raw-media acceptance plan](raw-media-acceptance-plan.md)
 describes the additional authorization and evidence required for incoming bytes.
 It does not claim execution or remove the outgoing-delivery maintainer gate.
+
+The subsequently authorized [raw-media execution](raw-media-results-2026-09-13.md)
+records actual PNG interpretation, failed cross-session recall, a failed ASR
+request, and separate native PDF extraction/capture evidence. It does not
+retroactively change the model-free claims above.

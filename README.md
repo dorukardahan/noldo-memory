@@ -30,6 +30,9 @@ The [dated platform comparison and synthetic measurements](docs/platform-memory-
 explain the tested versions, native advantages, limitations and integration status.
 The [host candidate follow-up](docs/host-candidate-follow-up-2026-09-10.md) separates
 unreleased audio provenance support from stable behavior and remaining acceptance gaps.
+The [raw-media run](docs/raw-media-results-2026-09-13.md) records successful
+current-turn image interpretation, failed cross-session media recall, and a
+separate model-free PDF extraction/capture check.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search

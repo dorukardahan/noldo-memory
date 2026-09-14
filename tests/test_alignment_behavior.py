@@ -175,6 +175,9 @@ for (const text of [
   'What time is the Aurora observatory visit, how does my current preference compare with before, and who is guiding it?',
   'Which rehearsal room did we agree on for the winter concert, and what time will the organizer arrive?',
   'What do I prefer? Who is the organizer?',
+  'For the Aurora visit, which entrance should I use, what should I bring, where should I meet, and who is the guide?',
+  'Regarding the winter concert, which rehearsal room did we agree on and when will the organizer arrive?',
+  'About the important booking, who is the contact?',
   'Hangi rehberi tercih etmiştim ve akşam yapılacak gözlemevi ziyaretinin başlangıç saati neydi?',
 ]) {
   await hooks.agent_end({success:true,messages:[{role:'user',content:text}]}, ctx);
@@ -184,6 +187,8 @@ const facts = [
   'I prefer quiet visits. What time does the observatory open?',
   'What time does it open? I prefer a guided group for this appointment.',
   'Remember that I prefer quiet visits, okay?',
+  'For the visit I booked at noon, who is the guide? I prefer quiet visits.',
+  'For the visit that was moved to Friday, which entrance should I use and who is the organizer?',
   'For the Aurora observatory visit, I now prefer a guided group instead of a quiet visit without a group. The booking time has not changed.',
 ];
 for (const text of facts) {

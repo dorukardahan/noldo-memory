@@ -1,7 +1,9 @@
 # Bounded incoming raw-media acceptance plan
 
-Status: prepared, **not authorized or executed**. Previous model allowances are
-exhausted. This plan does not restart the passed text-only correction scenario.
+Status: authorized and partially executed on **2026-09-13**;
+[results and remaining limits](raw-media-results-2026-09-13.md) recorded on
+2026-09-14. OpenClaw used both application turns; Hermes stopped at preflight
+before model calls. Earlier text-only allowances and successful tests are separate.
 
 ## What changes technically
 
