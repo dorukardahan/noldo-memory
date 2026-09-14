@@ -205,3 +205,13 @@ scope; original transcripts and other stores remain separate.
 
 For source-session granularity, opaque relearning receipts and legacy limits, see
 [source replay protection](../docs/forgetting-sources.md).
+
+### Automatic recall context budget
+
+Automatic recall preserves the full text of admitted memories while the rendered
+context fits `recallMaxTokens` (default 2000, estimated as four characters per
+token). The budget includes the wrapper, evidence metadata and escaped text.
+Records are kept in relevance order; subsequent records that do not fit stop the
+pack. Only an oversized first record receives a bounded prefix with a
+`[truncated]` marker. There is no separate 500-character limit per memory.
+This is a character-based estimate, not an exact model-token count.

@@ -281,9 +281,13 @@ export function registerAutoRecall(api, client, cfg) {
       const context = formatRelevantMemoriesContext(
         results.map((r) => ({
           category: r.memory_type || r.category || "other",
-          text: `[id=${r.id} valid_from=${r.valid_from ?? "unknown"} valid_to=${r.valid_to ?? "open"} evidence=${JSON.stringify(r.evidence || {})}] ${(r.text || r.content || "").slice(0, 500)}`,
-        }))
+          text: `[id=${r.id} valid_from=${r.valid_from ?? "unknown"} valid_to=${r.valid_to ?? "open"} evidence=${JSON.stringify(r.evidence || {})}] ${r.text || r.content || ""}`,
+        })),
+        // Match the API's four-characters-per-token estimate, including the
+        // wrapper, evidence metadata and escaping added by this plugin.
+        (cfg.recallMaxTokens ?? 2000) * 4,
       );
+      if (!context) return;
 
       return { prependContext: context };
     } catch (err) {
