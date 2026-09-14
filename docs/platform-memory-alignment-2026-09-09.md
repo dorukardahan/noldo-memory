@@ -1,5 +1,11 @@
 # Platform memory alignment evidence
 
+For the current reader-facing result, see the [capability and evidence guide](current-capabilities.md).
+Unpublished host metadata proposals are not prerequisites for the existing
+NoldoMem integrations. Their additional provenance/delivery guarantees and the
+remaining native validation gaps are tracked separately; the original acceptance
+criteria below are unchanged.
+
 Latest follow-up: [authorized native audio/document results and derivative corrections](media-audio-document-results-2026-09-14.md). Earlier pending-install/budget statements below describe the earlier checkpoint; they are not a new approval request.
 
 Latest text evidence: [two successful native Gateway applications and a question-capture regression fix, 2026-09-13](openclaw-native-gateway-2026-09-13.md). The bounded natural correction, cross-session current/previous answer, abstention and model-triggered hooks passed. Later [media evidence, 2026-09-14](media-history-follow-up-2026-09-14.md) separates correct pixel interpretation from failed automatic capture and a subsequent native-history correction verified without a model. The [subsequent real PNG check](media-native-proof-2026-09-14.md) confirms automatic capture and cross-session injection/entrance answer on the corrected candidate, with unknown-guide abstention and bounded source-wording limits. Earlier [Gateway setup failures and the official-install preflight](openclaw-gateway-attempts-2026-09-13.md) remain historical evidence. Full host/media acceptance is still incomplete.

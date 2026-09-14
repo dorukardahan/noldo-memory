@@ -2,14 +2,15 @@
 
 Latest follow-up: [authorized native audio/document results and derivative corrections](media-audio-document-results-2026-09-14.md). Earlier pending-install/budget statements below describe the earlier checkpoint; they are not a new approval request.
 
-Status: authorized and partially executed on **2026-09-13**;
-[results and remaining limits](raw-media-results-2026-09-13.md) recorded on
-2026-09-14. OpenClaw used both application turns; Hermes stopped at preflight
-before model calls. Earlier text-only allowances and successful tests are separate.
-The [later PNG proof](media-native-proof-2026-09-14.md) and
-[remaining upstream prerequisites](media-upstream-check-2026-09-14.md) supersede
-its pending-image and fresh-login assumptions. The existing isolated access is
-retained; the original execution instructions below are historical, not a new grant.
+Status: historical execution plan. The initial **2026-09-13** attempt and its
+[partial results](raw-media-results-2026-09-13.md) were followed by a
+[real PNG check](media-native-proof-2026-09-14.md) and the
+[authorized audio/document run](media-audio-document-results-2026-09-14.md).
+The latter used both applications on each host. Evidence collection is complete
+for those allowances; their temporary processes, profiles and access records
+were removed without logout/revoke. No retained test access or unused application
+allowance should be inferred from the execution instructions below. See the
+[current capability guide](current-capabilities.md) for results and open limits.
 
 ## What changes technically
 

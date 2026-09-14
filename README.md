@@ -28,27 +28,15 @@ provenance and conditional multimodal indexing. Hermes offers bounded, persisten
 
 The [dated platform comparison and synthetic measurements](docs/platform-memory-alignment-2026-09-09.md)
 explain the tested versions, native advantages, limitations and integration status.
-The [host candidate follow-up](docs/host-candidate-follow-up-2026-09-10.md) separates
-unreleased audio provenance support from stable behavior and remaining acceptance gaps.
-The [raw-media run](docs/raw-media-results-2026-09-13.md) records successful
-current-turn image interpretation, failed cross-session media recall, and a
-separate model-free PDF extraction/capture check.
-The [source-linked response follow-up](docs/media-response-follow-up-2026-09-14.md)
-adds inferred/generated media-response episodes with model-free native
-capture, injection and forgetting evidence. The [subsequent real run and fix](docs/media-history-follow-up-2026-09-14.md)
-identified completion metadata missing from hooks but available through native
-history. The correction passed native event replay and then a
-[real two-session PNG check](docs/media-native-proof-2026-09-14.md): automatic
-capture and injection carried the entrance detail into the next answer without
-the other agent's guide name. Audio/PDF and source-explanation limits remain.
-The [bounded native audio/PDF follow-up](docs/media-audio-document-results-2026-09-14.md)
-records Hermes's actual PNG/local-WAV/PDF learning and fresh-session answer,
-OpenClaw's audio HTTP 429, and PDF capture recovery through a documented native
-replay boundary. Failed file-read noise and document evidence were corrected;
-post-fix models were not silently rerun.
-The [upstream prerequisite check](docs/media-upstream-check-2026-09-14.md)
-distinguishes supported OAuth audio from account access and unmerged Hermes voice
-work, with a resolved isolated local-STT preparation path.
+Start with the [current capability and evidence guide](docs/current-capabilities.md)
+for observed behavior and the exact boundaries of each test. The guide links the
+historical runs without treating an earlier failed attempt as the current result.
+
+**The tested integrations run on released Hermes/OpenClaw hosts without the
+proposed upstream metadata changes.** Those proposals improve audio-clip origin
+and outbound delivery correlation; they are not installation prerequisites.
+NoldoMem can retain content while its exact clip origin or delivery status is
+unknown. It does not infer missing metadata or claim an unsent draft was delivered.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search
