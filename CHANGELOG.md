@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
 
 ### Fixed
+- Preserve native OpenClaw completion-row source identity and observation time, plus an unambiguous local reference for recognized text derivatives. Do not infer image content or reconstruct missing legacy provenance.
 - Exclude short topic-prefixed English questions such as "For the visit, which...?" from automatic fact capture; retain recognizable factual clauses and mixed turns. Found in bounded native raw-media acceptance, with focused and installed Gateway regressions.
 - Preserve literal `<media:document>` lines inside extracted documents; remove only the leading host transport placeholder before unwrapping.
 - Normalize successful OpenClaw file envelopes in default completion capture as well as preprocessing capture, accepting the real stable formatter’s blank line and omitting document-only failure markers. Preserve derived trust and content screening.

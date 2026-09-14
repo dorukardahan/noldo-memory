@@ -305,6 +305,7 @@ export function registerAutoCapture(api, client, cfg) {
       if (!agent) return;
       const messages = Array.isArray(event.messages) ? event.messages : [];
       const latestUser = messages.findLastIndex((message) => message?.role === "user");
+      const sourceMessage = latestUser >= 0 ? messages[latestUser] : undefined;
       const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
         .map(text => preprocessedFileText(omitEmptyAudioPlaceholder(text)));
       const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
@@ -325,7 +326,8 @@ export function registerAutoCapture(api, client, cfg) {
             session_id: ctx.sessionKey || ctx.sessionId,
             evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
               // Binary presence does not prove the adjacent text came from it.
-              modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text" },
+              modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text",
+              ...completionSourceEvidence(sourceMessage, derivativeKind) },
             namespace: cfg.defaultNamespace,
           });
         } catch (err) {
@@ -354,6 +356,36 @@ export function registerAutoCapture(api, client, cfg) {
       api.logger?.warn("noldomem: delivered-text capture unavailable");
     }
   });
+}
+
+function completionSourceEvidence(message, derivativeKind) {
+  // Stable UserTurnTranscriptRecorder retains these source fields on the
+  // prepared row supplied to agent_end. Never inspect upstreamUserText: it is
+  // a composite model prompt, not an attachment extraction or source identity.
+  const evidence = {};
+  if (typeof message?.idempotencyKey === "string" && message.idempotencyKey.length > 0 &&
+      message.idempotencyKey.length <= 200 && !/[\r\n]/u.test(message.idempotencyKey)) {
+    evidence.event_id = message.idempotencyKey;
+  }
+  // Host row timestamps are milliseconds. This is an observation time, not a
+  // supplied event date or revision-validity boundary.
+  if (typeof message?.timestamp === "number" && Number.isFinite(message.timestamp) && message.timestamp >= 0) {
+    evidence.observed_at = message.timestamp / 1000;
+  }
+  const media = message?.__openclaw?.media;
+  if (!derivativeKind || derivativeKind === "mixed" || !Array.isArray(media) || media.length !== 1) return evidence;
+  const fact = media[0];
+  if (!fact || fact.hydrationSuppressed || typeof fact.path !== "string" ||
+      /^[a-z][a-z\d+.-]*:/iu.test(fact.path)) return evidence;
+  const matches = fact.kind === derivativeKind ||
+    (derivativeKind === "document" && fact.kind === "file") ||
+    (typeof fact.contentType === "string" && (fact.contentType.startsWith(`${derivativeKind}/`) ||
+      (derivativeKind === "document" && /^(?:text\/|application\/(?:pdf|msword|vnd\.))/u.test(fact.contentType))));
+  if (matches) {
+    const reference = safeMediaReference(fact.path);
+    if (reference) evidence.reference = reference;
+  }
+  return evidence;
 }
 
 function registerPreprocessedCapture(api, client, cfg) {

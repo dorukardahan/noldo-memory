@@ -124,6 +124,35 @@ fact still captures and injects across sessions without reaching another agent.
 That regression used update rehearsal and **zero model calls**. Neither real
 application was repeated on the corrected code. Source digests distinguish them.
 
+## Completion source follow-up on 2026-09-14
+
+The pinned stable host already retains more source information than NoldoMem's
+default completion capture consumed. The source chain is
+[`prepareChatSendUserTurn`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/gateway/server-methods/chat-send-user-turn.ts)
+→ [`buildPersistedUserTurnMessage`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/sessions/user-turn-transcript.message.ts)
+→ [`buildFromPrepared` / `resolveFinalCodexMirrorMessages`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/app-server/user-prompt-message.ts)
+→ `agent_end`. The prepared row contains a source idempotency key, millisecond
+observation time and ordered `__openclaw.media` facts. These do not identify
+which sentence in an assistant answer came from which image.
+
+NoldoMem now preserves the supplied key/time, and a single matching local media
+reference when the captured text is already a recognized derivative. It does
+not retrieve sessions, fetch files, consume the composite upstream prompt,
+increase capture admission or save arbitrary model interpretations. Suppressed,
+multiple, mismatched and remote-only media receive no inferred reference.
+The agent/session binding and existing session-granularity replay tombstone
+remain unchanged; a media path is not a new file-level forgetting guarantee.
+
+The new synthetic adapter regression failed before the fix and passed afterward;
+**33 focused tests** passed with Ruff. It covers identity/time retention,
+attribution refusal, legacy absence and agent scope. This is source-contract and
+adapter evidence, not a new native/model run. A model-free attempt to use the
+host's source-tree `plugin-test-runtime` helper stopped with
+`ERR_PACKAGE_PATH_NOT_EXPORTED` on the installed 2026.9.3 package. No private
+import workaround or package installation followed. All earlier media outcomes
+and model budgets above remain unchanged. Image interpretation persistence still
+needs a design that preserves source and inference uncertainty.
+
 ## Hermes preflight and bounded usage
 
 The installed Hermes **0.21.1 / v2026.9.7** representative used Python **3.11.15**.

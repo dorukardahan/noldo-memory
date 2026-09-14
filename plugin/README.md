@@ -133,7 +133,12 @@ normalizes successful native file envelopes, including the stable formatter’s
 blank line, and drops failed/path-only file notices. Both capture modes keep
 extracted content derived and untrusted. A raw image/audio/file block next to
 text is not extraction evidence: that text retains a `text` representation and
-conservative derived trust. The `preprocessed` mode does not cover CLI-only ingress; choose the
+conservative derived trust. Completion capture preserves a supplied native row
+idempotency key and observation timestamp. An already recognized text derivative
+can retain a matching single local `__openclaw.media` reference; multiple,
+suppressed, remote-only or mismatched attachments are not attributed. Row time
+is not an event date or revision-validity time. Missing legacy fields stay absent.
+The `preprocessed` mode does not cover CLI-only ingress; choose the
 capture surface for the profile deliberately. `message_sent` still observes
 confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
 provider call or background join cache is introduced. See the

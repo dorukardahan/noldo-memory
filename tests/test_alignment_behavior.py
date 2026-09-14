@@ -106,6 +106,58 @@ assert.equal(stores[0].session_id, ctx.sessionKey);
 ''')
 
 
+def test_openclaw_completion_preserves_native_source_metadata_without_guessing_media():
+    run_node(r'''
+import assert from 'node:assert/strict';
+import {registerAutoCapture} from './plugin/src/hooks.js';
+const hooks = {}, stores = [];
+registerAutoCapture({on(name, fn) {hooks[name] = fn;}}, {
+  store: async body => {stores.push(body); return {};},
+}, {captureMaxItems: 3, defaultNamespace: 'default'});
+const transcript = '[Audio]\nTranscript:\nFor the observatory visit, bring a red notebook.';
+const input = {role:'user', content:transcript, idempotencyKey:'synthetic-run:user',
+  timestamp:123000, __openclaw:{media:[{path:'/synthetic/packing.wav', contentType:'audio/wav'}]}};
+const capture = async (row, ctx = {agentId:'alpha', sessionKey:'agent:alpha:source'}) => {
+  await hooks.agent_end({success:true, messages:[row]}, ctx);
+  return stores.at(-1);
+};
+const captured = await capture(input);
+assert.equal(captured.evidence.event_id, 'synthetic-run:user');
+assert.equal(captured.evidence.observed_at, 123);
+assert.equal(captured.evidence.reference, '/synthetic/packing.wav');
+assert.equal(captured.evidence.assertion, 'derived');
+assert.equal(captured.evidence.modality, 'audio');
+assert.equal(captured.evidence.representation, 'extracted_text');
+assert.equal(captured.session_id, 'agent:alpha:source');
+for (const media of [
+  [{path:'/synthetic/entrance.png', contentType:'image/png'}],
+  [{path:'/synthetic/one.wav', contentType:'audio/wav'}, {path:'/synthetic/two.wav', contentType:'audio/wav'}],
+  [{url:'https://example.invalid/clip', contentType:'audio/wav'}],
+  [{path:'/synthetic/packing.wav', contentType:'audio/wav', hydrationSuppressed:true}],
+]) {
+  assert.equal((await capture({...input, __openclaw:{media}})).evidence.reference, undefined,
+    'mismatched, multiple, remote or suppressed media is not an attributable local derivative');
+}
+const plain = await capture({...input, content:'I prefer quiet observatory visits.'});
+assert.equal(plain.evidence.assertion, 'reported', 'attachment presence does not make text an extraction');
+assert.equal(plain.evidence.modality, 'text');
+assert.equal(plain.evidence.reference, undefined);
+for (const invalid of [{idempotencyKey:'x'.repeat(201),timestamp:NaN},
+  {idempotencyKey:42,timestamp:-1}, {idempotencyKey:'bad\nkey',timestamp:'123'}]) {
+  const evidence = (await capture({...input, ...invalid})).evidence;
+  assert.equal(evidence.event_id, undefined);
+  assert.equal(evidence.observed_at, undefined);
+}
+const other = await capture(input, {agentId:'beta',sessionKey:'agent:beta:source'});
+assert.equal(other.agent, 'beta');
+assert.equal(other.session_id, 'agent:beta:source');
+const legacy = await capture({role:'user',content:transcript});
+assert.equal(legacy.evidence.event_id, undefined);
+assert.equal(legacy.evidence.observed_at, undefined);
+assert.equal(legacy.evidence.reference, undefined, 'missing legacy provenance stays missing');
+''')
+
+
 def test_similar_distinct_statements_keep_separate_provenance(tmp_storage):
     common = dict(vector=[1.0, 0.0, 0.0, 0.0], category='user', importance=0.8,
                   namespace='default', memory_type='preference', source='session_capture')
