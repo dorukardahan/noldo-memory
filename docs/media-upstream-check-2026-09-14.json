@@ -1,0 +1,253 @@
+{
+  "date": "2026-09-14",
+  "source_comparison": [
+    {
+      "repo": "openclaw/openclaw",
+      "ref": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+      "path": "extensions/openai/audio-transcription.ts",
+      "identical_to_tested_stable": true,
+      "sha256": "eae0ad8b79a018f7cb57d92319a326958657204398daa11eb719f4430c7f1597"
+    },
+    {
+      "repo": "openclaw/openclaw",
+      "ref": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+      "path": "src/media-understanding/openai-compatible-audio.ts",
+      "identical_to_tested_stable": true,
+      "sha256": "bf610529d620fd628e6564727695a9007848f1f179eaf3c53b6b574e54702e61"
+    },
+    {
+      "repo": "openclaw/openclaw",
+      "ref": "3a9d69db306cd7f081e06254cb89c4bcc14a7107",
+      "path": "src/media-understanding/runner.ts",
+      "identical_to_tested_stable": false,
+      "sha256": "abdd711053eaa92f3d9a15f2bc1b76f84960928adc03a9010746fbcb58d0d3b0"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "ref": "939e45c91d751fadd94dcd1b873ac3cb44846213",
+      "path": "tools/transcription_tools.py",
+      "identical_to_tested_stable": true,
+      "sha256": "33e7352921d4480032a32a64ce1b960c8f4d98cf0f78d95e790503b45e7ac735"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "ref": "939e45c91d751fadd94dcd1b873ac3cb44846213",
+      "path": "tools/transcription_local.py",
+      "identical_to_tested_stable": true,
+      "sha256": "695f9d6e492d5e607488bb52f685445d0b27cfef55c20c5f16c83d0d77a2eb36"
+    },
+    {
+      "repo": "NousResearch/hermes-agent",
+      "ref": "939e45c91d751fadd94dcd1b873ac3cb44846213",
+      "path": "tools/transcription_cloud.py",
+      "identical_to_tested_stable": true,
+      "sha256": "9afdb3f7194a9cce805175dabfe88497d4e11177f19b520cdcd7d5113462b4cb"
+    }
+  ],
+  "native_provider_error_probe": {
+    "openclaw": "2026.9.3",
+    "node": "24.19.0",
+    "sdk": "openclaw/plugin-sdk/provider-http",
+    "function": "createProviderHttpError",
+    "provider_calls": 0,
+    "model_calls": 0,
+    "cases": [
+      {
+        "status": 401,
+        "code": "invalid_api_key",
+        "numeric_status_retained": true,
+        "string_contains_status": true
+      },
+      {
+        "status": 403,
+        "code": "permission_denied",
+        "numeric_status_retained": true,
+        "string_contains_status": true
+      },
+      {
+        "status": 429,
+        "code": "insufficient_quota",
+        "numeric_status_retained": true,
+        "string_contains_status": true
+      }
+    ]
+  },
+  "voice_resolution": {
+    "installed": false,
+    "resolver": "uv 0.8.22",
+    "target_python": "3.11",
+    "target_platform": "x86_64-manylinux_2_28",
+    "only_binary": true,
+    "exclude_newer": "2026-09-07T00:00:00Z",
+    "official_hermes_lock_commit": "2237be355906fbe6065ce1815711eee52b2d646e",
+    "requirements_sha256": "72cffd24a1f564b471b869d1bd5ac52b288a484155f7732a9cf3977988b1f4d0",
+    "packages": [
+      {
+        "name": "anyio",
+        "version": "4.12.1",
+        "advisories": []
+      },
+      {
+        "name": "av",
+        "version": "17.0.0",
+        "advisories": []
+      },
+      {
+        "name": "certifi",
+        "version": "2026.5.20",
+        "advisories": []
+      },
+      {
+        "name": "cffi",
+        "version": "2.0.0",
+        "advisories": []
+      },
+      {
+        "name": "click",
+        "version": "8.4.2",
+        "advisories": []
+      },
+      {
+        "name": "ctranslate2",
+        "version": "4.7.1",
+        "advisories": []
+      },
+      {
+        "name": "faster-whisper",
+        "version": "1.2.1",
+        "advisories": []
+      },
+      {
+        "name": "filelock",
+        "version": "3.24.3",
+        "advisories": []
+      },
+      {
+        "name": "flatbuffers",
+        "version": "25.12.19",
+        "advisories": []
+      },
+      {
+        "name": "fsspec",
+        "version": "2026.2.0",
+        "advisories": []
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0",
+        "advisories": []
+      },
+      {
+        "name": "hf-xet",
+        "version": "1.5.2",
+        "advisories": []
+      },
+      {
+        "name": "httpcore",
+        "version": "1.0.9",
+        "advisories": []
+      },
+      {
+        "name": "httpx",
+        "version": "0.28.1",
+        "advisories": []
+      },
+      {
+        "name": "huggingface-hub",
+        "version": "1.24.0",
+        "advisories": []
+      },
+      {
+        "name": "idna",
+        "version": "3.18",
+        "advisories": []
+      },
+      {
+        "name": "numpy",
+        "version": "2.4.3",
+        "advisories": []
+      },
+      {
+        "name": "onnxruntime",
+        "version": "1.27.0",
+        "advisories": []
+      },
+      {
+        "name": "packaging",
+        "version": "26.0",
+        "advisories": []
+      },
+      {
+        "name": "protobuf",
+        "version": "6.33.5",
+        "advisories": []
+      },
+      {
+        "name": "pycparser",
+        "version": "3.0",
+        "advisories": []
+      },
+      {
+        "name": "pyyaml",
+        "version": "6.0.3",
+        "advisories": []
+      },
+      {
+        "name": "setuptools",
+        "version": "83.0.0",
+        "advisories": []
+      },
+      {
+        "name": "sounddevice",
+        "version": "0.5.5",
+        "advisories": []
+      },
+      {
+        "name": "tokenizers",
+        "version": "0.22.2",
+        "advisories": []
+      },
+      {
+        "name": "tqdm",
+        "version": "4.67.3",
+        "advisories": []
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.15.0",
+        "advisories": []
+      }
+    ],
+    "local_interpreter_warning": "Python 3.11 not present on resolver host; uv reported Python 3.14.7. Source builds were forbidden and no package was installed. This is cross-platform metadata resolution, not runtime compatibility proof.",
+    "security_audit": {
+      "tool": "pip-audit 2.10.0",
+      "packages": 27,
+      "known_vulnerabilities": 0,
+      "dependency_resolution_and_pip_execution_disabled": true,
+      "ignored_advisories": []
+    },
+    "target_hardware_metadata": {
+      "architecture": "x86_64",
+      "glibc": "2.39",
+      "sse4_1": true,
+      "avx": true,
+      "avx2": true,
+      "fma": true,
+      "native_engine_not_installed_or_executed": true
+    }
+  },
+  "next_harness_prepared_not_executed": {
+    "normal_cli": "gateway run --verbose",
+    "health_preflight": "gateway call health --json --timeout 2000",
+    "input_batch": [
+      "packing.wav",
+      "meeting.pdf"
+    ],
+    "application_limit": 2,
+    "per_application_seconds": 120,
+    "total_seconds": 240,
+    "preserve_previous_budget": true,
+    "fresh_synthetic_db": true,
+    "diagnostic_output": "numeric audio-error status and allowlisted code labels only; absent stays unknown"
+  }
+}

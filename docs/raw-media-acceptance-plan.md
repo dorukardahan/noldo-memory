@@ -4,6 +4,10 @@ Status: authorized and partially executed on **2026-09-13**;
 [results and remaining limits](raw-media-results-2026-09-13.md) recorded on
 2026-09-14. OpenClaw used both application turns; Hermes stopped at preflight
 before model calls. Earlier text-only allowances and successful tests are separate.
+The [later PNG proof](media-native-proof-2026-09-14.md) and
+[remaining upstream prerequisites](media-upstream-check-2026-09-14.md) supersede
+its pending-image and fresh-login assumptions. The existing isolated access is
+retained; the original execution instructions below are historical, not a new grant.
 
 ## What changes technically
 

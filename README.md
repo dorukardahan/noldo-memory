@@ -41,6 +41,9 @@ history. The correction passed native event replay and then a
 [real two-session PNG check](docs/media-native-proof-2026-09-14.md): automatic
 capture and injection carried the entrance detail into the next answer without
 the other agent's guide name. Audio/PDF and source-explanation limits remain.
+The [upstream prerequisite check](docs/media-upstream-check-2026-09-14.md)
+distinguishes supported OAuth audio from account access and unmerged Hermes voice
+work, with a resolved isolated local-STT preparation path.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search
