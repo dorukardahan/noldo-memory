@@ -102,13 +102,25 @@ try {
     assert.equal(captured.evidence.modality, 'document');
     assert.equal(captured.evidence.representation, 'extracted_text');
   }
+  // Seed historical evidence outside the configured capture namespace.
+  const historical = !mediaFile && !mediaResponse
+    ? 'For the Aurora observatory visit, I prefer quiet guided visits on weekdays.' : null;
+  if (historical) {
+    const seeded = await fetch(`${endpoint}/v1/store`, {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({agent:'alpha',
+        text:historical, namespace:'older-session', source:'synthetic-history',
+        session_id:'agent:alpha:prior'})});
+    assert(seeded.ok, 'Historical fixture seed failed');
+  }
   const built = await sdk.resolveAgentHarnessBeforePromptBuildResult({ctx: ctx('alpha', 'later'),
     prompt: query, developerInstructions: 'Synthetic lifecycle fixture.', messages: []});
   assert(built.prompt.includes(episode), 'Automatic cross-session injection absent');
   assert(built.prompt.includes(query));
+  if (historical) assert(built.prompt.includes(historical), 'Other own-agent namespace was excluded');
   const other = await sdk.resolveAgentHarnessBeforePromptBuildResult({ctx: ctx('beta', 'later'),
     prompt: query, developerInstructions: 'Synthetic lifecycle fixture.', messages: []});
   assert(!other.prompt.includes(episode), 'Other agent received the event');
+  if (historical) assert(!other.prompt.includes(historical), 'Other agent received historical namespace');
   assert.deepEqual(await exported('beta'), []);
   if (mediaResponse) {
     const forgotten = await fetch(`${endpoint}/v1/forget`, {method:'DELETE',

@@ -91,9 +91,11 @@ the native loader rejects those hook registrations; tools alone can still load.
 The example above enables capture/lifecycle access while retaining the
 prompt-injection prohibition. For automatic recall, deliberately enable both
 `enableAutoRecall` and `hooks.allowPromptInjection` in the selected profile.
-Automatic recall searches every namespace within the current agent database.
-`defaultNamespace` selects where automatic capture writes; it does not restrict
-historical recall. Other agents remain excluded.
+Automatic recall remains limited to `defaultNamespace` by default, preserving
+workspace isolation. Explicitly set `recallAllNamespaces: true` only when every
+namespace in the current agent database should be available to this profile.
+This opt-in matches unfiltered explicit recall; other agents remain excluded.
+`defaultNamespace` still selects where automatic capture writes.
 
 Declarative prompts can recall history; trivial acknowledgements skip search. An optional
 `recallMinSemanticScore` filters automatic context using a model-calibrated floor;

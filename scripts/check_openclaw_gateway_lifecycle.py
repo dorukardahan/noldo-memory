@@ -75,7 +75,7 @@ def check(host, node, media_file=False):
                             "hooks": {"allowConversationAccess": True, "allowPromptInjection": True},
                             "config": {"baseUrl": endpoint, "apiKeyFile": "/dev/null",
                                 "enableAutoRecall": True, "enableAutoCapture": True,
-                                "defaultNamespace": "synthetic-archive",
+                                "defaultNamespace": "synthetic-archive", "recallAllNamespaces": True,
                                 "enableOperationalCapture": False, "enableCompactionCapture": False,
                                 "enableSubagentCapture": False}}}},
         }
@@ -94,12 +94,15 @@ def check(host, node, media_file=False):
             lines = [line for line in stdout.splitlines() if line.startswith("LIFECYCLE_RESULT=")]
             assert len(lines) == 1, stdout + stderr
             result = json.loads(lines[0].split("=", 1)[1])
-            assert [r["path"] for r in requests] == ["/v1/store", "/v1/recall", "/v1/recall"], requests
+            expected_paths = ["/v1/store"] + ([] if media_file else ["/v1/store"]) + ["/v1/recall", "/v1/recall"]
+            assert [r["path"] for r in requests] == expected_paths, requests
             assert requests[0]["body"]["agent"] == "alpha"
             assert requests[0]["body"]["namespace"] == "synthetic-archive"
-            assert all("namespace" not in r["body"] for r in requests[1:])
-            assert requests[1]["body"]["agent"] == "alpha"
-            assert requests[2]["body"]["agent"] == "beta"
+            if not media_file:
+                assert requests[1]["body"]["namespace"] == "older-session"
+            assert all("namespace" not in r["body"] for r in requests[-2:])
+            assert requests[-2]["body"]["agent"] == "alpha"
+            assert requests[-1]["body"]["agent"] == "beta"
             result["http_requests"] = requests
         finally:
             if proc is not None and proc.poll() is None:

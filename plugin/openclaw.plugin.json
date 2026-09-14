@@ -16,6 +16,7 @@
       "baseUrl": { "type": "string", "default": "http://127.0.0.1:8787" },
       "apiKeyFile": { "type": "string", "default": "~/.noldomem/memory-api-key" },
       "defaultNamespace": { "type": "string", "default": "default" },
+      "recallAllNamespaces": { "type": "boolean", "default": false, "description": "Explicitly search all namespaces within the current agent during automatic recall. Other agents remain excluded." },
       "enableAutoRecall": { "type": "boolean", "default": false },
       "enableAutoCapture": { "type": "boolean", "default": false },
       "autoCaptureSource": { "type": "string", "enum": ["agent_end", "preprocessed"], "default": "agent_end", "description": "Choose one inbound capture path. preprocessed uses the stable Gateway message hook and requires explicit conversation access; it does not capture CLI turns." },

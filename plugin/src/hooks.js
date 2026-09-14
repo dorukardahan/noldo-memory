@@ -266,8 +266,8 @@ export function registerAutoRecall(api, client, cfg) {
         query: userQuery,
         limit: cfg.recallLimit,
         agent,
-        // Search every namespace in this agent's DB, as explicit recall does.
-        // defaultNamespace controls capture placement, not historical visibility.
+        // Cross-namespace recall is explicit; preserve existing workspace isolation.
+        ...(cfg.recallAllNamespaces === true ? {} : { namespace: cfg.defaultNamespace }),
         max_tokens: cfg.recallMaxTokens,
         ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });
