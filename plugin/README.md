@@ -117,9 +117,19 @@ without creating a reusable text derivative or memory record. See the
 [bounded raw-media results](../docs/raw-media-results-2026-09-13.md); pixel access,
 extracted text, generated answers and cross-session recall are separate evidence.
 
+Automatic capture can now retain one bounded **generated response episode** for
+a current, source-bound local/WebChat image input. It preserves the model's answer and its
+uncertainty as `inferred`/`generated`, never as verified extraction, a user fact
+or delivered content. Missing source/terminal evidence, suppressed media,
+NoldoMem context/tool echoes and failed turns are skipped. This applies alongside
+either inbound capture mode within the completion item bound. See the
+[mechanism, conservative limits and model-free native evidence](../docs/media-response-follow-up-2026-09-14.md).
+The changed path has not yet been retested with a real model.
+
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official
-`message:preprocessed` event **instead of** inbound `agent_end`. Internal hooks
+`message:preprocessed` event **instead of** inbound `agent_end` capture. The
+completion hook may still capture qualified generated episodes. Internal hooks
 must be enabled and the explicit conversation-access grant above is required.
 This mode captures accepted inbound prepared text without waiting for a successful
 model completion. It keeps available event IDs/times and audio/file derivative

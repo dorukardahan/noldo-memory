@@ -33,6 +33,9 @@ unreleased audio provenance support from stable behavior and remaining acceptanc
 The [raw-media run](docs/raw-media-results-2026-09-13.md) records successful
 current-turn image interpretation, failed cross-session media recall, and a
 separate model-free PDF extraction/capture check.
+The [source-linked response follow-up](docs/media-response-follow-up-2026-09-14.md)
+adds inferred/generated media-response episodes with model-free native
+capture, injection and forgetting evidence; a new real-model check is still pending.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search

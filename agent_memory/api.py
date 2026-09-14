@@ -997,7 +997,8 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     category = req.category
     importance = req.importance
     detected = _rule_detector.detect(req.text)
-    if detected or _rule_detector.check_safeword(req.text):
+    reported_user = req.evidence is None or (req.evidence.role == "user" and req.evidence.assertion == "reported")
+    if reported_user and (detected or _rule_detector.check_safeword(req.text)):
         category = "rule"
         importance = 1.0
         logger.info("Rule detected in /v1/store: %s", req.text[:60])
@@ -1012,6 +1013,8 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     trust_level = 'system' if source in ('hook', 'auto_escalation') else 'user'
 
     resolved_memory_type = req.memory_type if req.memory_type else classify_memory_type(req.text)
+    if not reported_user and req.memory_type is None and resolved_memory_type == "rule":
+        resolved_memory_type = "conversation"
     if category == "rule" and req.memory_type is None:
         resolved_memory_type = "rule"
 

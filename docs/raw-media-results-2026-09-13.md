@@ -153,6 +153,10 @@ import workaround or package installation followed. All earlier media outcomes
 and model budgets above remain unchanged. Image interpretation persistence still
 needs a design that preserves source and inference uncertainty.
 
+The subsequent [source-linked response implementation](media-response-follow-up-2026-09-14.md)
+adds a qualified generated-episode path and separate model-free native evidence.
+It does not retroactively change either real model result above.
+
 ## Hermes preflight and bounded usage
 
 The installed Hermes **0.21.1 / v2026.9.7** representative used Python **3.11.15**.

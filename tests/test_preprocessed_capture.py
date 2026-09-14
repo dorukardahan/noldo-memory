@@ -12,7 +12,10 @@ const config = {plugins: {entries: {noldomem: {hooks: {allowConversationAccess: 
 const api = {config, on(n,f) {typed.set(n,f);}, registerHook(n,f) {handlers.set(n,f);}};
 const cfg = {autoCaptureSource: 'preprocessed', defaultNamespace: 'default', captureMaxItems: 3};
 registerAutoCapture(api, {async store(body) {stores.push(body);}}, cfg);
-assert(!typed.has('agent_end')); // One inbound writer, not two.
+await typed.get('agent_end')({success:true,messages:[
+  {role:'user',content:'The Aurora observatory booking starts at 19:30 on Friday.'},
+]}, {agentId:'alpha',sessionKey:'agent:alpha:synthetic-a'});
+assert.equal(stores.length,0); // Completion must not duplicate the preprocessing inbound writer.
 assert(typed.has('message_sent'));
 const capture = handlers.get('message:preprocessed');
 const event = {type:'message', action:'preprocessed', sessionKey:'agent:alpha:synthetic-a', context:{

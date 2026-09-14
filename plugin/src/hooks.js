@@ -2,7 +2,7 @@
  * NoldoMem lifecycle hooks — auto-recall and auto-capture.
  *
  * Auto-recall: before_prompt_build — inject relevant memories before every response
- * Auto-capture: agent_end — capture important user messages after each turn
+ * Auto-capture: user evidence and source-qualified generated media episodes
  */
 
 import {
@@ -43,9 +43,9 @@ const CAPTURE_TRIGGERS = [
   /\b(rule|kural|policy|politika)\b/i,
 ];
 
-function boundedCaptureText(text) {
+function boundedCaptureText(text, limit = 2000) {
   // Preserve the existing UTF-16 bound without sending a cut surrogate pair.
-  return text.slice(0, 2000).replace(/[\uD800-\uDBFF]$/u, "");
+  return text.slice(0, limit).replace(/[\uD800-\uDBFF]$/u, "");
 }
 
 function isShortEventFact(text) {
@@ -297,47 +297,55 @@ export function registerAutoRecall(api, client, cfg) {
 export function registerAutoCapture(api, client, cfg) {
   if (cfg.autoCaptureSource === "preprocessed") {
     registerPreprocessedCapture(api, client, cfg);
-  } else {
-    api.on("agent_end", async (event, ctx) => {
-      if (!event.success) return;
-
-      const agent = resolveAgentId(ctx);
-      if (!agent) return;
-      const messages = Array.isArray(event.messages) ? event.messages : [];
-      const latestUser = messages.findLastIndex((message) => message?.role === "user");
-      const sourceMessage = latestUser >= 0 ? messages[latestUser] : undefined;
-      const texts = extractUserTextsFromMessages(latestUser < 0 ? [] : [messages[latestUser]])
-        .map(text => preprocessedFileText(omitEmptyAudioPlaceholder(text)));
-      const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
-      const media = Array.isArray(blocks) && blocks.some((block) =>
-        ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
-      const candidates = texts.filter(({text, extracted}) => shouldCapture(text) ||
-        ((media || extracted || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
-
-      for (const {text, extracted} of candidates) {
-        const kinds = new Set([nativeMediaKind(text), extracted ? "document" : null].filter(Boolean));
-        const derivativeKind = kinds.size > 1 ? "mixed" : [...kinds][0];
-        const derived = media || Boolean(derivativeKind);
-        try {
-          await client.store({
-            text: boundedCaptureText(text),
-            agent,
-            source: "plugin-auto-capture",
-            session_id: ctx.sessionKey || ctx.sessionId,
-            evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
-              // Binary presence does not prove the adjacent text came from it.
-              modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text",
-              ...completionSourceEvidence(sourceMessage, derivativeKind) },
-            namespace: cfg.defaultNamespace,
-          });
-        } catch (err) {
-          console.warn(
-            `[noldomem-plugin] auto-capture failed: ${err.message || err}`
-          );
-        }
-      }
-    });
   }
+  api.on("agent_end", async (event, ctx) => {
+    if (!event.success) return;
+
+    const agent = resolveAgentId(ctx);
+    if (!agent) return;
+    const messages = Array.isArray(event.messages) ? event.messages : [];
+    const latestUser = messages.findLastIndex((message) => message?.role === "user");
+    const sourceMessage = latestUser >= 0 ? messages[latestUser] : undefined;
+    const texts = extractUserTextsFromMessages(cfg.autoCaptureSource === "preprocessed" || latestUser < 0 ? [] : [messages[latestUser]])
+      .map(text => preprocessedFileText(omitEmptyAudioPlaceholder(text)));
+    const blocks = latestUser >= 0 ? messages[latestUser]?.content : [];
+    const media = Array.isArray(blocks) && blocks.some((block) =>
+      ["image", "image_url", "input_audio", "audio", "file", "document"].includes(block?.type));
+    const candidates = texts.filter(({text, extracted}) => shouldCapture(text) ||
+      ((media || extracted || nativeMediaKind(text)) && text.length >= 15 && !looksLikePromptInjection(text))).slice(0, cfg.captureMaxItems);
+
+    for (const {text, extracted} of candidates) {
+      const kinds = new Set([nativeMediaKind(text), extracted ? "document" : null].filter(Boolean));
+      const derivativeKind = kinds.size > 1 ? "mixed" : [...kinds][0];
+      const derived = media || Boolean(derivativeKind);
+      try {
+        await client.store({
+          text: boundedCaptureText(text),
+          agent,
+          source: "plugin-auto-capture",
+          session_id: ctx.sessionKey || ctx.sessionId,
+          evidence: { role: "user", assertion: derived ? "derived" : "reported", delivery: "received",
+            // Binary presence does not prove the adjacent text came from it.
+            modality: derivativeKind || "text", representation: derivativeKind ? "extracted_text" : "text",
+            ...completionSourceEvidence(sourceMessage, derivativeKind) },
+          namespace: cfg.defaultNamespace,
+        });
+      } catch (err) {
+        console.warn(
+          `[noldomem-plugin] auto-capture failed: ${err.message || err}`
+        );
+      }
+    }
+    const response = mediaResponseCandidate(event, ctx, sourceMessage, messages.slice(latestUser + 1));
+    if (response && candidates.length < cfg.captureMaxItems) {
+      try {
+        await client.store({...response, agent, namespace: cfg.defaultNamespace,
+          session_id: ctx.sessionKey || ctx.sessionId});
+      } catch {
+        api.logger?.warn("noldomem: media-response capture unavailable");
+      }
+    }
+  });
 
   // agent_end confirms generation, not channel delivery. Only this host event
   // can label outgoing text as delivered. Media-only payloads remain a host gap.
@@ -358,10 +366,64 @@ export function registerAutoCapture(api, client, cfg) {
   });
 }
 
+function mediaResponseCandidate(event, ctx, sourceMessage, tail) {
+  // Channel delivery remains owned by message_sent. Do not add a second
+  // automatic writer for a known external-channel response.
+  if ([ctx.channel, ctx.messageProvider].some(value => value && value !== "webchat")) return null;
+  // The stable recorder binds an admitted chat input to this run. An image
+  // count, old history row, or an unbound assistant answer cannot establish it.
+  if (typeof ctx.runId !== "string" || !ctx.runId ||
+      (event.runId && event.runId !== ctx.runId) || !(ctx.sessionKey || ctx.sessionId) ||
+      sourceMessage?.idempotencyKey !== `${ctx.runId}:user` ||
+      sourceMessage.display === false || sourceMessage.excludeFromContext === true ||
+      (sourceMessage.provenance?.kind && sourceMessage.provenance.kind !== "external_user")) return null;
+  const meta = sourceMessage.__openclaw;
+  // Presence-check the host's actual submitted context only. Never persist or
+  // extract from it. If NoldoMem context was supplied, this answer may merely
+  // echo another source; do not relabel that as a fresh media episode.
+  if (typeof meta?.upstreamUserText !== "string" ||
+      /<relevant-memories>|&lt;relevant-memories&gt;/u.test(meta.upstreamUserText)) return null;
+  const media = meta?.media;
+  const layout = meta?.mediaImageLayout;
+  if (!Array.isArray(media) || !Array.isArray(layout?.slots)) return null;
+  const hasCurrentImage = layout.slots.some(slot => {
+    if (!Number.isInteger(slot?.factIndex) || slot.factIndex < 0 ||
+        !["inline", "offloaded"].includes(slot.kind) ||
+        (Array.isArray(layout.suppressedFactIndexes) && layout.suppressedFactIndexes.includes(slot.factIndex))) return false;
+    const fact = media[slot.factIndex];
+    return typeof fact?.contentType === "string" && fact.contentType.startsWith("image/") && !fact.hydrationSuppressed &&
+      typeof fact.path === "string" && !/^[a-z][a-z\d+.-]*:/iu.test(fact.path) && safeMediaReference(fact.path);
+  });
+  if (!hasCurrentImage) return null;
+  // Do not turn recalled/revised/forgotten memory tool output into a fresh
+  // source. Preserve the original memory-tool echo boundary for this writer.
+  if (tail.some(message => isNoldoMemToolName(message?.toolName) ||
+      (Array.isArray(message?.content) && message.content.some(block =>
+        ["toolCall", "tool_use"].includes(block?.type) && isNoldoMemToolName(block.name))))) return null;
+  const last = tail.at(-1);
+  if (last?.role !== "assistant" || last.stopReason !== "stop" || last.errorMessage) return null;
+  const assistantText = typeof last.content === "string" ? last.content :
+    Array.isArray(last.content) ? last.content.filter(block => block?.type === "text" && typeof block.text === "string")
+      .map(block => block.text).join("\n") : "";
+  const requestText = extractUserTextsFromMessages([sourceMessage]).join("\n");
+  if (assistantText.trim().length < 15 || looksLikePromptInjection(assistantText) ||
+      looksLikePromptInjection(requestText)) return null;
+  const evidence = completionSourceEvidence(sourceMessage, media.length === 1 ? "image" : "mixed");
+  if (!evidence.event_id) return null;
+  // This is an episode of what the model said about a media-bearing input,
+  // not an assertion that each sentence was extracted from any particular file.
+  return {
+    text: boundedCaptureText(`Assistant response to media input (unverified interpretation):\n${boundedCaptureText(assistantText.trim(), 1500)}\nUser request:\n${boundedCaptureText(requestText.trim(), 300)}`),
+    category: "assistant", memory_type: "conversation", source: "plugin-media-response",
+    evidence: {...evidence, role: "assistant", assertion: "inferred", delivery: "generated",
+      modality: media.length === 1 ? "image" : "mixed", representation: "text"},
+  };
+}
+
 function completionSourceEvidence(message, derivativeKind) {
   // Stable UserTurnTranscriptRecorder retains these source fields on the
-  // prepared row supplied to agent_end. Never inspect upstreamUserText: it is
-  // a composite model prompt, not an attachment extraction or source identity.
+  // prepared row supplied to agent_end. The composite upstream prompt is not
+  // an attachment extraction or source identity and is never stored here.
   const evidence = {};
   if (typeof message?.idempotencyKey === "string" && message.idempotencyKey.length > 0 &&
       message.idempotencyKey.length <= 200 && !/[\r\n]/u.test(message.idempotencyKey)) {
