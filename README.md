@@ -35,7 +35,10 @@ current-turn image interpretation, failed cross-session media recall, and a
 separate model-free PDF extraction/capture check.
 The [source-linked response follow-up](docs/media-response-follow-up-2026-09-14.md)
 adds inferred/generated media-response episodes with model-free native
-capture, injection and forgetting evidence; a new real-model check is still pending.
+capture, injection and forgetting evidence. The [subsequent real run and fix](docs/media-history-follow-up-2026-09-14.md)
+identified completion metadata missing from hooks but available through native
+history. The correction passed native event replay; model acceptance after that
+correction remains pending.
 
 Python consumers of the Turkish morphology helpers should read the
 [unreleased helper migration](docs/turkish-helper-migration.md). The HTTP search

@@ -1,5 +1,6 @@
 """Bounded evidence metadata. References are never fetched or treated as content."""
 
+import re
 from typing import Literal, Optional
 from urllib.parse import urlsplit, urlunsplit
 
@@ -24,6 +25,9 @@ class Evidence(BaseModel):
     def safe_reference(cls, value):
         if not value:
             return None
+        # Opaque host-owned inbound media identifier; never fetch or open it.
+        if re.fullmatch(r"media://inbound/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}", value) and ".." not in value:
+            return value
         parts = urlsplit(value)
         if parts.scheme in {"http", "https"}:
             # Signed query strings and userinfo are neither evidence nor durable references.

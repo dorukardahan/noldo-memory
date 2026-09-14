@@ -294,11 +294,42 @@ export function registerAutoRecall(api, client, cfg) {
   });
 }
 
-export function registerAutoCapture(api, client, cfg) {
+async function readGatewayMediaHistory(api, cfg, ctx) {
+  const { callGatewayFromCli } = await import("openclaw/plugin-sdk/gateway-runtime");
+  return callGatewayFromCli("chat.history", {
+    port: String(api.config.gateway.port), timeout: String(cfg.requestTimeoutMs || 15000), json: true,
+  }, {agentId: resolveAgentId(ctx), sessionKey: ctx.sessionKey, limit: 20},
+  {progress: false, scopes: ["operator.read"], sharedStateMode: "read-only"});
+}
+
+function captureRunKey(ctx) {
+  const agent = resolveAgentId(ctx);
+  return agent && typeof ctx.runId === "string" && ctx.runId &&
+    typeof ctx.sessionKey === "string" && ctx.sessionKey.startsWith(`agent:${agent}:`) &&
+    typeof ctx.sessionId === "string" && ctx.sessionId
+    ? JSON.stringify([agent, ctx.sessionKey, ctx.sessionId, ctx.runId]) : null;
+}
+
+export function registerAutoCapture(api, client, cfg, readHistory = readGatewayMediaHistory) {
+  // Only a hint to inspect the exact admitted source, never evidence that an
+  // image belongs to this user turn: imagesCount can include context images.
+  // Keep identities/count presence only, bounded even if completion never fires.
+  const imageRuns = new Set();
+  api.on("llm_input", (event, ctx) => {
+    const key = captureRunKey(ctx);
+    if (!key) return;
+    imageRuns.delete(key);
+    if (event.runId !== ctx.runId || event.sessionId !== ctx.sessionId ||
+        !Number.isInteger(event.imagesCount) || event.imagesCount <= 0) return;
+    imageRuns.add(key);
+    if (imageRuns.size > 128) imageRuns.delete(imageRuns.values().next().value);
+  });
   if (cfg.autoCaptureSource === "preprocessed") {
     registerPreprocessedCapture(api, client, cfg);
   }
   api.on("agent_end", async (event, ctx) => {
+    const runKey = captureRunKey(ctx);
+    const hadImages = imageRuns.delete(runKey);
     if (!event.success) return;
 
     const agent = resolveAgentId(ctx);
@@ -336,7 +367,38 @@ export function registerAutoCapture(api, client, cfg) {
         );
       }
     }
-    const response = mediaResponseCandidate(event, ctx, sourceMessage, messages.slice(latestUser + 1));
+    let responseSource = sourceMessage;
+    // Stable Codex finalization persists enriched media in chat.history but
+    // supplies its earlier snapshot to agent_end. Recover metadata only via the
+    // public local Gateway API, with an explicit conversation-access grant.
+    const gateway = api.config?.gateway;
+    if (hadImages && cfg.captureMaxItems > candidates.length &&
+        api.config?.plugins?.entries?.noldomem?.hooks?.allowConversationAccess === true &&
+        gateway?.mode === "local" && gateway.bind === "loopback" &&
+        Number.isInteger(gateway.port) && gateway.port > 0 && gateway.port <= 65535 &&
+        (!event.runId || event.runId === ctx.runId) &&
+        sourceMessage?.idempotencyKey === `${ctx.runId}:user` &&
+        sourceMessage.__openclaw?.media === undefined &&
+        sourceMessage.__openclaw?.mediaImageLayout === undefined) {
+      try {
+        const history = await readHistory(api, cfg, ctx);
+        if (history?.sessionKey === ctx.sessionKey && history.sessionId === ctx.sessionId) {
+          const sources = Array.isArray(history.messages) ? history.messages.filter(message =>
+            message?.role === "user" && message.idempotencyKey === sourceMessage.idempotencyKey) : [];
+          const stored = sources.length === 1 ? sources[0] : null;
+          if (stored && stored.timestamp === sourceMessage.timestamp && stored.display !== false &&
+              stored.excludeFromContext !== true &&
+              (!stored.provenance?.kind || stored.provenance.kind === "external_user") &&
+              JSON.stringify(stored.content) === JSON.stringify(sourceMessage.content)) {
+            responseSource = {...sourceMessage, __openclaw: {...sourceMessage.__openclaw,
+              media: stored.__openclaw?.media, mediaImageLayout: stored.__openclaw?.mediaImageLayout}};
+          }
+        }
+      } catch {
+        api.logger?.warn("noldomem: source media metadata unavailable");
+      }
+    }
+    const response = mediaResponseCandidate(event, ctx, responseSource, messages.slice(latestUser + 1));
     if (response && candidates.length < cfg.captureMaxItems) {
       try {
         await client.store({...response, agent, namespace: cfg.defaultNamespace,
@@ -392,7 +454,8 @@ function mediaResponseCandidate(event, ctx, sourceMessage, tail) {
         (Array.isArray(layout.suppressedFactIndexes) && layout.suppressedFactIndexes.includes(slot.factIndex))) return false;
     const fact = media[slot.factIndex];
     return typeof fact?.contentType === "string" && fact.contentType.startsWith("image/") && !fact.hydrationSuppressed &&
-      typeof fact.path === "string" && !/^[a-z][a-z\d+.-]*:/iu.test(fact.path) && safeMediaReference(fact.path);
+      (isManagedMediaReference(fact.url) ||
+        (typeof fact.path === "string" && !/^[a-z][a-z\d+.-]*:/iu.test(fact.path) && safeMediaReference(fact.path)));
   });
   if (!hasCurrentImage) return null;
   // Do not turn recalled/revised/forgotten memory tool output into a fresh
@@ -437,14 +500,14 @@ function completionSourceEvidence(message, derivativeKind) {
   const media = message?.__openclaw?.media;
   if (!derivativeKind || derivativeKind === "mixed" || !Array.isArray(media) || media.length !== 1) return evidence;
   const fact = media[0];
-  if (!fact || fact.hydrationSuppressed || typeof fact.path !== "string" ||
-      /^[a-z][a-z\d+.-]*:/iu.test(fact.path)) return evidence;
+  if (!fact || fact.hydrationSuppressed) return evidence;
+  const reference = isManagedMediaReference(fact.url) ? fact.url :
+    typeof fact.path === "string" && !/^[a-z][a-z\d+.-]*:/iu.test(fact.path) ? safeMediaReference(fact.path) : null;
   const matches = fact.kind === derivativeKind ||
     (derivativeKind === "document" && fact.kind === "file") ||
     (typeof fact.contentType === "string" && (fact.contentType.startsWith(`${derivativeKind}/`) ||
       (derivativeKind === "document" && /^(?:text\/|application\/(?:pdf|msword|vnd\.))/u.test(fact.contentType))));
   if (matches) {
-    const reference = safeMediaReference(fact.path);
     if (reference) evidence.reference = reference;
   }
   return evidence;
@@ -524,8 +587,14 @@ function preprocessedFileText(body) {
   return { text, extracted };
 }
 
+function isManagedMediaReference(value) {
+  return typeof value === "string" && /^media:\/\/inbound\/[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/u.test(value) &&
+    !value.includes("..") && !/[\r\n]/u.test(value);
+}
+
 function safeMediaReference(value) {
   if (typeof value !== "string" || value.length > 1000 || /[\r\n]/u.test(value)) return null;
+  if (isManagedMediaReference(value)) return value;
   if (/^https?:\/\//iu.test(value)) {
     try {
       const url = new URL(value);

@@ -124,7 +124,15 @@ or delivered content. Missing source/terminal evidence, suppressed media,
 NoldoMem context/tool echoes and failed turns are skipped. This applies alongside
 either inbound capture mode within the completion item bound. See the
 [mechanism, conservative limits and model-free native evidence](../docs/media-response-follow-up-2026-09-14.md).
-The changed path has not yet been retested with a real model.
+The [real follow-up](../docs/media-history-follow-up-2026-09-14.md) found that stable
+Codex completion snapshots can omit media retained in `chat.history`. With
+explicit conversation access, `gateway.mode: "local"`, `gateway.bind: "loopback"`
+and a configured numeric `gateway.port`, the plugin can make
+one bounded native history request for an image-bearing run to recover only the
+exact source's metadata. Run/session/source identity checks and existing capture
+guards remain mandatory. Unavailable or mismatched history fails closed.
+The resulting correction passed native event replay; another model run has not
+yet tested it.
 
 For Gateway profiles on the tested stable 2026.9.3, `enableAutoCapture: true`
 with `autoCaptureSource: "preprocessed"` selects the official
@@ -145,13 +153,14 @@ extracted content derived and untrusted. A raw image/audio/file block next to
 text is not extraction evidence: that text retains a `text` representation and
 conservative derived trust. Completion capture preserves a supplied native row
 idempotency key and observation timestamp. An already recognized text derivative
-can retain a matching single local `__openclaw.media` reference; multiple,
+can retain a matching single local or opaque `media://inbound/` reference; multiple,
 suppressed, remote-only or mismatched attachments are not attributed. Row time
 is not an event date or revision-validity time. Missing legacy fields stay absent.
 The `preprocessed` mode does not cover CLI-only ingress; choose the
 capture surface for the profile deliberately. `message_sent` still observes
 confirmed outgoing text in either mode. No additional decoder, raw-media fetch,
-provider call or background join cache is introduced. See the
+provider call or background process is introduced. Pending image-run hints contain
+only identities and are bounded to 128 entries, consumed on completion. See the
 [verified host boundaries](../docs/host-evidence-boundaries-2026-09-10.md) and
 [media-path follow-up](../docs/media-path-follow-up-2026-09-13.md).
 

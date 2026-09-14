@@ -1,5 +1,10 @@
 # Source-linked media response episodes
 
+Later evidence: the [real follow-up and native-history correction](media-history-follow-up-2026-09-14.md)
+found that the stable completion snapshot omits media which its persisted source
+retains. The source-field assumptions below describe the earlier model-free
+checkpoint; they did not prove that every real completion supplied those fields.
+
 The [raw-media model run](raw-media-results-2026-09-13.md) correctly described
 an image in its first answer but did not retain it. The change below adds a
 bounded durable representation of **what the model said in a media-bearing
@@ -17,8 +22,9 @@ provides the necessary admitted-input fields:
 - [`prepareChatSendUserTurn`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/src/gateway/server-methods/chat-send-user-turn.ts)
   retains ordered media facts and image placement slots on the prepared input.
 - [`resolveFinalCodexMirrorMessages`](https://github.com/openclaw/openclaw/blob/1391f7cd2d40ab5bbcf2f5f831d3a64f520e72d7/extensions/codex/src/app-server/user-prompt-message.ts)
-  carries that input into completion messages. Native finalization supplies the
-  current run context and terminal assistant status before `agent_end`.
+  enriches the persisted transcript input. The later real run showed that this
+  enrichment does not reach its `agent_end` snapshot. Native finalization does
+  supply the current run context and terminal assistant status.
 
 Within opted-in automatic capture, a local/WebChat completion can retain one
 bounded response episode when the latest input matches the current run, has an
@@ -91,15 +97,16 @@ The existing agent-local **source-session** tombstone applies. This does not
 add file-level replay detection, recover legacy ownership, delete host history
 or authorize another source automatically after forgetting.
 
-## Remaining real-model check, not yet authorized
+## Original follow-up proposal (subsequently attempted)
 
-The technical condition has changed: there is now a source-qualified durable
+At this checkpoint the technical condition had changed: there was a source-qualified durable
 episode path with native model-free capture/injection/forgetting evidence.
-The smallest model check is **two OpenClaw applications**, at most 120 seconds
+The proposed model check was **two OpenClaw applications**, at most 120 seconds
 each and 240 total, using the normal isolated Gateway startup and existing
-OpenAI/Codex route. It needs a fresh isolated device-code login approved by the
+OpenAI/Codex route. It needed a fresh isolated device-code login approved by the
 user because earlier temporary OAuth state was removed. Existing credentials
-must not be copied; no login or model call has been started for this proposal.
+must not be copied. The later linked report records its authorization, actual
+attempts, failure, correction and the now-preserved isolated profile.
 
 First attach only the already prepared synthetic entrance PNG and ask for the
 practical visit detail, without supplying its contents. Then use a different

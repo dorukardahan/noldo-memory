@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. Coordinate the next major manifest versions before publishing.
 
 ### Fixed
+- Recover absent OpenClaw completion media metadata through the existing local Gateway history API, requiring exact agent/session/run/source matching and explicit conversation access. Preserve safe opaque inbound references; retain inferred/generated trust and source-forgetting protection. Native event replay passes; post-fix model acceptance remains open.
 - Retain source-qualified generated responses to current image inputs as inferred conversation episodes, preserving uncertainty and excluding known NoldoMem context/tool echoes. Verify replay/forgetting/isolation through the installed model-free Gateway lifecycle; real-model follow-up remains pending.
 - Prevent `/v1/store` from automatically promoting derived/inferred directive text to user rules; preserve reported-user rule detection and explicit caller classifications.
 - Preserve native OpenClaw completion-row source identity and observation time, plus an unambiguous local reference for recognized text derivatives. Do not infer image content or reconstruct missing legacy provenance.
