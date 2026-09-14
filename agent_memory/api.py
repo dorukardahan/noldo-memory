@@ -48,6 +48,7 @@ from pydantic_core import PydanticCustomError
 from starlette.responses import JSONResponse
 from .middleware import APIKeyMiddleware, RateLimitMiddleware, AuditLogMiddleware
 
+from . import __version__
 from .config import Config, load_config
 from .embed_worker import EmbedWorker
 from .embeddings import OpenRouterEmbeddings
@@ -390,7 +391,7 @@ async def warmup_loop():
 
 app = FastAPI(
     title="OpenClaw Memory API",
-    version="0.3.0",
+    version=__version__,
     lifespan=lifespan,
 )
 

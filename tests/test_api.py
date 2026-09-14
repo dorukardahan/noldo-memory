@@ -625,6 +625,8 @@ class TestDocs:
         resp = await client.get("/openapi.json")
         assert resp.status_code == 200
         data = resp.json()
+        from agent_memory import __version__
+        assert data["info"]["version"] == __version__
         assert "paths" in data
         assert "/v1/health" in data["paths"]
         assert "/v1/recall" in data["paths"]

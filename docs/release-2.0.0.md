@@ -39,7 +39,11 @@ plan, not evidence that any production step has run:
 3. Keep production traffic closed while starting the candidate API. Normal
    initialization adds the schema described in [source forgetting](forgetting-sources.md).
    Existing records remain; missing historical source links are not reconstructed.
-   Validate health/version and database integrity without exporting memory text.
+   Query `/openapi.json` on the candidate API endpoint and require
+   `info.version == "2.0.0"`; this reports the serving application's package
+   version, not a CLI or checkout version. Confirm the pinned commit through
+   the deployment receipt as well: a version string does not identify a commit.
+   Then validate health and database integrity without exporting memory text.
    Exercise adapters with a separate synthetic scope and DB before reopening.
 4. If validation fails **before production writes resume**, stop the candidate
    and restore the matched pre-upgrade code/environment and complete DB snapshot.

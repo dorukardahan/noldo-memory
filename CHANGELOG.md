@@ -13,6 +13,7 @@ Release preparation only; no tag or deployment is implied. See the
 - Remove Zeyrek/NLTK rather than retaining an NLP extra. Core HTTP capture/search is unchanged; Python morphology helpers now require a caller-owned analyzer for analysis, with explicit warning/pass-through otherwise. Lexical normalization defaults to no morphology. See `docs/turkish-helper-migration.md` before updating a Python consumer. All runtime manifests are coordinated at 2.0.0.
 
 ### Fixed
+- Report the coordinated package version in the running API's existing OpenAPI metadata so rollout checks can reject an older API.
 - Re-read queued worker records before embedding and stop stale sub-batches/fallbacks after cache invalidation, preventing forgotten text from repopulating caches through a previously loaded backlog.
 - Clear the embedder's actual persistent cache when forgetting from any agent, as well as its volatile cache. Preserve other agents' records and source markers; shared cached vectors may need recomputation.
 - Recover native document derivatives omitted by Codex completion snapshots from the official prepared-input event, requiring exact source/managed-attachment identity and bounded capture. Preserve derived trust, deletion barriers and single-writer behavior.
