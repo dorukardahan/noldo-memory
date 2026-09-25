@@ -189,8 +189,9 @@ memory writes can also mirror to NoldoMem when the native memory store and
 mirroring all off the result is `intentional_read_only` (exit 0). On hosts
 with the version-dependent
 `external_tools_enabled_when_memory_toolset_disabled` compatibility option,
-the check reports `unknown` rather than incorrectly claiming the gated tools
-are absent. An unconfigured provider reports `provider_unconfigured` (exit 1)
+the affected tool projection is `unknown`, never an unverified false. An
+independent, confirmed turn-sync path still reports `write_path_available`.
+An unconfigured provider reports `provider_unconfigured` (exit 1)
 without claiming a durable write path. Missing/malformed host configuration or
 an unavailable host resolver reports `unknown` (exit 3), never an inferred
 green. This is a configuration projection, not proof of a fresh session's

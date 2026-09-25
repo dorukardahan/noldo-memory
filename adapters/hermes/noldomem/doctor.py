@@ -123,11 +123,6 @@ def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
         if not isinstance(memory, dict):
             raise ValueError("invalid memory configuration")
         selected = memory.get("provider") == "noldomem"
-        if selected:
-            exposed = requested and _resolve_hermes_memory_toolset(config, platform)
-            mirror = _resolve_hermes_builtin_mirror(config, platform)
-        else:
-            exposed = mirror = False
     except Exception:
         print("host_provider_selected=unknown")
         print("provider_tools_exposed_for_platform=unknown")
@@ -136,23 +131,40 @@ def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
         print("host_write_status=unknown")
         return 3
 
-    durable = configured and selected and (sync or exposed or mirror)
+    # These are independent write paths. A missing/ambiguous optional host
+    # resolver must not erase a turn-sync (or tool) path already established.
+    exposed = mirror = False
+    if configured and selected:
+        if requested:
+            try:
+                exposed = _resolve_hermes_memory_toolset(config, platform)
+            except Exception:
+                exposed = None
+        try:
+            mirror = _resolve_hermes_builtin_mirror(config, platform)
+        except Exception:
+            mirror = None
+
+    durable = configured and selected and (sync or exposed is True or mirror is True)
+    uncertain = exposed is None or mirror is None
     if not selected:
         status = "host_provider_not_selected"
     elif not configured:
         status = "provider_unconfigured"
     elif durable:
         status = "write_path_available"
+    elif uncertain:
+        status = "unknown"
     elif requested:
         status = "no_write_path"
     else:
         status = "intentional_read_only"
     print(f"host_provider_selected={_bool_text(selected)}")
-    print(f"provider_tools_exposed_for_platform={_bool_text(configured and selected and exposed)}")
-    print(f"built_in_mirror_available={_bool_text(configured and selected and mirror)}")
-    print(f"durable_write_path_available={_bool_text(durable)}")
+    print(f"provider_tools_exposed_for_platform={_bool_text(exposed) if exposed is not None else 'unknown'}")
+    print(f"built_in_mirror_available={_bool_text(mirror) if mirror is not None else 'unknown'}")
+    print(f"durable_write_path_available={_bool_text(durable) if durable else ('unknown' if uncertain and configured and selected else 'false')}")
     print(f"host_write_status={status}")
-    return 3 if status in {"no_write_path", "host_provider_not_selected"} else 0
+    return 3 if status in {"no_write_path", "host_provider_not_selected", "unknown"} else 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
