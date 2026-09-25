@@ -809,18 +809,8 @@ async def relearn_source(req: RelearnRequest, request: Request):
     return {"cleared": cleared, "restored": False}
 
 
-@app.post("/v1/capture")
-async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
-    """Ingest a batch of messages into memory.
-
-    Each message dict should have at least ``text`` and ``role``.
-    """
-    if req.agent == "all":
-        raise HTTPException(400, "Cannot capture to 'all' -- specify an agent")
-
-    storage = _get_storage(req.agent, request=request)
-
-    # Pre-filter / normalize
+def _capture_candidates(req: CaptureRequest) -> List[Dict[str, Any]]:
+    """Normalize eligible rows identically for writes and status queries."""
     cleaned: List[Dict[str, Any]] = []
     for msg in req.messages:
         text = content_text(msg.get("text") or msg.get("content"))
@@ -851,7 +841,36 @@ async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
             "timestamp": msg.get("timestamp", ""),
             "evidence": evidence,
         })
+    return cleaned
 
+
+@app.post("/v1/capture/status")
+async def capture_status(req: CaptureRequest, request: Request) -> Dict[str, str]:
+    """Read-only exact-row reconciliation; incomplete includes partial/pending writes."""
+    if req.agent == "all":
+        raise HTTPException(400, "Cannot capture to 'all' -- specify an agent")
+    storage = _get_storage(req.agent, request=request)
+    from .ingest import classify_memory_type
+    candidates = _capture_candidates(req)
+    if any(storage.source_is_forgotten(row["session"]) for row in candidates):
+        return {"state": "blocked"}
+    for row in candidates:
+        if not storage.find_duplicate(
+            text=row["text"], category=row["role"], source_session=row["session"],
+            namespace=req.namespace, memory_type=classify_memory_type(row["text"]),
+            source="session_capture", trust_level="user", evidence=row["evidence"],
+        ):
+            return {"state": "incomplete"}
+    return {"state": "complete"}
+
+
+@app.post("/v1/capture")
+async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
+    """Ingest a batch of messages into memory."""
+    if req.agent == "all":
+        raise HTTPException(400, "Cannot capture to 'all' -- specify an agent")
+    storage = _get_storage(req.agent, request=request)
+    cleaned = _capture_candidates(req)
     if not cleaned:
         return {"stored": 0, "merged": 0, "total": len(req.messages)}
 

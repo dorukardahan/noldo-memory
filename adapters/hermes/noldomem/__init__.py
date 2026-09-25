@@ -201,6 +201,8 @@ class NoldoMemHTTPClient:
             detail = exc.reason or f"HTTP {exc.code}"
             raise RuntimeError(f"NoldoMem API request failed: {detail}") from exc
         except urllib.error.URLError as exc:
+            if isinstance(exc.reason, TimeoutError):
+                raise RuntimeError("NoldoMem API timed out") from exc
             raise RuntimeError("NoldoMem API is unavailable") from exc
         except TimeoutError as exc:
             raise RuntimeError("NoldoMem API timed out") from exc
@@ -210,6 +212,9 @@ class NoldoMemHTTPClient:
 
     def capture(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/capture", body)
+
+    def capture_status(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        return self.post("/v1/capture/status", body)
 
     def store(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/store", body)
@@ -623,8 +628,22 @@ class NoldoMemProvider(MemoryProvider):
                 if captured:
                     with self._network_operation(expected_generation=lifecycle_generation) as client:
                         if client is not None:
-                            client.capture({"agent": body["agent"], "namespace": body["namespace"],
-                                            "messages": captured})
+                            capture_body = {"agent": body["agent"], "namespace": body["namespace"],
+                                            "messages": captured}
+                            try:
+                                client.capture(capture_body)
+                            except RuntimeError as exc:
+                                if str(exc) != "NoldoMem API timed out":
+                                    raise
+                                # A timeout does not establish whether writes committed.
+                                # Only exact live rows under the same provenance can
+                                # turn this ambiguous result into a verified receipt.
+                                try:
+                                    status = client.capture_status(capture_body)
+                                except (AttributeError, RuntimeError):
+                                    status = None
+                                if not isinstance(status, dict) or status.get("state") != "complete":
+                                    raise RuntimeError("NoldoMem capture outcome ambiguous after timeout") from exc
                             self._invalidate_after_write()
                 return
             text = _truncate(
