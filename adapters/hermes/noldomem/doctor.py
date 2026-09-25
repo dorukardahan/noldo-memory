@@ -86,7 +86,21 @@ def _resolve_hermes_memory_toolset(config: dict, platform: str) -> bool:
         disabled = [part.strip() for part in disabled.split(",")]
     if not isinstance(disabled, list):
         raise ValueError("invalid disabled toolsets")
+    memory = config.get("memory") or {}
+    if not isinstance(memory, dict):
+        raise ValueError("invalid memory configuration")
+    # The optional compatibility flag is host-version-dependent. A config bit
+    # alone cannot prove whether this host really exposes provider tools.
+    if "memory" in disabled and memory.get("external_tools_enabled_when_memory_toolset_disabled") is True:
+        raise ValueError("host compatibility gate cannot be projected")
     return "memory" not in disabled and "memory" in _get_platform_tools(config, platform)
+
+
+def _resolve_hermes_builtin_mirror(config: dict, platform: str) -> bool:
+    """A successful native memory write is mirrored even with provider tools off."""
+    from tools.memory_tool import get_builtin_memory_store_flags
+
+    return _resolve_hermes_memory_toolset(config, platform) and any(get_builtin_memory_store_flags(config))
 
 
 def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
@@ -105,15 +119,27 @@ def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
         config = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(config, dict):
             raise ValueError("invalid host config")
-        exposed = requested and _resolve_hermes_memory_toolset(config, platform)
+        memory = config.get("memory") or {}
+        if not isinstance(memory, dict):
+            raise ValueError("invalid memory configuration")
+        selected = memory.get("provider") == "noldomem"
+        if selected:
+            exposed = requested and _resolve_hermes_memory_toolset(config, platform)
+            mirror = _resolve_hermes_builtin_mirror(config, platform)
+        else:
+            exposed = mirror = False
     except Exception:
+        print("host_provider_selected=unknown")
         print("provider_tools_exposed_for_platform=unknown")
+        print("built_in_mirror_available=unknown")
         print("durable_write_path_available=unknown")
         print("host_write_status=unknown")
         return 3
 
-    durable = configured and (sync or exposed)
-    if not configured:
+    durable = configured and selected and (sync or exposed or mirror)
+    if not selected:
+        status = "host_provider_not_selected"
+    elif not configured:
         status = "provider_unconfigured"
     elif durable:
         status = "write_path_available"
@@ -121,10 +147,12 @@ def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
         status = "no_write_path"
     else:
         status = "intentional_read_only"
-    print(f"provider_tools_exposed_for_platform={_bool_text(exposed)}")
+    print(f"host_provider_selected={_bool_text(selected)}")
+    print(f"provider_tools_exposed_for_platform={_bool_text(configured and selected and exposed)}")
+    print(f"built_in_mirror_available={_bool_text(configured and selected and mirror)}")
     print(f"durable_write_path_available={_bool_text(durable)}")
     print(f"host_write_status={status}")
-    return 3 if status == "no_write_path" else 0
+    return 3 if status in {"no_write_path", "host_provider_not_selected"} else 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

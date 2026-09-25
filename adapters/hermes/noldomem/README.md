@@ -176,12 +176,21 @@ python adapters/hermes/noldomem/doctor.py --host hermes --platform signal
 
 This opt-in check reads only the current profile's `config.yaml` (via
 `HERMES_HOME`, otherwise `~/.hermes`) and NoldoMem configuration. It reports
-`turn_sync_enabled`, `provider_tools_requested`,
-`provider_tools_exposed_for_platform`, `durable_write_path_available` and
-`host_write_status`, with no endpoint, key, agent, namespace, or host path.
-A configured provider with turn sync off and tools gated returns `no_write_path`
-(exit 3); both writes explicitly disabled report `intentional_read_only`
-(exit 0). An unconfigured provider reports `provider_unconfigured` (exit 1)
+`host_provider_selected`, `turn_sync_enabled`, `provider_tools_requested`,
+`provider_tools_exposed_for_platform`, `built_in_mirror_available`,
+`durable_write_path_available` and `host_write_status`, with no endpoint,
+key, agent, namespace, or host path. The host must select
+`memory.provider: noldomem`; otherwise the check returns
+`host_provider_not_selected` (exit 3), even if standalone adapter
+credentials exist. A configured provider with turn sync off and tools gated
+returns `no_write_path` (exit 3). Successful built-in
+memory writes can also mirror to NoldoMem when the native memory store and
+`memory` toolset are enabled; with turn sync, provider tools, and native
+mirroring all off the result is `intentional_read_only` (exit 0). On hosts
+with the version-dependent
+`external_tools_enabled_when_memory_toolset_disabled` compatibility option,
+the check reports `unknown` rather than incorrectly claiming the gated tools
+are absent. An unconfigured provider reports `provider_unconfigured` (exit 1)
 without claiming a durable write path. Missing/malformed host configuration or
 an unavailable host resolver reports `unknown` (exit 3), never an inferred
 green. This is a configuration projection, not proof of a fresh session's

@@ -1581,8 +1581,9 @@ def test_doctor_hermes_host_write_path_matrix(
     monkeypatch.setenv("NOLDOMEM_NAMESPACE", "NAMESPACE_MARKER")
     monkeypatch.setenv("NOLDOMEM_SYNC_TURNS_ENABLED", str(sync).lower())
     monkeypatch.setenv("NOLDOMEM_TOOLS_ENABLED", str(requested).lower())
-    (tmp_path / "config.yaml").write_text("agent: {disabled_toolsets: [memory]}\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("memory: {provider: noldomem, memory_enabled: false, user_profile_enabled: false}\nagent: {disabled_toolsets: [memory]}\n", encoding="utf-8")
     monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_memory_toolset", lambda config, platform: enabled)
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_builtin_mirror", lambda config, platform: False)
     result = noldomem_doctor.main(["--host", "hermes", "--platform", "signal"])
     output = capsys.readouterr().out
     assert result == expected_code
@@ -1612,9 +1613,10 @@ def test_doctor_host_does_not_claim_write_path_without_provider(monkeypatch, tmp
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setenv("NOLDOMEM_SYNC_TURNS_ENABLED", "true")
-    (tmp_path / "config.yaml").write_text("agent: {}\n", encoding="utf-8")
+    (tmp_path / "config.yaml").write_text("memory: {provider: noldomem}\nagent: {}\n", encoding="utf-8")
     cfg = NoldoMemConfig(api_key="", sync_turns_enabled=True)
     monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_memory_toolset", lambda config, platform: False)
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_builtin_mirror", lambda config, platform: False)
     monkeypatch.setattr(noldomem_doctor, "_load_provider", lambda: types.SimpleNamespace(
         is_available=lambda: False, load_config=lambda: cfg
     ))
@@ -1622,6 +1624,57 @@ def test_doctor_host_does_not_claim_write_path_without_provider(monkeypatch, tmp
     output = capsys.readouterr().out
     assert "host_write_status=provider_unconfigured" in output
     assert "durable_write_path_available=false" in output
+
+
+@pytest.mark.parametrize("selected", ["", "builtin", "mem0"])
+def test_doctor_host_unselected_provider_is_not_a_write_path(monkeypatch, tmp_path, capsys, selected):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NOLDOMEM_API_KEY", "fixture")
+    monkeypatch.setenv("NOLDOMEM_SYNC_TURNS_ENABLED", "true")
+    (tmp_path / "config.yaml").write_text(
+        f"memory: {{provider: {selected or 'null'}}}\nplatform_toolsets: {{signal: [memory]}}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_memory_toolset", lambda config, platform: True)
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_builtin_mirror", lambda config, platform: True)
+    assert noldomem_doctor.main(["--host", "hermes", "--platform", "signal"]) == 3
+    output = capsys.readouterr().out
+    assert "host_provider_selected=false" in output
+    assert "durable_write_path_available=false" in output
+    assert "host_write_status=host_provider_not_selected" in output
+
+
+def test_doctor_host_builtin_mirror_counts_when_provider_tools_and_sync_off(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NOLDOMEM_API_KEY", "fixture")
+    monkeypatch.setenv("NOLDOMEM_SYNC_TURNS_ENABLED", "false")
+    monkeypatch.setenv("NOLDOMEM_TOOLS_ENABLED", "false")
+    (tmp_path / "config.yaml").write_text(
+        "memory: {provider: noldomem, memory_enabled: true, user_profile_enabled: false}\n"
+        "platform_toolsets: {signal: [memory]}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_memory_toolset", lambda config, platform: True)
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_builtin_mirror", lambda config, platform: True)
+    assert noldomem_doctor.main(["--host", "hermes", "--platform", "signal"]) == 0
+    output = capsys.readouterr().out
+    assert "built_in_mirror_available=true" in output
+    assert "durable_write_path_available=true" in output
+
+
+def test_doctor_host_compatibility_option_fails_unknown_not_false_no_write(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("NOLDOMEM_API_KEY", "fixture")
+    monkeypatch.setenv("NOLDOMEM_SYNC_TURNS_ENABLED", "false")
+    monkeypatch.setenv("NOLDOMEM_TOOLS_ENABLED", "true")
+    (tmp_path / "config.yaml").write_text(
+        "memory: {provider: noldomem, external_tools_enabled_when_memory_toolset_disabled: true}\n"
+        "agent: {disabled_toolsets: [memory]}\nplatform_toolsets: {signal: [memory]}\n",
+        encoding="utf-8",
+    )
+    assert noldomem_doctor.main(["--host", "hermes", "--platform", "signal"]) == 3
+    output = capsys.readouterr().out
+    assert "host_write_status=unknown" in output
+    assert "durable_write_path_available=unknown" in output
+    assert "host_write_status=no_write_path" not in output
 
 
 def test_doctor_host_gate_uses_effective_hermes_toolsets(monkeypatch):
@@ -1637,6 +1690,22 @@ def test_doctor_host_gate_uses_effective_hermes_toolsets(monkeypatch):
     assert noldomem_doctor._resolve_hermes_memory_toolset(
         {"platform_toolsets": {"signal": ["memory"]}, "agent": {"disabled_toolsets": []}}, "signal"
     ) is True
+
+
+def test_doctor_builtin_mirror_requires_native_store_and_memory_toolset(monkeypatch):
+    native = types.ModuleType("tools.memory_tool")
+    setattr(native, "get_builtin_memory_store_flags", lambda config: (
+        config["memory"]["memory_enabled"], config["memory"]["user_profile_enabled"]
+    ))
+    monkeypatch.setitem(sys.modules, "tools", types.ModuleType("tools"))
+    monkeypatch.setitem(sys.modules, "tools.memory_tool", native)
+    monkeypatch.setattr(noldomem_doctor, "_resolve_hermes_memory_toolset", lambda config, platform: not config["agent"]["disabled_toolsets"])
+    config = {"memory": {"memory_enabled": False, "user_profile_enabled": False}, "agent": {"disabled_toolsets": []}}
+    assert noldomem_doctor._resolve_hermes_builtin_mirror(config, "signal") is False
+    config["memory"]["user_profile_enabled"] = True
+    assert noldomem_doctor._resolve_hermes_builtin_mirror(config, "signal") is True
+    config["agent"]["disabled_toolsets"] = ["memory"]
+    assert noldomem_doctor._resolve_hermes_builtin_mirror(config, "signal") is False
 
 
 @requires_posix_deadline
