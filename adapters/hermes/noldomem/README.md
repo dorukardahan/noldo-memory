@@ -166,6 +166,29 @@ Use `--live` only when an explicit bounded readiness read is wanted:
 python adapters/hermes/noldomem/doctor.py --live --timeout 2
 ```
 
+To inspect the host write path for a specific Hermes platform, run from the
+Hermes Python environment (which supplies PyYAML and its effective toolset
+resolver):
+
+```bash
+python adapters/hermes/noldomem/doctor.py --host hermes --platform signal
+```
+
+This opt-in check reads only the current profile's `config.yaml` (via
+`HERMES_HOME`, otherwise `~/.hermes`) and NoldoMem configuration. It reports
+`turn_sync_enabled`, `provider_tools_requested`,
+`provider_tools_exposed_for_platform`, `durable_write_path_available` and
+`host_write_status`, with no endpoint, key, agent, namespace, or host path.
+A configured provider with turn sync off and tools gated returns `no_write_path`
+(exit 3); both writes explicitly disabled report `intentional_read_only`
+(exit 0). An unconfigured provider reports `provider_unconfigured` (exit 1)
+without claiming a durable write path. Missing/malformed host configuration or
+an unavailable host resolver reports `unknown` (exit 3), never an inferred
+green. This is a configuration projection, not proof of a fresh session's
+actual tool list or successful memory ingestion; verify those separately if
+needed. `--live` can be combined with the host check: backend readiness and write-path status remain separate.
+The default doctor behavior and exit codes are unchanged.
+
 The timeout is capped at two seconds and enforced as one outer wall deadline on
 POSIX main-thread calls, in addition to the transport timeout. If that deadline
 cannot be installed safely (for example, from a non-main thread), the probe

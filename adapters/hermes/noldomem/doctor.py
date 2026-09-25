@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 import sys
 
 from pathlib import Path
@@ -73,11 +74,68 @@ def _safe_error_type(value: object) -> str:
     return name if name in allowed else "ReadinessError"
 
 
+def _resolve_hermes_memory_toolset(config: dict, platform: str) -> bool:
+    """Use the host's effective resolver, not a naive platform list membership test."""
+    from hermes_cli.tools_config import _get_platform_tools
+
+    agent = config.get("agent") or {}
+    if not isinstance(agent, dict):
+        raise ValueError("invalid agent configuration")
+    disabled = agent.get("disabled_toolsets") or []
+    if isinstance(disabled, str):
+        disabled = [part.strip() for part in disabled.split(",")]
+    if not isinstance(disabled, list):
+        raise ValueError("invalid disabled toolsets")
+    return "memory" not in disabled and "memory" in _get_platform_tools(config, platform)
+
+
+def _host_write_diagnostic(cfg, platform: str, configured: bool) -> int:
+    """Read local host configuration only; print a bounded, payload-free receipt."""
+    sync = cfg.sync_turns_enabled
+    requested = cfg.tools_enabled
+    print(f"turn_sync_enabled={_bool_text(sync)}")
+    print(f"provider_tools_requested={_bool_text(requested)}")
+    try:
+        import yaml
+
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+        path = home / "config.yaml"
+        if path.stat().st_size > 262144:
+            raise ValueError("host config too large")
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            raise ValueError("invalid host config")
+        exposed = requested and _resolve_hermes_memory_toolset(config, platform)
+    except Exception:
+        print("provider_tools_exposed_for_platform=unknown")
+        print("durable_write_path_available=unknown")
+        print("host_write_status=unknown")
+        return 3
+
+    durable = configured and (sync or exposed)
+    if not configured:
+        status = "provider_unconfigured"
+    elif durable:
+        status = "write_path_available"
+    elif requested:
+        status = "no_write_path"
+    else:
+        status = "intentional_read_only"
+    print(f"provider_tools_exposed_for_platform={_bool_text(exposed)}")
+    print(f"durable_write_path_available={_bool_text(durable)}")
+    print(f"host_write_status={status}")
+    return 3 if status == "no_write_path" else 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Check NoldoMem adapter configuration and optional readiness.")
     parser.add_argument("--live", action="store_true", help="Perform one bounded live readiness probe.")
     parser.add_argument("--timeout", type=float, default=2.0, help="Live probe timeout, capped at 2 seconds.")
+    parser.add_argument("--host", choices=["hermes"], help="Opt in to local Hermes host write-path diagnostics.")
+    parser.add_argument("--platform", help="Hermes platform key (required with --host).")
     args = parser.parse_args(argv)
+    if bool(args.host) != bool(args.platform):
+        parser.error("--host and --platform must be used together")
 
     provider = _load_provider()
     configured = provider.is_available()
@@ -88,9 +146,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"endpoint_scheme={endpoint_scheme}")
     print(f"endpoint_scope={endpoint_scope}")
 
+    host_code = _host_write_diagnostic(cfg, args.platform, configured) if args.host else 0
+
     if not args.live:
         print("readiness_probe=skipped")
-        return 0 if configured else 1
+        return host_code if configured else 1
 
     print("readiness_probe=completed")
     if not configured:
@@ -111,7 +171,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"readiness_uptime_seconds={max(0.0, float(uptime_seconds)):.1f}")
     if health.get("error_type"):
         print(f"readiness_error_type={_safe_error_type(health['error_type'])}")
-    return 0 if ready else 2
+    return host_code if ready else 2
 
 
 if __name__ == "__main__":
