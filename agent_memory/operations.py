@@ -144,6 +144,8 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
                             valid_from=revision['valid_from'],
                             source_session=item.get('source_session'), evidence=item.get('evidence'),
                         )
+                    except ForgottenSourceError:
+                        raise
                     except ValueError:
                         raise AdmissionError('revision_conflict', 409) from None
                     result['action'] = 'inserted'

@@ -261,3 +261,46 @@ async def test_revision_validity_conflict_remains_http_409(client):
     )
     assert response.status_code == 409, response.text
     assert api._get_storage().stats()["total_memories"] == 1
+
+
+@pytest.mark.asyncio
+async def test_forgotten_source_revision_with_new_identity_is_blocked(client):
+    storage = api._get_storage()
+    previous_id = storage.store_memory(
+        "The synthetic predecessor remains current.",
+        valid_from=1_000.0,
+    )
+    forgotten_id = storage.store_memory(
+        "The synthetic source is forgotten independently.",
+        source_session="synthetic-forgotten-revision-source",
+    )
+    storage.forget_memory(forgotten_id)
+    request_id = str(uuid.uuid4())
+
+    response = await client.post(
+        "/v1/store",
+        json={
+            "request_id": request_id,
+            "text": "The forgotten source must not create a revision.",
+            "supersedes": previous_id,
+            "valid_from": 2_000.0,
+            "session_id": "synthetic-forgotten-revision-source",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "blocked"
+    assert response.json()["error_code"] == "source_blocked"
+    assert response.json()["blocked"] == 1
+    previous = storage.get_memory(previous_id)
+    assert previous is not None
+    assert previous["valid_to"] is None
+    assert storage.stats()["total_memories"] == 1
+    assert storage._get_conn().execute(
+        "SELECT count(*) FROM memory_index_jobs"
+    ).fetchone()[0] == 0
+    persisted = storage._get_conn().execute(
+        "SELECT state,error_code FROM memory_operations WHERE request_id=?",
+        (request_id,),
+    ).fetchone()
+    assert tuple(persisted) == ("blocked", "source_blocked")
