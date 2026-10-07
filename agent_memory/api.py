@@ -51,9 +51,13 @@ from .middleware import APIKeyMiddleware, RateLimitMiddleware, AuditLogMiddlewar
 from . import __version__
 from .config import Config, load_config
 from .embed_worker import EmbedWorker
+from .index_worker import IndexWorker
+from . import operations
 from .embeddings import OpenRouterEmbeddings
 from .entities import KnowledgeGraph
 from .pool import StoragePool
+from .foreground import Foreground
+from .recall_owner import RecallOwner, current as _owned_recall
 from .reranker import APIReranker, BaseReranker, CrossEncoderReranker
 from .search import HybridSearch, SearchWeights, _lexical_overlap, _rrf_fuse
 from .evidence import Evidence, MemoryValidity, content_text
@@ -71,6 +75,7 @@ logger = logging.getLogger(__name__)
 _storage_pool: Optional[StoragePool] = None
 _embedder: Optional[OpenRouterEmbeddings] = None
 _embed_worker: Optional[EmbedWorker] = None
+_index_worker: Optional[IndexWorker] = None
 _warmup_task: Optional[asyncio.Task[None]] = None
 _config: Optional[Config] = None
 _start_time: float = 0.0
@@ -134,6 +139,9 @@ def _check_allowed_agent(request: Optional[Request], agent: Optional[str]) -> No
 
 def _get_storage(agent: Optional[str] = None, request: Optional[Request] = None) -> MemoryStorage:
     """Get the MemoryStorage for the given agent."""
+    owner = _owned_recall.get()
+    if owner is not None:
+        return owner.storage(agent)
     if _storage_pool is None:
         raise HTTPException(503, "Storage pool not initialised")
 
@@ -147,6 +155,18 @@ def _get_storage(agent: Optional[str] = None, request: Optional[Request] = None)
 
 def _get_search(agent: Optional[str] = None, request: Optional[Request] = None) -> HybridSearch:
     """Get or create a HybridSearch for the given agent."""
+    owner = _owned_recall.get()
+    if owner is not None:
+        key = StoragePool.normalize_key(agent)
+        if key not in owner.searches:
+            owner.searches[key] = HybridSearch(
+                storage=owner.storage(key), embedder=owner.embedder,
+                weights=_search_weights, reranker=_reranker,
+                rerank_weight=owner.config.reranker_weight,
+                bg_reranker=_bg_reranker,
+                bg_two_pass_enabled=owner.config.reranker_two_pass_enabled,
+                bg_rerank_weight=owner.config.reranker_two_pass_weight)
+        return owner.searches[key]
     if _storage_pool is None or _search_weights is None:
         raise HTTPException(503, "Search not initialised")
 
@@ -190,7 +210,7 @@ def _get_kg(agent: Optional[str] = None) -> KnowledgeGraph:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown logic."""
-    global _storage_pool, _embedder, _embed_worker, _warmup_task, _config, _start_time, _search_weights, _reranker, _bg_reranker
+    global _storage_pool, _embedder, _embed_worker, _index_worker, _warmup_task, _config, _start_time, _search_weights, _reranker, _bg_reranker
 
     _config = load_config()
     errors = _config.validate()
@@ -213,6 +233,11 @@ async def lifespan(app: FastAPI):
             api_key=_config.openrouter_api_key,
             model=_config.embedding_model,
             dimensions=_config.embedding_dimensions,
+            max_retries=_config.embed_max_retries,
+            timeout_seconds=_config.embed_timeout_seconds,
+            max_batch_items=_config.embed_max_batch_items,
+            max_batch_chars=_config.embed_max_batch_chars,
+            concurrency=_config.api_embedding_concurrency,
         )
         _embedder.set_storage(_storage_pool.get("main"))
     else:
@@ -319,6 +344,8 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Embed worker disabled via AGENT_MEMORY_EMBED_WORKER_ENABLED")
 
+    _index_worker = IndexWorker(_storage_pool, _embedder, _config)
+    await _index_worker.start()
     agents = _storage_pool.get_all_agents()
     reranker_mode = "off"
     reranker_name = "-"
@@ -371,6 +398,13 @@ async def lifespan(app: FastAPI):
         finally:
             _embed_worker = None
 
+    if _index_worker is not None:
+        await _index_worker.stop()
+        _index_worker = None
+    if _embedder is not None:
+        await _embedder.aclose()
+    if _storage_pool._foreground is not None:
+        await _storage_pool._foreground.stop()
     _storage_pool.close_all()
     _search_cache.clear()
     _kg_cache.clear()
@@ -424,9 +458,14 @@ app.add_middleware(
 
 # --- Centralized error handling ---
 
+def _safe_log_path(request: Request) -> str:
+    from .metrics import normalize_metric_path
+    return normalize_metric_path(request.url.path)
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request, exc):
-    logger.warning("HTTP %d: %s (path=%s)", exc.status_code, exc.detail, request.url.path)
+    logger.warning("HTTP status=%d path=%s", exc.status_code, _safe_log_path(request))
     return JSONResponse(
         status_code=exc.status_code,
         content={"error": str(exc.detail), "status_code": exc.status_code},
@@ -437,7 +476,7 @@ async def validation_exception_handler(request, exc):
     # Pydantic's ctx can contain ValueError objects, and input can contain
     # private evidence. Return serializable field diagnostics only.
     errors = [{key: err[key] for key in ("type", "loc", "msg") if key in err} for err in exc.errors()]
-    logger.warning("Validation error: %d fields (path=%s)", len(errors), request.url.path)
+    logger.warning("Validation error: %d fields (path=%s)", len(errors), _safe_log_path(request))
     status_code = 422
     error_message = "Validation error"
     if any(err.get("type") == "agent_format" for err in errors):
@@ -450,7 +489,7 @@ async def validation_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    logger.exception("Unhandled error: %s (path=%s)", exc, request.url.path)
+    logger.error("Unhandled error type=%s path=%s", type(exc).__name__, _safe_log_path(request))
     return JSONResponse(
         status_code=500,
         content={"error": "Internal server error"},
@@ -471,6 +510,15 @@ AGENT_PATTERN = re.compile(r'^[a-z0-9_-]{1,64}$')
 
 
 class RequestModel(BaseModel):
+    timeout_ms: Optional[int] = Field(default=None, strict=True, ge=100, le=10000)
+
+    @field_validator("request_id", mode="before", check_fields=False)
+    @classmethod
+    def _validate_request_id(cls, value):
+        if value is None:
+            return value
+        return operations.canonical_request_id(value)
+
     @field_validator("namespace", check_fields=False)
     @classmethod
     def _validate_namespace(cls, value: Optional[str]) -> Optional[str]:
@@ -511,6 +559,7 @@ class RecallRequest(RequestModel):
 
 
 class CaptureRequest(RequestModel):
+    request_id: Optional[str] = None
     messages: List[Dict[str, Any]] = Field(..., max_length=200)
     namespace: str = Field(default="default", description="Namespace for captured messages")
     agent: Optional[str] = None
@@ -526,6 +575,7 @@ class CaptureRequest(RequestModel):
 
 
 class StoreRequest(RequestModel):
+    request_id: Optional[str] = None
     evidence: Optional[Evidence] = None
     supersedes: Optional[str] = Field(default=None, min_length=1, max_length=100)
     valid_from: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
@@ -571,6 +621,53 @@ class GCRequest(RequestModel):
 
 @app.post("/v1/recall")
 async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
+    from .metrics import record_stage_metric
+    import sqlite3
+    started = time.monotonic()
+    outcome = 'completed'
+    deadline = _deadline(req, 'api_recall_timeout_seconds', 6)
+    try:
+        _check_allowed_agent(request, req.agent)
+        pool, embedder, config = _storage_pool, _embedder, _config
+        if pool is None:
+            raise HTTPException(503, 'storage_unavailable')
+        agent = req.agent
+        if req.agent == 'all':
+            agents = pool.get_all_agents()
+            if len(agents) > getattr(config, 'recall_max_agents', 32):
+                raise HTTPException(503, 'too_many_agent_shards')
+            if not agents:
+                return {'query': req.query, 'agent': 'all', 'count': 0, 'results': [],
+                        'triggered': should_trigger(req.query), 'search_mode': 'full', 'cross_agent': True}
+            agent = agents[0]
+        loop = asyncio.get_running_loop()
+        def execute(storage):
+            owner = RecallOwner(pool, storage, StoragePool.normalize_key(agent), deadline,
+                                embedder, loop, config)
+            return owner.run(_recall_impl(req, None))
+        return await _foreground(agent, request, deadline, execute, write=True, invalidate=False,
+                                 metric_operation='recall')
+    except HTTPException as exc:
+        outcome = 'timeout' if exc.status_code == 504 else 'rejected' if exc.status_code < 500 else 'failed'
+        raise
+    except (TimeoutError, operations.AdmissionError):
+        outcome = 'timeout'
+        raise HTTPException(504, 'recall_deadline_exceeded') from None
+    except sqlite3.OperationalError:
+        outcome = 'failed'
+        raise HTTPException(503, 'storage_busy') from None
+    except asyncio.CancelledError:
+        outcome = 'cancelled'
+        raise
+    except Exception:
+        outcome = 'failed'
+        raise
+    finally:
+        record_stage_metric(operation='recall', stage='total',
+                            duration_seconds=time.monotonic() - started, outcome=outcome)
+
+
+async def _recall_impl(req: RecallRequest, request: Request) -> Dict[str, Any]:
     """Search memories using hybrid search (semantic + BM25 + recency).
 
     Use ``agent="all"`` to search across all agent databases.
@@ -639,11 +736,19 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
 
 def _record_recall_access(results, request, agent=None):
     """Reinforce only API-admitted results, after semantic and token filtering."""
-    for result in results[:3]:
-        try:
-            _get_storage(result.get("agent", agent), request=request).boost_strength(result["id"])
-        except Exception:
-            logger.debug("Could not record admitted recall access")
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    outcome = 'completed'
+    try:
+        for result in results[:3]:
+            try:
+                _get_storage(result.get("agent", agent), request=request).boost_strength(result["id"])
+            except Exception:
+                outcome = 'failed'
+                logger.debug("Could not record admitted recall access")
+    finally:
+        record_stage_metric(operation='recall', stage='access',
+                            duration_seconds=time.monotonic() - started, outcome=outcome)
 
 
 async def _recall_all(req: RecallRequest, request: Request) -> Dict[str, Any]:
@@ -757,7 +862,21 @@ async def _rerank_cross_agent_results(query: str, results: List[Dict[str, Any]])
     keys = [f"{item.get('agent', 'main')}:{item.get('id', '')}" for item in cands]
     texts = [str(item.get("text", "")) for item in cands]
 
-    rerank_scores = await asyncio.to_thread(_reranker.score, query, texts, keys)
+    from .metrics import record_stage_metric
+    rerank_started = time.monotonic()
+    rerank_outcome = 'completed'
+    try:
+        rerank_scores = await asyncio.to_thread(_reranker.score, query, texts, keys)
+    except asyncio.CancelledError:
+        rerank_outcome = 'cancelled'
+        raise
+    except Exception:
+        rerank_outcome = 'failed'
+        raise
+    finally:
+        record_stage_metric(operation='recall', stage='rerank',
+                            duration_seconds=time.monotonic() - rerank_started,
+                            outcome=rerank_outcome)
     if not rerank_scores or len(rerank_scores) != len(cands):
         rerank_scores = [_lexical_overlap(query, text) for text in texts]
 
@@ -809,6 +928,144 @@ async def relearn_source(req: RelearnRequest, request: Request):
     return {"cleared": cleared, "restored": False}
 
 
+def _deadline(req, field, default):
+    budget = getattr(_config, field, default)
+    if req.timeout_ms is not None:
+        budget = min(budget, req.timeout_ms / 1000)
+    return time.monotonic() + budget
+
+
+async def _foreground(agent, request, deadline, fn, *, write=False, invalidate=True,
+                      metric_operation=None):
+    _check_allowed_agent(request, agent)
+    pool = _storage_pool
+    if pool is None:
+        raise HTTPException(503, 'storage_unavailable')
+    try:
+        key = StoragePool.normalize_key(agent)
+    except ValueError:
+        raise HTTPException(422, 'invalid_scope') from None
+    if pool._foreground is None:
+        pool._foreground = Foreground(pool)
+    try:
+        result = await pool._foreground.run(
+            key, deadline, fn, write=write, valid=lambda: _storage_pool is pool,
+            metric_operation=metric_operation,
+        )
+    except operations.AdmissionError as exc:
+        raise HTTPException(exc.status, exc.code,
+                            headers={'Retry-After': '1'} if exc.status == 429 else None) from None
+    except sqlite3.OperationalError:
+        raise HTTPException(503, 'storage_busy') from None
+    if write and invalidate:
+        # Shared event-loop objects never cross into a worker thread.
+        existing = pool._storages.get(key)
+        if existing is not None:
+            existing.cache_generation += 1
+    return result
+
+
+def _accept(storage, req, operation, rows, payload, total, deadline, *, graph=False, revision=None):
+    import sqlite3
+    import uuid
+    from .metrics import collector
+    started = time.monotonic()
+    try:
+        return operations.accept(storage, namespace=req.namespace, operation=operation,
+            request_id=req.request_id or str(uuid.uuid4()), payload=payload, rows=rows,
+            total=total, embed_required=_embedder is not None, graph_required=graph,
+            queue_cap=getattr(_config, 'index_queue_max_jobs', 1000), deadline=deadline,
+            revision=revision)
+    except operations.AdmissionError as exc:
+        raise HTTPException(exc.status, exc.code, headers={'Retry-After': '1'} if exc.status == 429 else None) from None
+    except sqlite3.OperationalError:
+        raise HTTPException(503, 'storage_busy') from None
+    except Exception:
+        raise HTTPException(503, 'admission_failed') from None
+    finally:
+        collector.record_stage(operation, 'persist', time.monotonic() - started)
+
+
+@app.get('/v1/operations/{request_id}')
+async def operation_status(request_id: str, request: Request, agent: Optional[str] = None,
+                           namespace: str = 'default', operation: Literal['capture', 'store'] = 'capture'):
+    import sqlite3
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    outcome = 'completed'
+    try:
+        try:
+            operations.canonical_request_id(request_id)
+        except ValueError:
+            raise HTTPException(422, 'invalid_request_id') from None
+        if not NAMESPACE_PATTERN.fullmatch(namespace) or agent == 'all':
+            raise HTTPException(422, 'invalid_scope')
+        _check_allowed_agent(request, agent)
+        if _storage_pool is None:
+            raise HTTPException(503, 'storage_unavailable')
+        try:
+            key = StoragePool.normalize_key(agent)
+        except ValueError:
+            raise HTTPException(422, 'invalid_scope') from None
+        # Unknown identities never cause new shard creation.
+        if not Path(_storage_pool._db_path(key)).is_file():
+            raise HTTPException(404, 'operation_not_found')
+        try:
+            deadline = time.monotonic() + getattr(_config, 'api_status_timeout_seconds', 1)
+            result = await _foreground(
+                key, request, deadline,
+                lambda storage: operations.public_status(storage, namespace, operation, request_id),
+                metric_operation='status',
+            )
+        except (operations.AdmissionError, sqlite3.OperationalError):
+            raise HTTPException(503, 'status_unavailable') from None
+        if result is None:
+            raise HTTPException(404, 'operation_not_found')
+        outcome = result.get('state', 'completed')
+        return result
+    except HTTPException as exc:
+        outcome = 'timeout' if exc.status_code == 504 else 'rejected' if exc.status_code < 500 else 'failed'
+        raise
+    except asyncio.CancelledError:
+        outcome = 'cancelled'
+        raise
+    except Exception:
+        outcome = 'failed'
+        raise
+    finally:
+        record_stage_metric(operation='status', stage='total',
+                            duration_seconds=time.monotonic() - started, outcome=outcome)
+
+
+@app.get('/v1/health/live')
+async def health_live():
+    return {'status': 'ok'}
+
+
+@app.get('/v1/health/backend')
+async def health_backend(request: Request, agent: Optional[str] = None):
+    import sqlite3
+    _check_allowed_agent(request, agent)
+    if agent == 'all' or _storage_pool is None:
+        raise HTTPException(422, 'invalid_scope')
+    try:
+        key = StoragePool.normalize_key(agent)
+    except ValueError:
+        raise HTTPException(422, 'invalid_scope') from None
+    if not Path(_storage_pool._db_path(key)).is_file():
+        raise HTTPException(404, 'backend_not_found')
+    deadline = time.monotonic() + 2
+    try:
+        await _foreground(key, request, deadline,
+            lambda storage: storage._get_conn().execute('SELECT 1').fetchone()[0])
+        if _embedder is None:
+            return {'status': 'degraded', 'storage': True, 'embedding': 'not_required'}
+        await asyncio.wait_for(_embedder.probe(deadline=deadline), max(.001, deadline - time.monotonic()))
+    except (Exception, sqlite3.OperationalError):
+        raise HTTPException(503, 'backend_unavailable') from None
+    return {'status': 'ok', 'storage': True, 'embedding': 'completed'}
+
+
 def _capture_candidates(req: CaptureRequest) -> List[Dict[str, Any]]:
     """Normalize eligible rows identically for writes and status queries."""
     cleaned: List[Dict[str, Any]] = []
@@ -849,7 +1106,16 @@ async def capture_status(req: CaptureRequest, request: Request) -> Dict[str, str
     """Read-only exact-row reconciliation; incomplete includes partial/pending writes."""
     if req.agent == "all":
         raise HTTPException(400, "Cannot capture to 'all' -- specify an agent")
-    storage = _get_storage(req.agent, request=request)
+    _check_allowed_agent(request, req.agent)
+    if _storage_pool is None:
+        raise HTTPException(503, 'storage_unavailable')
+    if not Path(_storage_pool._db_path(StoragePool.normalize_key(req.agent))).is_file():
+        return {'state': 'incomplete'}
+    deadline = _deadline(req, 'api_status_timeout_seconds', 1)
+    return await _foreground(req.agent, request, deadline, lambda storage: _capture_status_owned(storage, req))
+
+
+def _capture_status_owned(storage, req):
     from .ingest import classify_memory_type
     candidates = _capture_candidates(req)
     if any(storage.source_is_forgotten(row["session"]) for row in candidates):
@@ -866,118 +1132,52 @@ async def capture_status(req: CaptureRequest, request: Request) -> Dict[str, str
 
 @app.post("/v1/capture")
 async def capture(req: CaptureRequest, request: Request) -> Dict[str, Any]:
-    """Ingest a batch of messages into memory."""
-    if req.agent == "all":
-        raise HTTPException(400, "Cannot capture to 'all' -- specify an agent")
-    storage = _get_storage(req.agent, request=request)
-    cleaned = _capture_candidates(req)
-    if not cleaned:
-        return {"stored": 0, "merged": 0, "total": len(req.messages)}
-
-    from .ingest import classify_memory_type
-    fresh = []
-    seen = set()
-    duplicate_count = 0
-    blocked_count = 0
-    for message in cleaned:
-        if storage.source_is_forgotten(message["session"]):
-            blocked_count += 1
-            continue
-        identity = (message["text"], message["role"], message["session"],
-                    json.dumps(message["evidence"], sort_keys=True, ensure_ascii=False))
-        duplicate = identity in seen or storage.find_duplicate(
-            text=message["text"], category=message["role"], source_session=message["session"],
-            namespace=req.namespace, memory_type=classify_memory_type(message["text"]),
-            source="session_capture", trust_level="user", evidence=message["evidence"],
+    """Commit vectorless assertions, jobs and receipt; never await a provider."""
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    outcome = 'accepted'
+    deadline = _deadline(req, "api_write_timeout_seconds", 2)
+    try:
+        if req.agent == "all":
+            raise HTTPException(400, "Specify one agent")
+        result = await _foreground(
+            req.agent, request, deadline, lambda storage: _capture_owned(storage, req, deadline),
+            write=True, metric_operation='capture',
         )
-        if duplicate:
-            duplicate_count += 1
-        else:
-            seen.add(identity)
-            fresh.append(message)
-    cleaned = fresh
-    if not cleaned:
-        return {"stored": 0, "merged": duplicate_count, "blocked": blocked_count, "total": len(req.messages),
-                "agent": StoragePool.normalize_key(req.agent), "namespace": req.namespace}
+        outcome = result.get('state', 'accepted')
+        return result
+    except HTTPException as exc:
+        outcome = 'timeout' if exc.status_code == 504 else 'rejected' if exc.status_code < 500 else 'failed'
+        raise
+    except asyncio.CancelledError:
+        outcome = 'cancelled'
+        raise
+    except Exception:
+        outcome = 'failed'
+        raise
+    finally:
+        record_stage_metric(operation='capture', stage='total',
+                            duration_seconds=time.monotonic() - started, outcome=outcome)
 
-    texts = [m["text"] for m in cleaned]
 
-    vectors: List[Optional[List[float]]] = [None] * len(texts)
-    if _embedder is not None:
-        for attempt in range(3):
-            try:
-                vectors = await _embedder.embed_batch(texts)
-                break
-            except Exception as exc:
-                if attempt < 2:
-                    logger.warning("Batch embed retry %d/3: %s", attempt + 1, exc)
-                    await asyncio.sleep(0.5 * (attempt + 1))
-                else:
-                    logger.error("Batch embed failed after 3 attempts: %s", exc)
-                    vectors = [None] * len(texts)
-
-    items: List[Dict[str, Any]] = []
-    for m, vec in zip(cleaned, vectors):
-        importance = score_importance(m["text"], {"role": m["role"]})
-        items.append({
-            "text": m["text"],
-            "vector": vec,
-            "category": m["role"],
-            "importance": importance,
-            "source_session": m["session"],
-            "timestamp": m.get("timestamp", ""),
-            "evidence": m["evidence"],
-        })
-
-    # Store distinct assertions; collapse exact provenance-matched retries only.
-    stored_n = 0
-    merged_n = duplicate_count
-
-    admitted = []
-    for it in items:
-        try:
-            res = storage.merge_or_store(
-                text=it["text"],
-                vector=it.get("vector"),
-                category=it.get("category", "other"),
-                importance=float(it.get("importance", 0.5)),
-                source_session=it.get("source_session"),
-                namespace=req.namespace,
-                memory_type=classify_memory_type(it["text"]),
-                source="session_capture",
-                trust_level="user",
-                evidence=it["evidence"],
-            )
-        except ForgottenSourceError:
-            blocked_count += 1
-            continue
-        admitted.append((it, res["id"]))
-        if res.get("action") == "merged":
-            merged_n += 1
-        else:
-            stored_n += 1
-
-    # Only admitted rows can create derived context. The graph writer rechecks
-    # existence under the same SQLite write lock as all of its derived writes.
-    kg = _get_kg(req.agent)
-    for it, memory_id in admitted:
-        try:
-            kg.process_text(it["text"], timestamp=it.get("timestamp", ""), source_memory_id=memory_id)
-        except Exception:
-            pass
-
-    # Invalidate search cache
-    storage.invalidate_search_cache(agent=req.agent or "main")
-
-    agent_key = StoragePool.normalize_key(req.agent)
-    return {
-        "stored": stored_n,
-        "blocked": blocked_count,
-        "merged": merged_n,
-        "total": len(req.messages),
-        "agent": agent_key,
-        "namespace": req.namespace,
-    }
+def _capture_owned(storage, req, deadline):
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    try:
+        cleaned = _capture_candidates(req)
+    finally:
+        record_stage_metric(operation='capture', stage='normalize',
+                            duration_seconds=time.monotonic() - started)
+    if sum(len(row['text']) for row in cleaned) > (_config.capture_max_total_chars if _config else 128000):
+        raise HTTPException(413, 'capture_too_large')
+    from .ingest import classify_memory_type
+    rows = [dict(text=m['text'], category=m['role'],
+                 importance=score_importance(m['text'], {'role': m['role']}),
+                 source_session=m['session'], namespace=req.namespace,
+                 memory_type=classify_memory_type(m['text']), source='session_capture',
+                 trust_level='user', evidence=m['evidence']) for m in cleaned]
+    result = _accept(storage, req, 'capture', rows, {'rows': rows}, len(req.messages), deadline, graph=True)
+    return {**result, 'agent': StoragePool.normalize_key(req.agent), 'namespace': req.namespace}
 
 
 async def _embed_single_for_store(text: str) -> Optional[List[float]]:
@@ -1008,10 +1208,34 @@ async def _embed_single_for_store(text: str) -> Optional[List[float]]:
 @app.post("/v1/store")
 async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     """Manually store a single memory."""
-    if req.agent == "all":
-        raise HTTPException(400, "Cannot store to 'all' -- specify an agent")
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    outcome = 'accepted'
+    deadline = _deadline(req, 'api_write_timeout_seconds', 2)
+    try:
+        if req.agent == "all":
+            raise HTTPException(400, "Cannot store to 'all' -- specify an agent")
+        result = await _foreground(
+            req.agent, request, deadline, lambda storage: _store_owned(storage, req, deadline),
+            write=True, metric_operation='store',
+        )
+        outcome = result.get('state', 'accepted')
+        return result
+    except HTTPException as exc:
+        outcome = 'timeout' if exc.status_code == 504 else 'rejected' if exc.status_code < 500 else 'failed'
+        raise
+    except asyncio.CancelledError:
+        outcome = 'cancelled'
+        raise
+    except Exception:
+        outcome = 'failed'
+        raise
+    finally:
+        record_stage_metric(operation='store', stage='total',
+                            duration_seconds=time.monotonic() - started, outcome=outcome)
 
-    storage = _get_storage(req.agent, request=request)
+
+def _store_owned(storage, req, deadline):
 
     # Rule detection: override category/importance if instruction detected
     category = req.category
@@ -1021,10 +1245,16 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if reported_user and (detected or _rule_detector.check_safeword(req.text)):
         category = "rule"
         importance = 1.0
-        logger.info("Rule detected in /v1/store: %s", req.text[:60])
+        logger.info("store_rule_detected")
 
     from .ingest import classify_memory_type, is_low_signal_memory_text, normalize_memory_text
-    req.text = normalize_memory_text(req.text)
+    from .metrics import record_stage_metric
+    started = time.monotonic()
+    try:
+        req.text = normalize_memory_text(req.text)
+    finally:
+        record_stage_metric(operation='store', stage='normalize',
+                            duration_seconds=time.monotonic() - started)
     if is_low_signal_memory_text(req.text):
         raise HTTPException(400, "Memory text is low-signal transport metadata")
 
@@ -1038,63 +1268,29 @@ async def store(req: StoreRequest, request: Request) -> Dict[str, Any]:
     if category == "rule" and req.memory_type is None:
         resolved_memory_type = "rule"
 
-    if storage.source_is_forgotten(req.session_id):
-        raise ForgottenSourceError()
     evidence = req.evidence.model_dump(exclude_none=True) if req.evidence else None
-    if not req.supersedes and req.valid_from is None:
-        duplicate = storage.find_duplicate(
-            text=req.text, namespace=req.namespace, category=category, memory_type=resolved_memory_type,
-            source=source, trust_level=trust_level, source_session=req.session_id, evidence=evidence,
-        )
-        if duplicate:
-            return {"id": duplicate, "stored": False, "merged": True, "similarity": 1.0,
-                    "agent": StoragePool.normalize_key(req.agent)}
-    vector = await _embed_single_for_store(req.text)
-
+    revision = None
     if req.supersedes:
-        if req.evidence and (req.evidence.assertion != "reported" or req.evidence.role != "user"):
-            raise HTTPException(422, "Derived or inferred evidence cannot supersede a reported fact")
+        if req.evidence and (req.evidence.assertion != 'reported' or req.evidence.role != 'user'):
+            raise HTTPException(422, 'invalid_revision_evidence')
         previous = storage.get_memory(req.supersedes)
-        if previous is None or previous["namespace"] != req.namespace:
-            raise HTTPException(404, "Previous memory not found in this namespace")
-        try:
-            res = storage.revise_memory(
-                req.supersedes, text=req.text, vector=vector,
-                valid_from=req.valid_from if req.valid_from is not None else time.time(),
-                source_session=req.session_id,
-                evidence=req.evidence.model_dump(exclude_none=True) if req.evidence else None,
-            )
-        except ValueError as exc:
-            raise HTTPException(409, str(exc))
-        storage.invalidate_search_cache(agent=req.agent or "main")
-        return {**res, "stored": True, "merged": False, "agent": StoragePool.normalize_key(req.agent)}
-    if req.valid_from is not None:
-        raise HTTPException(422, "valid_from requires an explicit supersedes ID")
-
-    res = storage.merge_or_store(
-        text=req.text,
-        vector=vector,
-        category=category,
-        importance=importance,
-        source_session=req.session_id,
-        namespace=req.namespace,
-        memory_type=resolved_memory_type,
-        source=source,
-        trust_level=trust_level,
-        evidence=req.evidence.model_dump(exclude_none=True) if req.evidence else None,
-    )
-
-    # Invalidate search cache
-    storage.invalidate_search_cache(agent=req.agent or "main")
-
-    agent_key = StoragePool.normalize_key(req.agent)
-    return {
-        "id": res["id"],
-        "stored": res["action"] == "inserted",
-        "merged": res["action"] == "merged",
-        "similarity": res.get("similarity"),
-        "agent": agent_key,
-    }
+        if previous is None or previous['namespace'] != req.namespace:
+            raise HTTPException(404, 'previous_memory_not_found')
+        if previous.get('valid_to') is not None:
+            raise HTTPException(409, 'previous_memory_superseded')
+        revision = {'supersedes': req.supersedes,
+                    'valid_from': req.valid_from if req.valid_from is not None else time.time()}
+    elif req.valid_from is not None:
+        raise HTTPException(422, 'valid_from_requires_supersedes')
+    if req.request_id is None and storage.source_is_forgotten(req.session_id):
+        raise ForgottenSourceError()
+    row = dict(text=req.text, category=category, importance=importance,
+               source_session=req.session_id, namespace=req.namespace,
+               memory_type=resolved_memory_type, source=source,
+               trust_level=trust_level, evidence=evidence)
+    payload = {'rows': [row], 'supersedes': req.supersedes, 'valid_from': req.valid_from}
+    result = _accept(storage, req, 'store', [row], payload, 1, deadline, revision=revision)
+    return {**result, 'agent': StoragePool.normalize_key(req.agent)}
 
 
 @app.post("/v1/rule")
@@ -1132,7 +1328,7 @@ async def store_rule(req: StoreRequest, request: Request) -> Dict[str, Any]:
     storage.invalidate_search_cache(agent=req.agent or "main")
 
     agent_key = StoragePool.normalize_key(req.agent)
-    logger.info("Rule stored via /v1/rule: %s", req.text[:60])
+    logger.info("rule_stored")
     return {
         "id": res["id"],
         "stored": res["action"] == "inserted",

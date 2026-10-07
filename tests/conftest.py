@@ -20,6 +20,10 @@ def _set_test_env(monkeypatch):
     """Set a dummy API key so tests never fail on missing key."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-for-pytest")
     monkeypatch.delenv("AGENT_MEMORY_API_KEY", raising=False)
+    # Keep real rate-limit behavior within a test, without spending another
+    # test's process-global IP allowance (fast durable admission exposes this).
+    import agent_memory.api as api
+    monkeypatch.setattr(api.app, "middleware_stack", api.app.build_middleware_stack())
 
 
 # ---------------------------------------------------------------------------

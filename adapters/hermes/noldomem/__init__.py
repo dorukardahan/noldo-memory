@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
@@ -11,7 +12,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from urllib.parse import urlsplit, urlunsplit
+import uuid
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -124,6 +126,10 @@ class NoldoMemConfig:
     recall_min_semantic_score: Optional[float] = None
     recall_max_chars: int = 3500
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
+    capture_timeout_seconds: Optional[float] = None
+    store_timeout_seconds: Optional[float] = None
+    recall_timeout_seconds: Optional[float] = None
+    status_timeout_seconds: Optional[float] = None
     prefetch_enabled: bool = True
     sync_prefetch_on_miss: bool = True
     sync_turns_enabled: bool = False
@@ -171,47 +177,170 @@ class _RecallSnapshot:
         return body
 
 
+class _HTTPDeadlineUnavailable(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("NoldoMem API deadline unavailable")
+
+
+_threaded_http_capacity = threading.BoundedSemaphore(2)
+_threaded_http_state = threading.local()
+
+
+def _threaded_http(client, path, body, method, deadline):
+    """Bound host-thread requests; retain capacity until real urllib I/O drains."""
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise RuntimeError('NoldoMem API timed out')
+    if not _threaded_http_capacity.acquire(blocking=False):
+        raise RuntimeError('NoldoMem API is unavailable')
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='noldomem-http')
+    def perform():
+        _threaded_http_state.admitted = True
+        try:
+            with client.deadline_scope(deadline):
+                return client.post(path, body, method=method)
+        finally:
+            _threaded_http_state.admitted = False
+    try:
+        future = executor.submit(perform)
+    except BaseException:
+        _threaded_http_capacity.release()
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    def drained(_):
+        _threaded_http_capacity.release()
+        executor.shutdown(wait=False, cancel_futures=True)
+    future.add_done_callback(drained)
+    try:
+        return future.result(timeout=max(.001, deadline - time.monotonic()))
+    except FutureTimeout:
+        # A socket timeout is not a total deadline against trickling peers.
+        # The real thread remains admitted until close/read actually returns.
+        raise RuntimeError('NoldoMem API timed out') from None
+
+
+@contextmanager
+def _http_deadline(deadline: float) -> Iterator[None]:
+    """Interrupt actual blocking I/O, not a detached thread waiting for it.
+
+    urllib's socket timeout alone cannot bound a trickle response. On hosts or
+    host lanes without an exclusive POSIX timer, reject before starting I/O.
+    """
+    if getattr(_threaded_http_state, 'admitted', False):
+        if deadline <= time.monotonic():
+            raise TimeoutError()
+        yield
+        return
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or not all(hasattr(signal, name) for name in ("SIGALRM", "ITIMER_REAL", "setitimer", "getitimer"))
+        or signal.getitimer(signal.ITIMER_REAL)[0] > 0.0
+    ):
+        raise _HTTPDeadlineUnavailable()
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError()
+    previous_handler = signal.getsignal(signal.SIGALRM)
+
+    def expired(signum: int, frame: Any) -> None:
+        raise TimeoutError()
+
+    try:
+        signal.signal(signal.SIGALRM, expired)
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+    except Exception as exc:
+        signal.signal(signal.SIGALRM, previous_handler)
+        raise _HTTPDeadlineUnavailable() from exc
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 class NoldoMemHTTPClient:
     def __init__(self, base_url: str, api_key: str, timeout_seconds: float) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = _timeout_value(timeout_seconds, DEFAULT_TIMEOUT_SECONDS)
+        self._request_scope = threading.local()
+        self.legacy_capture_status = False
+
+    @contextmanager
+    def deadline_scope(self, deadline: float) -> Iterator[None]:
+        previous = getattr(self._request_scope, "deadline", None)
+        self._request_scope.deadline = deadline
+        try:
+            yield
+        finally:
+            self._request_scope.deadline = previous
 
     def post(self, path: str, body: Dict[str, Any], *, method: str = "POST") -> Dict[str, Any]:
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(
-            self.base_url + path,
-            data=data,
-            method=method,
-            headers={
-                "Content-Type": "application/json",
-                "X-API-Key": self.api_key,
-            },
-        )
+        deadline = getattr(self._request_scope, "deadline", None)
+        timeout = self.timeout_seconds if deadline is None else max(0.0, deadline - time.monotonic())
+        if deadline is None:
+            deadline = time.monotonic() + timeout
+        if (threading.current_thread() is not threading.main_thread()
+                and not getattr(_threaded_http_state, 'admitted', False)):
+            return _threaded_http(self, path, body, method, deadline)
         try:
-            response = urllib.request.urlopen(req, timeout=self.timeout_seconds)
-            try:
-                raw = response.read().decode("utf-8")
-            finally:
-                close = getattr(response, "close", None)
-                if callable(close):
-                    close()
-            return json.loads(raw or "{}")
+            with _http_deadline(deadline):
+                data = None if method == "GET" else json.dumps(body).encode("utf-8")
+                req = urllib.request.Request(
+                    self.base_url + path,
+                    data=data,
+                    method=method,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-API-Key": self.api_key,
+                        "X-Request-ID": str(uuid.uuid4()),
+                    },
+                )
+                response = urllib.request.urlopen(req, timeout=timeout)
+                try:
+                    raw = response.read().decode("utf-8")
+                finally:
+                    close = getattr(response, "close", None)
+                    if callable(close):
+                        close()
+                payload = json.loads(raw or "{}")
+                if not isinstance(payload, dict):
+                    raise ValueError()
+                return payload
         except urllib.error.HTTPError as exc:
-            detail = exc.reason or f"HTTP {exc.code}"
-            raise RuntimeError(f"NoldoMem API request failed: {detail}") from exc
+            exc.close()
+            # Never echo a remote reason/body (it may contain private payload).
+            raise RuntimeError(f"NoldoMem API request failed: HTTP {exc.code}") from exc
         except urllib.error.URLError as exc:
             if isinstance(exc.reason, TimeoutError):
                 raise RuntimeError("NoldoMem API timed out") from exc
             raise RuntimeError("NoldoMem API is unavailable") from exc
         except TimeoutError as exc:
             raise RuntimeError("NoldoMem API timed out") from exc
+        except (OSError, http.client.HTTPException) as exc:
+            raise RuntimeError("NoldoMem API is unavailable") from exc
+        except (ValueError, UnicodeError) as exc:
+            raise RuntimeError("NoldoMem API invalid response") from exc
 
     def recall(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/recall", body)
 
     def capture(self, body: Dict[str, Any]) -> Dict[str, Any]:
-        return self.post("/v1/capture", body)
+        receipt = self.post("/v1/capture", body)
+        # Only an observed compatible receipt proves this peer predates identity
+        # status. Never probe GET then POST: that would spend two status calls.
+        if not any(key in receipt for key in ("request_id", "state", "durable")) and all(
+            key in receipt for key in ("stored", "merged", "blocked", "total")
+        ):
+            self.legacy_capture_status = True
+        elif "request_id" in receipt or "state" in receipt:
+            self.legacy_capture_status = False
+        return receipt
+
+    def operation_status(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        query = urlencode({key: body[key] for key in ("agent", "namespace", "operation")})
+        return self.post("/v1/operations/" + body["request_id"] + "?" + query, {}, method="GET")
 
     def capture_status(self, body: Dict[str, Any]) -> Dict[str, Any]:
         return self.post("/v1/capture/status", body)
@@ -253,6 +382,29 @@ def _as_float(value: Any, default: float, *, minimum: float = 0.1, maximum: floa
     if not math.isfinite(parsed):
         return default
     return max(minimum, min(maximum, parsed))
+
+
+def _timeout_value(value: Any, fallback: float, *, maximum: float = 10.0, env: bool = False) -> float:
+    """JSON requires a finite number (not bool/string); env accepts numeric text.
+
+    An invalid selected operation setting falls back to effective legacy, not
+    another shadowed setting. Invalid selected legacy falls back to 8 seconds.
+    Finite values, including zero/negative values, clamp to 0.1..maximum.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str) if env else (int, float)):
+        return fallback
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(0.1, min(maximum, parsed)) if math.isfinite(parsed) else fallback
+
+
+def _configured_timeout(raw: Dict[str, Any], field: str, fallback: float, *, maximum: float = 10.0) -> float:
+    env_name = "NOLDOMEM_" + field.upper()
+    if env_name in os.environ:
+        return _timeout_value(os.environ[env_name], fallback, maximum=maximum, env=True)
+    return _timeout_value(raw.get(field), fallback, maximum=maximum)
 
 
 def _read_text_file(path: str) -> str:
@@ -339,6 +491,7 @@ class NoldoMemProvider(MemoryProvider):
             or _read_text_file(str(Path.home() / ".noldomem" / "memory-api-key"))
         )
 
+        legacy_timeout = _configured_timeout(raw, "timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
         return NoldoMemConfig(
             base_url=str(os.environ.get("NOLDOMEM_BASE_URL") or raw.get("base_url") or DEFAULT_BASE_URL),
             api_key=key,
@@ -360,11 +513,12 @@ class NoldoMemProvider(MemoryProvider):
                 _as_float(raw["recall_min_semantic_score"], 1.0, minimum=0.0, maximum=1.0)
                 if raw.get("recall_min_semantic_score") is not None else None
             ),
-            timeout_seconds=_as_float(
-                os.environ.get("NOLDOMEM_TIMEOUT_SECONDS") or raw.get("timeout_seconds"),
-                DEFAULT_TIMEOUT_SECONDS,
-                minimum=0.2,
-                maximum=10.0,
+            timeout_seconds=legacy_timeout,
+            capture_timeout_seconds=_configured_timeout(raw, "capture_timeout_seconds", legacy_timeout),
+            store_timeout_seconds=_configured_timeout(raw, "store_timeout_seconds", legacy_timeout),
+            recall_timeout_seconds=_configured_timeout(raw, "recall_timeout_seconds", legacy_timeout),
+            status_timeout_seconds=_configured_timeout(
+                raw, "status_timeout_seconds", min(legacy_timeout, 2.0), maximum=2.0,
             ),
             prefetch_enabled=_as_bool(
                 os.environ.get("NOLDOMEM_PREFETCH_ENABLED") or raw.get("prefetch_enabled"),
@@ -479,6 +633,7 @@ class NoldoMemProvider(MemoryProvider):
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "",
                   messages: Optional[List[Dict[str, Any]]] = None) -> None:
+        started_at = time.monotonic()
         user_content = _without_failed_voice_prefix(user_content)
         with self._tracked_operation(require_client=False) as (admitted, _, admission_generation):
             if not admitted or not (
@@ -630,21 +785,10 @@ class NoldoMemProvider(MemoryProvider):
                         if client is not None:
                             capture_body = {"agent": body["agent"], "namespace": body["namespace"],
                                             "messages": captured}
-                            try:
-                                client.capture(capture_body)
-                            except RuntimeError as exc:
-                                if str(exc) != "NoldoMem API timed out":
-                                    raise
-                                # A timeout does not establish whether writes committed.
-                                # Only exact live rows under the same provenance can
-                                # turn this ambiguous result into a verified receipt.
-                                try:
-                                    status = client.capture_status(capture_body)
-                                except (AttributeError, RuntimeError):
-                                    status = None
-                                if not isinstance(status, dict) or status.get("state") != "complete":
-                                    raise RuntimeError("NoldoMem capture outcome ambiguous after timeout") from exc
-                            self._invalidate_after_write()
+                            self._write(
+                                client, "capture", capture_body, started_at=started_at,
+                                expected_generation=lifecycle_generation,
+                            )
                 return
             text = _truncate(
                 f"User: {user_content.strip()}\nAssistant: {assistant_content.strip()}",
@@ -657,7 +801,9 @@ class NoldoMemProvider(MemoryProvider):
                     "source": "hermes-sync-turn",
                 }
             )
-            self._safe_store(body, expected_generation=lifecycle_generation)
+            self._safe_store(
+                body, expected_generation=lifecycle_generation, started_at=started_at, suppress_errors=False,
+            )
 
     def on_session_switch(
         self,
@@ -756,6 +902,7 @@ class NoldoMemProvider(MemoryProvider):
         admission_generation: Optional[int],
         **kwargs: Any,
     ) -> str:
+        started_at = time.monotonic()
         try:
             if tool_name == "noldomem_recall":
                 request = self._base_body_snapshot(
@@ -777,7 +924,9 @@ class NoldoMemProvider(MemoryProvider):
                 with self._network_operation(expected_generation=lifecycle_generation) as client:
                     if client is None:
                         return self._network_unavailable_error(lifecycle_generation)
-                    data = client.recall(body)
+                    data = self._invoke_client(
+                        client, "recall", body, started_at + self._operation_timeout("recall"),
+                    )
                     if not self._network_result_allowed(client, lifecycle_generation):
                         return self._network_unavailable_error(lifecycle_generation)
                     return json.dumps({"success": True, "data": data}, ensure_ascii=False)
@@ -801,8 +950,10 @@ class NoldoMemProvider(MemoryProvider):
                 with self._network_operation(expected_generation=lifecycle_generation) as client:
                     if client is None:
                         return self._network_unavailable_error(lifecycle_generation)
-                    data = client.store(body)
-                    self._invalidate_after_write()
+                    data = self._write(
+                        client, "store", body, started_at=started_at,
+                        expected_generation=lifecycle_generation,
+                    )
                     if not self._network_result_allowed(client, lifecycle_generation):
                         return self._network_unavailable_error(lifecycle_generation)
                     return json.dumps({"success": True, "data": data}, ensure_ascii=False)
@@ -854,6 +1005,7 @@ class NoldoMemProvider(MemoryProvider):
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
+        started_at = time.monotonic()
         if action in {"remove", "replace"}:
             # A substring is not an external memory ID. Never turn a deletion
             # into capture or pretend an ambiguous cross-store update succeeded.
@@ -875,7 +1027,7 @@ class NoldoMemProvider(MemoryProvider):
                     "source": f"hermes-built-in-memory-{action}",
                 }
             )
-            self._safe_store(body, expected_generation=lifecycle_generation)
+            self._safe_store(body, expected_generation=lifecycle_generation, started_at=started_at)
 
     def shutdown(self) -> None:
         started_at = time.monotonic()
@@ -1008,14 +1160,103 @@ class NoldoMemProvider(MemoryProvider):
                 body["session_id"] = sid
             return body, self._session_generation
 
-    def _safe_store(self, body: Dict[str, Any], *, expected_generation: int) -> None:
+    def _operation_timeout(self, operation: str) -> float:
+        legacy = _timeout_value(self._config.timeout_seconds, DEFAULT_TIMEOUT_SECONDS)
+        cap = 2.0 if operation == "status" else 10.0
+        return _timeout_value(getattr(self._config, operation + "_timeout_seconds"), min(legacy, cap), maximum=cap)
+
+    @staticmethod
+    def _invoke_client(client: Any, method: str, body: Dict[str, Any], deadline: float) -> Dict[str, Any]:
+        if deadline <= time.monotonic():
+            raise RuntimeError("NoldoMem API timed out")
+        # Production transport always enforces the remaining deadline on actual
+        # I/O. Synthetic clients retain the existing small testing interface.
+        if isinstance(client, NoldoMemHTTPClient):
+            with client.deadline_scope(deadline):
+                return getattr(client, method)(body)
+        return getattr(client, method)(body)
+
+    @staticmethod
+    def _durable_receipt(receipt: Any) -> bool:
+        if not isinstance(receipt, dict):
+            return False
+        if receipt.get("blocked") or receipt.get("indexing_state") == "blocked":
+            return False
+        return receipt.get("durable") is True and receipt.get("state") in {"accepted", "completed", "failed"}
+
+    def _write(
+        self, client: Any, operation: str, body: Dict[str, Any], *, started_at: float, expected_generation: int,
+    ) -> Dict[str, Any]:
+        # Random request identity is assigned once, before admission, never from
+        # text and never regenerated to retry an uncertain write.
+        body = {**body, "request_id": str(uuid.uuid4())}
+        total = self._operation_timeout(operation)
+        deadline = started_at + total
+        reserve = min(self._operation_timeout("status"), total / 4.0)
+        self._invalidate_after_write()  # An uncertain write may already be committed.
+        try:
+            receipt = self._invoke_client(client, operation, body, deadline - reserve)
+        except Exception as exc:
+            ambiguous = isinstance(exc, (TimeoutError, OSError, ValueError, http.client.HTTPException)) or (
+                isinstance(exc, RuntimeError) and str(exc) in {
+                    "NoldoMem API timed out", "NoldoMem API is unavailable", "NoldoMem API invalid response",
+                }
+            )
+            if not ambiguous:
+                raise
+            with self._lock:
+                if self._closing or not self._network_result_allowed_locked(client, expected_generation):
+                    raise _ProviderClosed("NoldoMem request lifecycle expired") from exc
+            legacy = operation == "capture" and (
+                getattr(client, "legacy_capture_status", False) is True
+                or not callable(getattr(client, "operation_status", None))
+            )
+            status_body = body if legacy else {
+                "agent": body["agent"], "namespace": body["namespace"],
+                "operation": operation, "request_id": body["request_id"],
+            }
+            try:
+                # Exactly one reconciliation call, never GET followed by POST.
+                status = self._invoke_client(
+                    client, "capture_status" if legacy else "operation_status", status_body,
+                    min(deadline, time.monotonic() + self._operation_timeout("status")),
+                )
+                valid = (isinstance(status, dict) and status.get("state") == "complete" and not status.get("blocked")) if legacy else self._durable_receipt(status)
+            except _ProviderClosed:
+                raise
+            except Exception:
+                # Includes bad JSON/UTF-8, truncated reads and reset connections;
+                # deliberately excludes BaseException/cancellation/shutdown.
+                valid = False
+            if not valid or time.monotonic() > deadline:
+                raise RuntimeError(f"NoldoMem {operation} outcome ambiguous after timeout") from exc
+            receipt = status
+        else:
+            if isinstance(receipt, dict):
+                if any(key in receipt for key in ("state", "durable", "indexing_state")):
+                    valid = self._durable_receipt(receipt)
+                else:
+                    valid = not receipt.get("blocked")  # Preserve older HTTP-200 receipts.
+                if not valid:
+                    raise RuntimeError(f"NoldoMem {operation} not durably accepted or blocked")
+        with self._lock:
+            # A previously admitted successful write may finish during drain.
+            # Shutdown completion/session changes invalidate client/generation;
+            # closing alone rejects NEW admission, not the committed result.
+            if not self._network_result_allowed_locked(client, expected_generation):
+                raise _ProviderClosed('NoldoMem is shutting down' if self._closing else 'NoldoMem request lifecycle expired')
+        return receipt
+
+    def _safe_store(
+        self, body: Dict[str, Any], *, expected_generation: int, started_at: float, suppress_errors: bool = True,
+    ) -> None:
         try:
             with self._network_operation(expected_generation=expected_generation) as client:
                 if client is not None:
-                    client.store(body)
-                    self._invalidate_after_write()
+                    self._write(client, "store", body, started_at=started_at, expected_generation=expected_generation)
         except Exception:
-            return
+            if not suppress_errors:
+                raise
 
     def _invalidate_after_write(self) -> None:
         # Reject in-flight pre-write results as well as already cached context.
@@ -1040,11 +1281,12 @@ class NoldoMemProvider(MemoryProvider):
         return self._recall_context_from_snapshot(snapshot)
 
     def _recall_context_from_snapshot(self, snapshot: _RecallSnapshot) -> str:
+        deadline = time.monotonic() + self._operation_timeout("recall")
         try:
             with self._network_operation(expected_generation=snapshot.session_generation) as client:
                 if client is None:
                     return ""
-                data = client.recall(snapshot.request_body())
+                data = self._invoke_client(client, "recall", snapshot.request_body(), deadline)
             context = self._format_recall(data, max_chars=snapshot.max_chars)
             accepted = self._cache_put(snapshot, context)
             return context if accepted else ""
@@ -1194,11 +1436,10 @@ class NoldoMemProvider(MemoryProvider):
             # Results completed during the bounded drain are still valid. Once
             # shutdown finishes (or times out), it clears the client and bumps
             # the generation; session switches and reinitialization do likewise.
-            return (
-                self._initialized
-                and self._client is client
-                and expected_generation == self._session_generation
-            )
+            return self._network_result_allowed_locked(client, expected_generation)
+
+    def _network_result_allowed_locked(self, client: Any, expected_generation: int) -> bool:
+        return self._initialized and self._client is client and expected_generation == self._session_generation
 
     def _recall_snapshot(
         self,

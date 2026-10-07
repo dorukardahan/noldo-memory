@@ -153,15 +153,17 @@ async def test_exact_store_retry_avoids_another_embedding_call(client, monkeypat
     calls = []
     embed = api._embedder.embed
 
-    async def counted(text):
+    async def counted(text, **kwargs):
         calls.append(text)
-        return await embed(text)
+        return await embed(text, **kwargs)
 
     monkeypatch.setattr(api._embedder, 'embed', counted)
     payload = {'text': 'I prefer quiet evening observatory visits.', 'session_id': 'session-a'}
     first = (await client.post('/v1/store', json=payload)).json()
     again = (await client.post('/v1/store', json=payload)).json()
     assert first['id'] == again['id']
+    from tests.test_api import drain_indexing
+    await drain_indexing()
     assert len(calls) == 1
 
 
@@ -182,7 +184,12 @@ async def test_capture_duplicate_events_skip_repeat_batch_embedding(client, monk
     retry = (await client.post('/v1/capture', json={'messages': [event]})).json()
     assert first['stored'] == 1 and first['merged'] == 1
     assert retry['stored'] == 0 and retry['merged'] == 1
-    assert calls == [1]
+    assert calls == []  # Acceptance never calls the provider inline.
+    storage = api._get_storage()
+    assert storage._get_conn().execute('SELECT count(*) FROM memory_index_jobs').fetchone()[0] == 2
+    from tests.test_api import drain_indexing
+    await drain_indexing()
+    assert storage._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state='completed'").fetchone()[0] == 2
 
 
 @pytest.mark.asyncio
@@ -342,8 +349,10 @@ async def test_overlapping_recall_does_not_discard_a_healthy_semantic_result(cli
 @pytest.mark.asyncio
 async def test_overlapping_healthy_recall_does_not_admit_or_cache_an_outage(client, monkeypatch):
     import asyncio
+    import time
+    import threading
     import agent_memory.api as api
-    started, release = asyncio.Event(), asyncio.Event()
+    started, release = threading.Event(), threading.Event()
     storage = api._storage_pool.get('alpha')
     for text in ('The observatory has a violet dome.', 'The observatory opens at dusk.'):
         storage.store_memory(text, vector=[1, 0, 0, 0])
@@ -356,21 +365,20 @@ async def test_overlapping_healthy_recall_does_not_admit_or_cache_an_outage(clie
     class Reranker:
         top_k = 10
         def score(self, query, docs, ids):
+            if 'outage' in query:
+                started.set()
+                assert release.wait(2)
             return [.9] * len(docs)
-
-    async def run_score(func, query, *args):
-        if 'outage' in query:
-            started.set()
-            await release.wait()
-        return func(query, *args)
 
     monkeypatch.setattr(api._embedder, 'embed', embedding)
     monkeypatch.setattr(api, '_reranker', Reranker())
-    monkeypatch.setattr(asyncio, 'to_thread', run_score)
     query = {'agent': 'alpha', 'min_semantic_score': 0.0}
     outage = asyncio.create_task(client.post('/v1/recall', json={**query, 'query': 'outage observatory'}))
     try:
-        await asyncio.wait_for(started.wait(), 2)
+        deadline = time.monotonic() + 2
+        while not started.is_set():
+            assert time.monotonic() < deadline
+            await asyncio.sleep(.01)
         healthy = (await client.post('/v1/recall', json={**query, 'query': 'healthy observatory'})).json()
     finally:
         release.set()

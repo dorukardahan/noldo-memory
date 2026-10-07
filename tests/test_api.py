@@ -26,14 +26,31 @@ from agent_memory.config import Config
 class _StubEmbedder:
     """Minimal stub that returns a zero-vector — enough for capture/store."""
 
-    async def embed(self, text: str):
+    async def embed(self, text: str, **kwargs):
         return [0.0, 0.0, 0.0, 0.0]
 
-    async def embed_batch(self, texts):
+    async def embed_batch(self, texts, **kwargs):
         return [[0.0, 0.0, 0.0, 0.0]] * len(texts)
 
     def set_storage(self, storage):
         pass
+
+
+async def drain_indexing():
+    """Wait for actual durable jobs, not inline admission-derived work."""
+    import asyncio
+    from agent_memory.index_worker import IndexWorker
+    worker = IndexWorker(api_module._storage_pool, api_module._embedder, api_module._config)
+    await worker.start()
+    deadline = time.monotonic() + 4
+    try:
+        while any(api_module._storage_pool.get(agent)._get_conn().execute(
+                "SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]
+                for agent in api_module._storage_pool.get_all_agents()):
+            assert time.monotonic() < deadline, 'index jobs did not drain'
+            await asyncio.sleep(.01)
+    finally:
+        await worker.stop()
 
 
 class _CountingReranker:
@@ -268,7 +285,7 @@ class TestStore:
         assert row is not None
         assert row["source_session"] == "20260528_231900_ab12cd"
 
-    async def test_store_embeds_inline_when_worker_disabled(self, client):
+    async def test_store_indexes_durably_when_legacy_worker_disabled(self, client):
         api_module._config.embed_worker_enabled = False
 
         resp = await client.post("/v1/store", json={
@@ -276,6 +293,8 @@ class TestStore:
         })
 
         assert resp.status_code == 200
+        assert resp.json()['stage_states'] == {'embed': 'pending', 'graph': 'not_required'}
+        await drain_indexing()
         mid = resp.json()["id"]
         storage = api_module._storage_pool.get("main")
         row = storage._get_conn().execute(

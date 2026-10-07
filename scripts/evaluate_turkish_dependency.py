@@ -35,10 +35,10 @@ async def evaluate(repo, fixtures, block):
     vectors = {normalize_query(t): v for t, v in zip(snapshot['texts'], snapshot['vectors'])}
     class RecordedEmbedder:
         calls = 0
-        async def embed(self, text):
+        async def embed(self, text, **kwargs):
             self.calls += 1
             return vectors[normalize_query(text)]
-        async def embed_batch(self, texts):
+        async def embed_batch(self, texts, **kwargs):
             return [await self.embed(text) for text in texts]
         def set_storage(self, storage):
             pass
@@ -58,6 +58,24 @@ async def evaluate(repo, fixtures, block):
                         for row in episodes]})
                     response.raise_for_status()
                 exported = (await client.get('/v1/export', params={'agent': 'alpha'})).json()
+                # Admission receipts prove rows, not vectors. Exercise the real
+                # worker and wait for durable indexing before semantic scoring.
+                from agent_memory.index_worker import IndexWorker
+                worker = IndexWorker(api._storage_pool, api._embedder, api._config)
+                await worker.start()
+                try:
+                    deadline = time.monotonic() + 10
+                    while any(api._storage_pool.get(agent)._get_conn().execute(
+                            "SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]
+                            for agent in api._storage_pool.get_all_agents()):
+                        if time.monotonic() > deadline:
+                            raise TimeoutError('synthetic indexing did not drain')
+                        await asyncio.sleep(.01)
+                    for agent in api._storage_pool.get_all_agents():
+                        assert api._storage_pool.get(agent)._get_conn().execute(
+                            "SELECT count(*) FROM memory_index_jobs WHERE state <> 'completed'").fetchone()[0] == 0
+                finally:
+                    await worker.stop()
                 identities = {m['id']: m['evidence']['event_id'] for m in exported}
                 rows = []
                 for episode in corpus['episodes']:

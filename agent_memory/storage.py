@@ -190,7 +190,9 @@ class ForgottenSourceError(ValueError):
 class MemoryStorage:
     """SQLite-backed storage with vector search and FTS5."""
 
-    def __init__(self, db_path: Optional[str] = None, dimensions: int = 4096) -> None:
+    def __init__(self, db_path: Optional[str] = None, dimensions: int = 4096, *, deadline=None, cancelled=None) -> None:
+        self._deadline = deadline
+        self._request_valid = lambda: cancelled is None or not cancelled.is_set()
         self._transaction_depth = 0
         self._graph_source = None
         self.cache_generation = 0
@@ -204,9 +206,13 @@ class MemoryStorage:
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._conn: Optional[sqlite3.Connection] = None
-        self._ensure_schema()
-        # Schema migration for typed relations
-        self.run_migrations()
+        try:
+            self._ensure_schema()
+            # Schema migration for typed relations
+            self.run_migrations()
+        except BaseException:
+            self.close()
+            raise
 
     # ------------------------------------------------------------------
     # Connection helpers
@@ -225,10 +231,14 @@ class MemoryStorage:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
+            bounded = getattr(self, "_deadline", None) is not None
+            self._conn = sqlite3.connect(self.db_path, timeout=.01 if bounded else 5)
             self._conn.row_factory = sqlite3.Row
+            if bounded:
+                self._conn.set_progress_handler(lambda: int(
+                    time.monotonic() >= self._deadline or not self._request_valid()), 100)
             self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA busy_timeout = 5000")  # 5s wait on write contention
+            self._conn.execute("PRAGMA busy_timeout = 10" if bounded else "PRAGMA busy_timeout = 5000")
             self._conn.execute("PRAGMA foreign_keys=ON")
 
             # Adaptive PRAGMA based on DB size — avoids over-allocating
@@ -254,6 +264,26 @@ class MemoryStorage:
             _load_vec_extension(self._conn)
             self._harden_db_permissions()
         return self._conn
+
+    @classmethod
+    def open_existing(cls, db_path, dimensions, *, readonly=False, deadline=None, cancelled=None):
+        """Owned existing-shard connection: no schema, chmod, config or probe writes."""
+        obj = cls.__new__(cls)
+        obj.db_path, obj.dimensions = db_path, dimensions
+        obj._transaction_depth, obj._graph_source, obj.cache_generation = 0, None, 0
+        obj._deadline = deadline
+        obj._request_valid = lambda: cancelled is None or not cancelled.is_set()
+        mode = 'ro' if readonly else 'rw'
+        uri = Path(db_path).resolve().as_uri() + '?mode=' + mode
+        obj._conn = sqlite3.connect(uri, uri=True, timeout=.01)
+        obj._conn.row_factory = sqlite3.Row
+        obj._conn.execute('PRAGMA foreign_keys=ON')
+        if deadline is not None:
+            obj._conn.set_progress_handler(lambda: int(
+                time.monotonic() >= deadline or not obj._request_valid()), 100)
+        if not readonly:
+            _load_vec_extension(obj._conn)
+        return obj
 
     def close(self) -> None:
         if self._conn:
@@ -381,6 +411,9 @@ class MemoryStorage:
         try:
             yield conn
             if owner:
+                if not self._request_valid() or (self._deadline is not None and time.monotonic() >= self._deadline):
+                    from .operations import AdmissionError
+                    raise AdmissionError('deadline_exceeded', 504)
                 conn.commit()
         except BaseException:
             if owner:
@@ -556,9 +589,7 @@ class MemoryStorage:
         This is an explicit correction, never inferred from embedding similarity.
         A stale previous ID fails instead of creating competing current branches.
         """
-        conn = self._get_conn()
-        with conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self.transaction() as conn:
             previous = conn.execute(
                 "SELECT * FROM memories WHERE id = ? AND deleted_at IS NULL AND valid_to IS NULL",
                 (previous_id,),
@@ -593,9 +624,18 @@ class MemoryStorage:
 
     def forget_memory(self, memory_id: str) -> Dict[str, Any]:
         """Forget the revision family and return only non-content source receipts."""
-        conn = self._get_conn()
-        with conn:
-            conn.execute("BEGIN IMMEDIATE")
+        from .operations import block_linked_operations
+        blocked_jobs = set()
+
+        def block(memory):
+            for job in conn.execute(
+                    "SELECT stage FROM memory_index_jobs WHERE memory_id=? AND state!='blocked'",
+                    (memory,),
+            ).fetchall():
+                blocked_jobs.add((memory, job['stage']))
+            block_linked_operations(conn, memory)
+
+        with self.transaction() as conn:
             if not self.get_memory(memory_id):
                 return {"deleted": False, "source_keys": [], "unidentified_records": 0}
             # UNION bounds malformed imported cycles. Namespace guards also
@@ -613,10 +653,21 @@ class MemoryStorage:
             source_keys = set()
             unidentified = 0
             for row in rows:
+                block(row["id"])
                 key = self.source_key(row["source_session"])
                 if key:
                     source_keys.add(key)
                     conn.execute("INSERT OR IGNORE INTO forgotten_sources VALUES (?)", (key,))
+                    # Preserve independent assertion families, but permanently
+                    # revoke every admitted generation from this exact source
+                    # in this DB (including other namespaces). Relearn only
+                    # authorizes future admissions; it cannot undo job fencing.
+                    siblings = conn.execute(
+                        "SELECT id FROM memories WHERE source_session = ? AND id != ?",
+                        (row["source_session"], row["id"]),
+                    ).fetchall()
+                    for sibling in siblings:
+                        block(sibling["id"])
                 else:
                     unidentified += 1
                 refs = conn.execute("SELECT * FROM graph_sources WHERE memory_id = ?", (row["id"],)).fetchall()
@@ -645,6 +696,9 @@ class MemoryStorage:
                 conn.execute("DELETE FROM memories WHERE id = ?", (row["id"],))
             conn.execute("DELETE FROM search_result_cache")
             conn.execute("DELETE FROM embedding_cache")
+        from .metrics import record_job_metric
+        for _, stage in blocked_jobs:
+            record_job_metric(stage, 'blocked')
         self.cache_generation += 1
         return {"deleted": True, "source_keys": sorted(source_keys), "unidentified_records": unidentified}
 
@@ -656,7 +710,10 @@ class MemoryStorage:
         importance: Optional[float] = None,
         vector: Optional[List[float]] = None,
     ) -> bool:
-        """Update fields of an existing memory. Returns True if found."""
+        """Update fields atomically without committing an outer writer."""
+        if not self._transaction_depth:
+            with self.transaction():
+                return self.update_memory(memory_id, text, category, importance, vector)
         conn = self._get_conn()
         row = conn.execute(
             "SELECT * FROM memories WHERE id = ?", (memory_id,)
@@ -702,7 +759,7 @@ class MemoryStorage:
         conn.execute(
             f"UPDATE memories SET {', '.join(updates)} WHERE id = ?", params
         )
-        conn.commit()
+        self._commit()
         return True
 
     # ------------------------------------------------------------------
@@ -1032,6 +1089,8 @@ class MemoryStorage:
                AND category = ? AND memory_type = ? AND source = ?
                AND trust_level = ? AND source_session IS ? AND evidence = ? AND deleted_at IS NULL
                AND valid_to IS NULL
+               AND NOT EXISTS (SELECT 1 FROM memory_index_jobs j
+                               WHERE j.memory_id = memories.id AND j.state = 'blocked')
                LIMIT 1""",
             (text, namespace, category, memory_type, source, trust_level, source_session,
              json.dumps(evidence or {}, sort_keys=True, ensure_ascii=False)),
@@ -1051,6 +1110,7 @@ class MemoryStorage:
         source: str = "api",
         trust_level: str = "user",
         evidence: Optional[Dict[str, Any]] = None,
+        _dedup_observer=None,
     ) -> Dict[str, Any]:
         """Preserve distinct assertions; only collapse exact provenance-matched retries.
 
@@ -1061,10 +1121,18 @@ class MemoryStorage:
         with self.transaction():
             if self.source_is_forgotten(source_session):
                 raise ForgottenSourceError("Source session was forgotten; explicit relearning is required")
-            existing = self.find_duplicate(
-                text=text, namespace=namespace, category=category, memory_type=memory_type,
-                source=source, trust_level=trust_level, source_session=source_session, evidence=evidence,
-            )
+            dedup_started = time.monotonic()
+            try:
+                existing = self.find_duplicate(
+                    text=text, namespace=namespace, category=category, memory_type=memory_type,
+                    source=source, trust_level=trust_level, source_session=source_session, evidence=evidence,
+                )
+            finally:
+                if _dedup_observer is not None:
+                    try:
+                        _dedup_observer(time.monotonic() - dedup_started)
+                    except Exception:
+                        pass
             if existing:
                 return {"action": "merged", "id": existing, "similarity": 1.0}
             mid = self.store_memory(
@@ -1570,14 +1638,13 @@ class MemoryStorage:
         return row["results_json"] if row else None
 
     def invalidate_search_cache(self, agent: Optional[str] = None) -> None:
-        """Delete expired cache entries, or all entries for a specific agent.
+        """Delete cached searches, respecting any enclosing writer transaction.
 
         Per-agent DBs historically stored rows under agent='main'. Clear both the
         normalized agent key and legacy 'main' rows on any explicit invalidation.
         """
         self.cache_generation += 1
         conn = self._get_conn()
-        now = time.time()
         if agent:
             agent_norm = str(agent or "main").strip().lower() or "main"
             if agent_norm == "main":
@@ -1588,7 +1655,7 @@ class MemoryStorage:
                     (agent_norm, "main"),
                 )
         else:
-            conn.execute("DELETE FROM search_result_cache WHERE expires_at <= ?", (now,))
+            conn.execute("DELETE FROM search_result_cache")
         self._commit()
 
     def clear_embedding_cache(self) -> None:
@@ -1673,6 +1740,9 @@ class MemoryStorage:
         # Indexes
         conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_entity_rel_active ON temporal_facts(entity_id, relation_type, is_active)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_temporal_valid_from ON temporal_facts(valid_from)")
+        # Local import avoids the ledger/storage exception dependency cycle.
+        from .operations import migrate
+        migrate(conn)
         self._commit()
 
     def store_typed_fact(

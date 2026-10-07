@@ -10,7 +10,7 @@ import pytest
 import agent_memory.api as api
 from agent_memory.storage import MemoryStorage, ForgottenSourceError
 from agent_memory.entities import KnowledgeGraph
-from tests.test_api import _init_api_state  # noqa: F401
+from tests.test_api import _init_api_state, drain_indexing  # noqa: F401
 from httpx import AsyncClient, ASGITransport
 
 TEXT = 'Mira Sol uses Python and SQLite at the violet observatory.'
@@ -27,6 +27,7 @@ async def client(monkeypatch):
 async def test_capture_forget_replay_relearn_and_agent_isolation(client):
     payload = {'agent': 'alpha', 'messages': [{'role': 'user', 'session': 'source-a', 'text': TEXT}]}
     assert (await client.post('/v1/capture', json=payload)).json()['stored'] == 1
+    await drain_indexing()
     rows = (await client.get('/v1/export', params={'agent': 'alpha'})).json()
     storage = api._storage_pool.get('alpha')
     conn = storage._get_conn()
@@ -71,11 +72,11 @@ async def test_non_main_forget_clears_embedder_backing_cache(client, monkeypatch
     embedder.set_storage(main)  # Match the API lifespan's shared backing cache.
     calls = []
 
-    def synthetic_vectors(texts):
+    async def synthetic_vectors(texts, deadline):
         calls.extend(texts)
         return [[1., 0., 0., 0.] for _ in texts]
 
-    monkeypatch.setattr(embedder, '_call_api', synthetic_vectors)
+    monkeypatch.setattr(embedder, '_call_api_async', synthetic_vectors)
     monkeypatch.setattr(api, '_embedder', embedder)
     for agent in ('main', 'alpha', 'beta'):
         response = await client.post('/v1/store', json={
@@ -84,6 +85,9 @@ async def test_non_main_forget_clears_embedder_backing_cache(client, monkeypatch
         assert response.status_code == 200
         if agent == 'alpha':
             target = response.json()['id']
+    # Admission is cacheless/vectorless. Seed the real legacy shared cache
+    # explicitly; forgetting still has to clear it without touching siblings.
+    await embedder.embed(TEXT)
     key = embedder._cache_key(TEXT)
     assert main.get_cached_embedding(key) is not None
     assert calls == [TEXT]
@@ -113,7 +117,6 @@ async def test_non_main_forget_clears_embedder_backing_cache(client, monkeypatch
 @pytest.mark.asyncio
 @pytest.mark.parametrize('phase', ['inter_batch_sleep', 'sub_batch', 'fallback'])
 async def test_worker_does_not_embed_forgotten_queued_rows(client, monkeypatch, phase):
-    from threading import Event
     import agent_memory.embeddings as embeddings
     from agent_memory.embed_worker import EmbedWorker
 
@@ -124,39 +127,37 @@ async def test_worker_does_not_embed_forgotten_queued_rows(client, monkeypatch, 
     embedder.set_storage(main)
     monkeypatch.setattr(api, '_embedder', embedder)
     ids = []
+    storage = api._storage_pool.get('alpha')
     for text in ('The synthetic first dome is blue.', TEXT, 'The synthetic last dome is green.'):
-        response = await client.post('/v1/store', json={
-            'agent': 'alpha', 'text': text, 'session_id': f'source-{len(ids)}',
-        })
-        assert response.status_code == 200
-        ids.append(response.json()['id'])
-    entered, release = Event(), Event()
+        # This is the legacy scan lane, not new durable-job-owned admissions.
+        ids.append(storage.store_memory(text, source_session=f'source-{len(ids)}'))
+    entered, release = asyncio.Event(), asyncio.Event()
     calls = []
 
-    def synthetic_vectors(texts):
+    async def synthetic_vectors(texts, deadline):
         first = not calls
         calls.extend(texts)
         if first and phase != 'inter_batch_sleep':
             entered.set()
-            assert release.wait(5)
+            await asyncio.wait_for(release.wait(), 5)
             if phase == 'fallback':
                 raise embeddings.EmbeddingError('Synthetic batch failure')
         return [[1., 0., 0., 0.] for _ in texts]
 
-    monkeypatch.setattr(embedder, '_call_api', synthetic_vectors)
+    monkeypatch.setattr(embedder, '_call_api_async', synthetic_vectors)
     worker = EmbedWorker(api._storage_pool, embedder,
                          batch_size=1 if phase == 'inter_batch_sleep' else 3, max_sub_batch=1)
 
     async def pause_between_batches(seconds):
         if not release.is_set():
             entered.set()
-            assert await asyncio.to_thread(release.wait, 5)
+            await asyncio.wait_for(release.wait(), 5)
         return False
 
     monkeypatch.setattr(worker, '_sleep_or_stop', pause_between_batches)
     pending = asyncio.create_task(worker._process_agent('alpha'))
     try:
-        assert await asyncio.to_thread(entered.wait, 2)
+        await asyncio.wait_for(entered.wait(), 2)
         receipt = await client.request('DELETE', '/v1/forget', json={'agent': 'alpha', 'id': ids[1]})
         assert receipt.status_code == 200 and receipt.json()['deleted']
     finally:
@@ -173,7 +174,7 @@ async def test_worker_does_not_embed_forgotten_queued_rows(client, monkeypatch, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('endpoint', ['/v1/capture', '/v1/store', '/v1/import'])
+@pytest.mark.parametrize('endpoint', ['/v1/import'])
 async def test_forget_wins_against_embedding_in_flight(client, endpoint):
     old = (await client.post('/v1/store', json={'text': TEXT, 'session_id': 'source-a'})).json()['id']
     entered, release = asyncio.Event(), asyncio.Event()
@@ -206,6 +207,54 @@ async def test_forget_wins_against_embedding_in_flight(client, endpoint):
         assert response.status_code == 409
     assert (await client.get('/v1/export')).json() == []
     assert api._storage_pool.get('main')._get_conn().execute('SELECT count(*) FROM graph_sources').fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('operation', ['capture', 'store'])
+async def test_forget_fences_durable_index_embedding_in_flight(client, operation):
+    import uuid
+    from agent_memory.index_worker import IndexWorker
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class PausedEmbedder:
+        async def embed(self, text, **kwargs):
+            entered.set()
+            await release.wait()
+            return [1., 0., 0., 0.]
+
+    api._embedder = PausedEmbedder()
+    request_id = str(uuid.uuid4())
+    body = {'request_id': request_id, 'session_id': 'source-a'}
+    if operation == 'capture':
+        body['messages'] = [{'role': 'user', 'text': TEXT, 'session': 'source-a'}]
+    else:
+        body['text'] = TEXT
+    response = await client.post('/v1/' + operation, json=body)
+    assert response.status_code == 200 and response.json()['state'] == 'accepted'
+    assert not entered.is_set()  # Admission never waits for embedding.
+    rows = (await client.get('/v1/export')).json()
+    worker = IndexWorker(api._storage_pool, api._embedder, api._config)
+    await worker.start()
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        receipt = await client.request('DELETE', '/v1/forget', json={'id': rows[0]['id']})
+        assert receipt.json()['deleted']
+        release.set()
+        # Let the actual awaiting worker recheck/attempt its fenced completion.
+        await asyncio.sleep(.1)
+        status = await client.get('/v1/operations/' + request_id, params={'operation': operation})
+        assert status.json()['state'] == 'blocked'
+        assert (await client.get('/v1/export')).json() == []
+        conn = api._storage_pool.get('main')._get_conn()
+        for table in ('memory_vectors', 'graph_sources', 'memory_fts'):
+            assert conn.execute(f'SELECT count(*) FROM {table}').fetchone()[0] == 0
+        assert (await client.post('/v1/relearn-source', json={'session_id': 'source-a', 'confirm': True})).json()['cleared']
+        replay = await client.post('/v1/' + operation, json=body)
+        assert replay.json()['state'] == 'blocked'
+        assert (await client.get('/v1/export')).json() == []
+    finally:
+        release.set()
+        await worker.stop()
 
 
 def test_persistent_marker_migration_atomic_batch_and_missing_identity(tmp_path):
@@ -313,28 +362,29 @@ def test_shared_graph_support_and_independent_source_survive(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('batch', [False, True])
-async def test_embedding_cache_fences_pre_forget_requests(tmp_path, batch):
-    from threading import Event
+async def test_embedding_cache_fences_pre_forget_requests(tmp_path, batch, monkeypatch):
+    import agent_memory.embeddings as embeddings
     from agent_memory.embeddings import OpenRouterEmbeddings
-    embedder = OpenRouterEmbeddings.__new__(OpenRouterEmbeddings)
-    embedder._cache_generation = 0
-    embedder._cache, embedder._cache_order, embedder._cache_size = {}, [], 10
-    embedder._storage = MemoryStorage(str(tmp_path / 'cache.sqlite'), dimensions=4)
-    entered, release = Event(), Event()
+    from agent_memory.config import Config
+    monkeypatch.setattr(embeddings, 'load_config', lambda: Config(openrouter_api_key='', embedding_dimensions=4))
+    embedder = OpenRouterEmbeddings(api_key='synthetic', dimensions=4, cache_size=10)
+    embedder.set_storage(MemoryStorage(str(tmp_path / 'cache.sqlite'), dimensions=4))
+    entered, release = asyncio.Event(), asyncio.Event()
 
-    def synthetic_embedding(texts):
+    async def synthetic_embedding(texts, deadline):
         entered.set()
-        assert release.wait(5)
+        await asyncio.wait_for(release.wait(), 5)
         return [[0., 0., 0., 0.] for _ in texts]
 
-    embedder._call_api = synthetic_embedding
+    embedder._call_api_async = synthetic_embedding
     pending = asyncio.create_task(embedder.embed_batch([TEXT]) if batch else embedder.embed(TEXT))
-    assert await asyncio.to_thread(entered.wait, 2)
+    await asyncio.wait_for(entered.wait(), 2)
     embedder.clear_cache()
     release.set()
     await pending
     assert not embedder._cache and not embedder._cache_order
     assert embedder._storage._get_conn().execute('SELECT count(*) FROM embedding_cache').fetchone()[0] == 0
+    await embedder.aclose()
     embedder._storage.close()
 
 

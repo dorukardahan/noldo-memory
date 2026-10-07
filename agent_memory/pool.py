@@ -30,6 +30,7 @@ class StoragePool:
         self.base_dir = Path(base_dir)
         self.dimensions = dimensions
         self._storages: Dict[str, MemoryStorage] = {}
+        self._foreground = None
 
     @staticmethod
     def normalize_key(agent_id: Optional[str]) -> str:
@@ -98,6 +99,8 @@ class StoragePool:
 
     def close_all(self) -> None:
         """Close all open database connections."""
+        if self._foreground is not None:
+            self._foreground.close()
         for storage in self._storages.values():
             storage.close()
         self._storages.clear()

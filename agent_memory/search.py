@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .config import Config, load_config
-from .metrics import collector
+from .metrics import collector, record_stage_metric
 from .reranker import BaseReranker
 from .storage import MemoryStorage
 from .triggers import get_confidence_tier
@@ -559,23 +559,53 @@ class HybridSearch:
 
         async def _semantic_search() -> List[Dict[str, Any]]:
             """Embed query + vector search (async)."""
-            query_vec = await self.embedder.embed(q_norm)
-            return self.storage.search_vectors(
-                query_vec, limit=candidate_limit, min_score=0.0,
-                namespace=namespace,
-                memory_type=db_filter_type,
-                include_history=include_history, as_of=as_of, validity_time=validity_time,
-            )
+            started = time.perf_counter()
+            outcome = 'completed'
+            try:
+                query_vec = await self.embedder.embed(q_norm)
+            except asyncio.CancelledError:
+                outcome = 'cancelled'
+                raise
+            except Exception:
+                outcome = 'failed'
+                raise
+            finally:
+                record_stage_metric(operation='recall', stage='embedding',
+                                    duration_seconds=time.perf_counter() - started, outcome=outcome)
+            started = time.perf_counter()
+            outcome = 'completed'
+            try:
+                return self.storage.search_vectors(
+                    query_vec, limit=candidate_limit, min_score=0.0,
+                    namespace=namespace,
+                    memory_type=db_filter_type,
+                    include_history=include_history, as_of=as_of, validity_time=validity_time,
+                )
+            except Exception:
+                outcome = 'failed'
+                raise
+            finally:
+                record_stage_metric(operation='recall', stage='vector',
+                                    duration_seconds=time.perf_counter() - started, outcome=outcome)
 
         async def _keyword_search() -> List[Dict[str, Any]]:
             """FTS5 BM25 search (sync, runs in event loop — fast enough)."""
-            return self.storage.search_text(
-                q_norm,
-                candidate_limit,
-                namespace,
-                memory_type=db_filter_type,
-                include_history=include_history, as_of=as_of, validity_time=validity_time,
-            )
+            started = time.perf_counter()
+            outcome = 'completed'
+            try:
+                return self.storage.search_text(
+                    q_norm,
+                    candidate_limit,
+                    namespace,
+                    memory_type=db_filter_type,
+                    include_history=include_history, as_of=as_of, validity_time=validity_time,
+                )
+            except Exception:
+                outcome = 'failed'
+                raise
+            finally:
+                record_stage_metric(operation='recall', stage='bm25',
+                                    duration_seconds=time.perf_counter() - started, outcome=outcome)
 
         async def _kg_entity_search() -> List[Dict[str, Any]]:
             """Use KG entity matches to pull extra memory candidates.
@@ -974,6 +1004,48 @@ class HybridSearch:
             )
             results.append(sr)
 
+        async def _rerank_candidates(cands):
+            started = time.perf_counter()
+            outcome = 'completed'
+            try:
+                rerank_map: Dict[str, float] = {}
+                rerank_ranked: List[str] = []
+                used_cross_encoder = False
+                if self.reranker is not None:
+                    ce_scores = await asyncio.to_thread(
+                        self.reranker.score,
+                        q_norm,
+                        [r.text for r in cands],
+                        [f"{agent}:{r.id}" for r in cands],
+                    )
+                    if ce_scores and len(ce_scores) == len(cands):
+                        used_cross_encoder = True
+                        for result, score in zip(cands, ce_scores):
+                            rerank_map[result.id] = float(score)
+                        rerank_ranked = [
+                            mid for mid, _ in sorted(
+                                rerank_map.items(), key=lambda item: item[1], reverse=True
+                            )
+                        ]
+                if not rerank_ranked:
+                    overlap_map = {r.id: _lexical_overlap(q_norm, r.text) for r in cands}
+                    rerank_map = {key: float(value) for key, value in overlap_map.items()}
+                    rerank_ranked = [
+                        mid for mid, _ in sorted(
+                            overlap_map.items(), key=lambda item: item[1], reverse=True
+                        )
+                    ]
+                return rerank_map, rerank_ranked, used_cross_encoder
+            except asyncio.CancelledError:
+                outcome = 'cancelled'
+                raise
+            except Exception:
+                outcome = 'failed'
+                raise
+            finally:
+                record_stage_metric(operation='recall', stage='rerank',
+                                    duration_seconds=time.perf_counter() - started, outcome=outcome)
+
         # Cross-encoder reranker on top-N candidates.
         # Fallback: lightweight lexical overlap if cross-encoder is unavailable.
         # CPU-safe gating: rerank only when ranking is ambiguous.
@@ -1001,36 +1073,7 @@ class HybridSearch:
                         top_n = min(len(results), self.reranker.top_k)
                     cands = results[:top_n]
 
-                    rerank_map: Dict[str, float] = {}
-                    rerank_ranked: List[str] = []
-                    used_cross_encoder = False
-
-                    if self.reranker is not None:
-                        ce_scores = await asyncio.to_thread(
-                            self.reranker.score,
-                            q_norm,
-                            [r.text for r in cands],
-                            [f"{agent}:{r.id}" for r in cands],
-                        )
-                        if ce_scores and len(ce_scores) == len(cands):
-                            used_cross_encoder = True
-                            for r, s in zip(cands, ce_scores):
-                                rerank_map[r.id] = float(s)
-                            rerank_ranked = [
-                                mid for mid, _ in sorted(
-                                    rerank_map.items(), key=lambda x: x[1], reverse=True
-                                )
-                            ]
-
-                    if not rerank_ranked:
-                        # Fallback lexical overlap signal
-                        overlap_map = {r.id: _lexical_overlap(q_norm, r.text) for r in cands}
-                        rerank_map = {k: float(v) for k, v in overlap_map.items()}
-                        rerank_ranked = [
-                            mid for mid, _ in sorted(
-                                overlap_map.items(), key=lambda x: x[1], reverse=True
-                            )
-                        ]
+                    rerank_map, rerank_ranked, used_cross_encoder = await _rerank_candidates(cands)
 
                     # Combine original ranking + reranker ranking via RRF
                     w_rerank = self.rerank_weight
