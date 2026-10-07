@@ -138,8 +138,14 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
                 raise AdmissionError('deadline_exceeded', 504)
             try:
                 if revision is not None:
-                    result = storage.revise_memory(revision['supersedes'], text=item['text'], vector=None,
-                        valid_from=revision['valid_from'], source_session=item.get('source_session'), evidence=item.get('evidence'))
+                    try:
+                        result = storage.revise_memory(
+                            revision['supersedes'], text=item['text'], vector=None,
+                            valid_from=revision['valid_from'],
+                            source_session=item.get('source_session'), evidence=item.get('evidence'),
+                        )
+                    except ValueError:
+                        raise AdmissionError('revision_conflict', 409) from None
                     result['action'] = 'inserted'
                 else:
                     result = storage.merge_or_store(

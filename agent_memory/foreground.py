@@ -109,7 +109,7 @@ class Foreground:
         future.add_done_callback(drained)
         try:
             return await asyncio.wait_for(asyncio.shield(future), max(.001, deadline - time.monotonic()))
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             event.set()
             raise operations.AdmissionError('deadline_exceeded', 504) from None
         except asyncio.CancelledError:

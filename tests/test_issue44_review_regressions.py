@@ -158,3 +158,106 @@ async def test_storage_busy_rolls_back_rows_jobs_and_operation(client, monkeypat
     assert storage.stats()["total_memories"] == 0
     assert storage._get_conn().execute("SELECT count(*) FROM memory_index_jobs").fetchone()[0] == 0
     assert storage._get_conn().execute("SELECT count(*) FROM memory_operations").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_python310_foreground_timeout_maps_to_bounded_deadline(tmp_path, monkeypatch):
+    from agent_memory import foreground as foreground_module
+    from agent_memory.foreground import Foreground
+    from agent_memory.pool import StoragePool
+
+    class Python310AsyncioTimeout(Exception):
+        pass
+
+    async def raise_compat_timeout(awaitable, timeout):
+        awaitable.cancel()
+        raise Python310AsyncioTimeout
+
+    pool = StoragePool(str(tmp_path), dimensions=4)
+    foreground = Foreground(pool)
+    monkeypatch.setattr(foreground_module.asyncio, "TimeoutError", Python310AsyncioTimeout)
+    monkeypatch.setattr(foreground_module.asyncio, "wait_for", raise_compat_timeout)
+    try:
+        with pytest.raises(operations.AdmissionError, match="deadline_exceeded") as exc:
+            await foreground.run("main", time.monotonic() + 1, lambda storage: None)
+        assert exc.value.status == 504
+    finally:
+        await foreground.stop()
+        pool.close_all()
+
+
+@pytest.mark.asyncio
+async def test_python310_index_timeout_keeps_deadline_error_code(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_memory import index_worker as worker_module
+
+    class Python310AsyncioTimeout(Exception):
+        pass
+
+    class TimeoutEmbedder:
+        async def embed(self, text, **kwargs):
+            raise Python310AsyncioTimeout
+
+    pool = pool_module.StoragePool(str(tmp_path), dimensions=4)
+    task = worker_module.IndexWorker(
+        pool,
+        TimeoutEmbedder(),
+        SimpleNamespace(index_job_timeout_seconds=1, index_job_max_attempts=3),
+    )
+    failures = []
+
+    async def offload(fn, *args):
+        if fn.__name__ == "_memory":
+            return {"text": "Synthetic timeout assertion", "source_session": "synthetic"}
+        if fn.__name__ == "_fail":
+            failures.append(args[1])
+            return True
+        raise AssertionError(fn.__name__)
+
+    task._offload = offload
+    monkeypatch.setattr(worker_module.asyncio, "TimeoutError", Python310AsyncioTimeout)
+    try:
+        await task._execute({"stage": "embed", "memory_id": "synthetic", "attempts": 1})
+    finally:
+        pool.close_all()
+    assert failures == ["index_deadline_exceeded"]
+
+
+@pytest.mark.asyncio
+async def test_python310_recall_timeout_maps_to_504(client, monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    class Python310AsyncioTimeout(Exception):
+        pass
+
+    async def raise_compat_timeout(*args, **kwargs):
+        raise Python310AsyncioTimeout
+
+    monkeypatch.setattr(api.asyncio, "TimeoutError", Python310AsyncioTimeout)
+    monkeypatch.setattr(api, "_foreground", raise_compat_timeout)
+    request = Request({"type": "http", "method": "POST", "path": "/v1/recall", "headers": []})
+    request.state.allowed_agent = None
+    with pytest.raises(HTTPException) as exc:
+        await api.recall(api.RecallRequest(query="Synthetic timeout query"), request)
+    assert exc.value.status_code == 504
+    assert exc.value.detail == "recall_deadline_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_revision_validity_conflict_remains_http_409(client):
+    storage = api._get_storage()
+    previous_id = storage.store_memory(
+        "The synthetic observatory opens after midnight.",
+        valid_from=2_000.0,
+    )
+    response = await client.post(
+        "/v1/store",
+        json={
+            "text": "The synthetic observatory now opens before midnight.",
+            "supersedes": previous_id,
+            "valid_from": 1_000.0,
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert api._get_storage().stats()["total_memories"] == 1

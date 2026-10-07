@@ -273,7 +273,7 @@ class IndexWorker:
                 record_stage_metric(operation='index', stage=stage,
                                     duration_seconds=time.monotonic() - started, outcome='cancelled')
             raise
-        except (TimeoutError, operations.AdmissionError):
+        except (TimeoutError, asyncio.TimeoutError, operations.AdmissionError):
             await self._offload(self._fail, job, 'index_deadline_exceeded',
                                 stage, started, 'timeout')
         except Exception:

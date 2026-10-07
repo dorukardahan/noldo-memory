@@ -650,7 +650,7 @@ async def recall(req: RecallRequest, request: Request) -> Dict[str, Any]:
     except HTTPException as exc:
         outcome = 'timeout' if exc.status_code == 504 else 'rejected' if exc.status_code < 500 else 'failed'
         raise
-    except (TimeoutError, operations.AdmissionError):
+    except (TimeoutError, asyncio.TimeoutError, operations.AdmissionError):
         outcome = 'timeout'
         raise HTTPException(504, 'recall_deadline_exceeded') from None
     except sqlite3.OperationalError:
