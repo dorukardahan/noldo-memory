@@ -95,12 +95,13 @@ def public_status(storage, namespace, operation, request_id):
     indexing = next((state for state in ('blocked','failed','running','pending') if state in stages.values()),
                     'completed' if 'completed' in stages.values() else 'not_required')
     state = ('blocked' if row['state'] == 'blocked' or indexing == 'blocked' else
-             'failed' if indexing == 'failed' else
+             'failed' if row['state'] == 'failed' or indexing == 'failed' else
              'accepted' if indexing in {'pending','running'} else 'completed')
     counts = {key: int(receipt.get(key, 0)) for key in ('stored','merged','blocked','total')}
     return {'request_id': request_id, 'operation': operation, 'state': state,
             'durable': bool(row['durable']), 'indexing_state': indexing, 'stage_states': stages,
-            'error_code': 'source_blocked' if state == 'blocked' else 'indexing_failed' if state == 'failed' else row['error_code'],
+            'error_code': ('source_blocked' if state == 'blocked' else
+                           row['error_code'] or ('indexing_failed' if state == 'failed' else None)),
             'counts': counts, 'timing': {'elapsed_seconds': max(0.0, row['updated_at'] - row['created_at'])}}
 
 
@@ -119,6 +120,14 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
                 raise AdmissionError('request_conflict', 409)
             receipt = json.loads(previous['receipt_json'])
             return {**receipt, **public_status(storage, *key)}
+        # Replay/conflict/blocked state belongs to the stable ledger identity.
+        # Mutable predecessor checks apply only to a genuinely new admission.
+        if revision is not None:
+            predecessor = storage.get_memory(revision['supersedes'])
+            if predecessor is None or predecessor['namespace'] != namespace:
+                raise AdmissionError('previous_memory_not_found', 404)
+            if predecessor.get('valid_to') is not None:
+                raise AdmissionError('previous_memory_superseded', 409)
         stored = merged = blocked = 0
         ids = []
         required = ['embed'] if embed_required else []

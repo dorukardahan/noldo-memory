@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
+from concurrent.futures import Future
 from contextvars import ContextVar
 
 from . import operations
@@ -18,17 +20,58 @@ class ProviderBridge:
         self.embedder, self.loop, self.deadline = embedder, loop, deadline
 
     async def embed(self, text):
+        if self.deadline <= time.monotonic():
+            raise TimeoutError
+        if self.loop.is_closed():
+            raise RuntimeError('provider_owner_closed')
+        completion = Future()
+        cancelled = threading.Event()
+        task = None
+
         async def call():
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError
-            return await asyncio.wait_for(self.embedder.embed(text), remaining)
-        future = asyncio.run_coroutine_threadsafe(call(), self.loop)
+            return await self.embedder.embed(text)
+
+        def finished(done):
+            # This acknowledgement means the real provider task has drained,
+            # not merely that its cross-thread proxy was cancelled.
+            try:
+                result = done.result()
+            except BaseException as exc:
+                completion.set_exception(exc)
+            else:
+                completion.set_result(result)
+
+        def start():
+            nonlocal task
+            if cancelled.is_set() or self.deadline <= time.monotonic():
+                completion.set_exception(TimeoutError())
+                return
+            # Allocate the coroutine on its owning loop, never before a queued
+            # callback which may be abandoned during loop shutdown.
+            task = self.loop.create_task(call())
+            task.add_done_callback(finished)
+
+        def cancel():
+            if task is not None and not task.done():
+                task.cancel()
+
+        self.loop.call_soon_threadsafe(start)
+        future = asyncio.wrap_future(completion)
         try:
-            return await asyncio.wait_for(asyncio.wrap_future(future),
+            return await asyncio.wait_for(asyncio.shield(future),
                 max(.001, self.deadline - time.monotonic()))
         except BaseException:
-            future.cancel()
+            cancelled.set()
+            self.loop.call_soon_threadsafe(cancel)
+            # Preserve foreground admission until cancellation cleanup really
+            # finishes. Timeout of the HTTP caller cannot recycle this slot.
+            try:
+                await asyncio.shield(future)
+            except BaseException:
+                pass
             raise
 
 

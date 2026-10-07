@@ -82,8 +82,14 @@ class IndexWorker:
         """Called ONLY by our one executor thread, never pool.get()."""
         if self._agent != agent:
             self._close()
-            self._storage = MemoryStorage(self.pool._db_path(agent), self.pool.dimensions)
+            self._storage = MemoryStorage.open_existing(self.pool._db_path(agent), self.pool.dimensions)
             self._storage._get_conn().execute('PRAGMA busy_timeout=50')
+            if not self._storage._get_conn().execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='memory_index_jobs'").fetchone():
+                # A cold foreground admission may still be creating this DB.
+                # Never bootstrap/backfill corpus tables from the index lane.
+                self._close()
+                return None
             self._agent = agent
         return self._storage
 
@@ -104,6 +110,8 @@ class IndexWorker:
             if not Path(self.pool._db_path(agent)).is_file():
                 continue
             storage = self._open(agent)
+            if storage is None:
+                continue
             job = operations.claim(storage, budget=self.budget, max_attempts=self.max_attempts)
             if job is not None:
                 self._cursor = (index + 1) % len(agents)

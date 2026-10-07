@@ -1273,11 +1273,6 @@ def _store_owned(storage, req, deadline):
     if req.supersedes:
         if req.evidence and (req.evidence.assertion != 'reported' or req.evidence.role != 'user'):
             raise HTTPException(422, 'invalid_revision_evidence')
-        previous = storage.get_memory(req.supersedes)
-        if previous is None or previous['namespace'] != req.namespace:
-            raise HTTPException(404, 'previous_memory_not_found')
-        if previous.get('valid_to') is not None:
-            raise HTTPException(409, 'previous_memory_superseded')
         revision = {'supersedes': req.supersedes,
                     'valid_from': req.valid_from if req.valid_from is not None else time.time()}
     elif req.valid_from is not None:

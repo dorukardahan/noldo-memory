@@ -406,7 +406,21 @@ class MemoryStorage:
         conn = self._get_conn()
         owner = not conn.in_transaction
         if owner:
-            conn.execute("BEGIN IMMEDIATE")
+            if self._deadline is None:
+                conn.execute("BEGIN IMMEDIATE")
+            else:
+                from .operations import AdmissionError
+                remaining = self._deadline - time.monotonic()
+                if remaining <= 0 or not self._request_valid():
+                    raise AdmissionError('deadline_exceeded', 504)
+                previous_timeout = conn.execute('PRAGMA busy_timeout').fetchone()[0]
+                try:
+                    # Only writer admission may wait: one attempt bounded by
+                    # the existing total deadline, on this owner thread.
+                    conn.execute(f'PRAGMA busy_timeout={max(1, int(remaining * 1000))}')
+                    conn.execute("BEGIN IMMEDIATE")
+                finally:
+                    conn.execute(f'PRAGMA busy_timeout={previous_timeout}')
         self._transaction_depth += 1
         try:
             yield conn

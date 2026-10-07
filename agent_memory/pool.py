@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -31,6 +32,7 @@ class StoragePool:
         self.dimensions = dimensions
         self._storages: Dict[str, MemoryStorage] = {}
         self._foreground = None
+        self._lock = threading.RLock()
 
     @staticmethod
     def normalize_key(agent_id: Optional[str]) -> str:
@@ -57,14 +59,17 @@ class StoragePool:
     def get(self, agent_id: Optional[str] = None) -> MemoryStorage:
         """Get or create a MemoryStorage for the given agent."""
         key = self.normalize_key(agent_id)
-        if key not in self._storages:
-            db_path = self._db_path(key)
-            self._storages[key] = MemoryStorage(
-                db_path=db_path,
-                dimensions=self.dimensions,
-            )
-            logger.info("StoragePool: opened %s -> %s", key, db_path)
-        return self._storages[key]
+        # Serialize cache lifecycle, not SQLite use: pooled connections remain
+        # thread-affine; foreground/index lanes open their own connections.
+        with self._lock:
+            if key not in self._storages:
+                db_path = self._db_path(key)
+                self._storages[key] = MemoryStorage(
+                    db_path=db_path,
+                    dimensions=self.dimensions,
+                )
+                logger.info("StoragePool: opened %s -> %s", key, db_path)
+            return self._storages[key]
 
     def get_all_agents(self) -> List[str]:
         """Discover all agent IDs from existing database files.
@@ -99,8 +104,9 @@ class StoragePool:
 
     def close_all(self) -> None:
         """Close all open database connections."""
-        if self._foreground is not None:
-            self._foreground.close()
-        for storage in self._storages.values():
-            storage.close()
-        self._storages.clear()
+        with self._lock:
+            if self._foreground is not None:
+                self._foreground.close()
+            for storage in self._storages.values():
+                storage.close()
+            self._storages.clear()

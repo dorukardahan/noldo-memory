@@ -24,6 +24,7 @@ class Foreground:
         self.active = {}
         self.writes = 0
         self.closed = False
+        self.bootstrap_lock = threading.Lock()
 
     def close(self):
         self.closed = True
@@ -62,17 +63,30 @@ class Foreground:
                                         duration_seconds=time.monotonic() - queued_at)
                 if event.is_set() or not valid() or time.monotonic() >= deadline:
                     raise operations.AdmissionError('deadline_exceeded', 504)
-                if Path(path).is_file():
-                    storage = MemoryStorage.open_existing(path, dimensions, readonly=not write,
+                if write:
+                    # Serialize schema visibility, not the acceptance work.
+                    # No sibling opens a partially bootstrapped writer shard.
+                    if not self.bootstrap_lock.acquire(timeout=max(.001, deadline - time.monotonic())):
+                        raise operations.AdmissionError('deadline_exceeded', 504)
+                    try:
+                        if event.is_set() or not valid() or time.monotonic() >= deadline:
+                            raise operations.AdmissionError('deadline_exceeded', 504)
+                        if Path(path).is_file():
+                            storage = MemoryStorage.open_existing(path, dimensions,
+                                                                  deadline=deadline, cancelled=event)
+                            if not storage._get_conn().execute(
+                                    "SELECT 1 FROM sqlite_master WHERE name='memory_operations'").fetchone():
+                                storage.close()
+                                storage = None
+                        if storage is None:
+                            storage = MemoryStorage(path, dimensions, deadline=deadline, cancelled=event)
+                    finally:
+                        self.bootstrap_lock.release()
+                elif Path(path).is_file():
+                    storage = MemoryStorage.open_existing(path, dimensions, readonly=True,
                                                           deadline=deadline, cancelled=event)
-                    if write and not storage._get_conn().execute(
-                        "SELECT 1 FROM sqlite_master WHERE name='memory_operations'").fetchone():
-                        storage.close()
-                        storage = None
-                if storage is None:
-                    if not write:
-                        raise operations.AdmissionError('operation_not_found', 404)
-                    storage = MemoryStorage(path, dimensions, deadline=deadline, cancelled=event)
+                else:
+                    raise operations.AdmissionError('operation_not_found', 404)
                 storage._request_valid = lambda: not event.is_set() and not self.closed and valid()
                 with operations.sql_budget(storage, deadline):
                     if not storage._request_valid():

@@ -32,13 +32,18 @@ from agent_memory.config import Config
 from agent_memory.index_worker import IndexWorker
 from agent_memory.pool import StoragePool
 from agent_memory.search import SearchWeights
+from agent_memory.storage import MemoryStorage
 
 
 def utc():
     return datetime.now(timezone.utc).isoformat()
 
 
-def fixed_error_code(status):
+def fixed_error_code(status, body=None):
+    code = (body or {}).get('error')
+    if code in {'foreground_full', 'queue_full', 'deadline_exceeded', 'storage_busy',
+                'request_conflict', 'source_blocked', 'request_invalid'}:
+        return code
     return {
         413: 'payload_too_large',
         422: 'validation_error',
@@ -207,6 +212,8 @@ async def measure(samples):
                 api._start_time = time.time()
                 api.app.middleware_stack = api.app.build_middleware_stack()
                 ids = []
+                observer = None
+                rejections = []
                 worker = IndexWorker(pool, embedder, api._config)
                 async with AsyncClient(transport=ASGITransport(app=api.app), base_url='http://synthetic') as client:
                     if operation in {'status', 'recall'}:
@@ -215,7 +222,8 @@ async def measure(samples):
                         ids.append(seed.json()['request_id'])
                         await worker.start()
                         until = time.monotonic() + 5
-                        while pool.get()._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]:
+                        observer = MemoryStorage.open_existing(pool._db_path('main'), 4, readonly=True)
+                        while observer._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]:
                             if time.monotonic() > until:
                                 raise TimeoutError('seed did not index')
                             await asyncio.sleep(.005)
@@ -224,7 +232,7 @@ async def measure(samples):
                     semaphore = asyncio.Semaphore(concurrency)
                     peak_active = 0
                     async def sample(i):
-                        nonlocal peak_active
+                        nonlocal peak_active, observer
                         async with semaphore:
                             identity = str(uuid.uuid4())
                             start = time.monotonic()
@@ -239,20 +247,33 @@ async def measure(samples):
                             else:
                                 response = await client.get('/v1/operations/' + ids[0], params={'operation': 'store'})
                             elapsed = time.monotonic() - start
-                            conn = pool.get()._get_conn()
-                            queue = conn.execute("SELECT count(*) FROM memory_index_jobs WHERE state='pending'").fetchone()[0]
-                            running = conn.execute("SELECT count(*) FROM memory_index_jobs WHERE state='running'").fetchone()[0]
+                            if observer is None and response.status_code == 200:
+                                candidate = MemoryStorage.open_existing(pool._db_path('main'), 4, readonly=True)
+                                if candidate._get_conn().execute(
+                                        "SELECT 1 FROM sqlite_master WHERE name='memory_index_jobs'").fetchone():
+                                    observer = candidate
+                                else:
+                                    candidate.close()
+                            # Before the cold admission commits its schema,
+                            # no durable job can exist; rejected calls must not
+                            # initialize/migrate a shard merely to measure it.
+                            conn = observer._get_conn() if observer is not None else None
+                            queue = conn.execute("SELECT count(*) FROM memory_index_jobs WHERE state='pending'").fetchone()[0] if conn is not None else 0
+                            running = conn.execute("SELECT count(*) FROM memory_index_jobs WHERE state='running'").fetchone()[0] if conn is not None else 0
                             active = len(pool._foreground.active) if pool._foreground else 0
                             peak_active = max(peak_active, active)
-                            response.json()
+                            body = response.json()
                             # No identity, text, session, source, hash, URL or path in samples.
                             output.append(dict(run=run_name, operation=operation, concurrency=concurrency, sample=i,
                                 cold_warm='cold' if i < concurrency else 'warm', observed_utc=utc(),
                                 elapsed_seconds=elapsed, budget_seconds=budget, http_status=response.status_code,
-                                error_code=(fixed_error_code(response.status_code)
+                                error_code=(fixed_error_code(response.status_code, body)
                                             if response.status_code != 200 else ''),
+                                rejected_no_mutation=None,
                                 queue_depth=queue, index_inflight=running, foreground_inflight=active,
                                 provider_inflight=embedder.inflight))
+                            if operation in {'capture', 'store'} and response.status_code != 200:
+                                rejections.append((identity, f'synthetic-{i}', output[-1]))
                     try:
                         await asyncio.gather(*(sample(i) for i in range(samples)))
                         drain_start = time.monotonic()
@@ -260,12 +281,21 @@ async def measure(samples):
                         # this is a measured drain window, NOT a raised HTTP cap.
                         until = drain_start + 45
                         drain_expired = False
-                        while pool.get()._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]:
+                        while observer._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state IN ('pending','running')").fetchone()[0]:
                             if time.monotonic() > until:
                                 drain_expired = True
                                 break
                             await asyncio.sleep(.005)
-                        failed = pool.get()._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state='failed'").fetchone()[0]
+                        failed = observer._get_conn().execute("SELECT count(*) FROM memory_index_jobs WHERE state='failed'").fetchone()[0]
+                        conn = observer._get_conn()
+                        for identity, source_session, sample_row in rejections:
+                            receipt = conn.execute(
+                                'SELECT 1 FROM memory_operations WHERE request_id=?', (identity,)
+                            ).fetchone()
+                            memory = conn.execute(
+                                'SELECT 1 FROM memories WHERE source_session=?', (source_session,)
+                            ).fetchone()
+                            sample_row['rejected_no_mutation'] = not receipt and not memory
                         drains.append(dict(run=run_name, operation=operation, concurrency=concurrency,
                             drain_seconds=time.monotonic() - drain_start, failed_jobs=failed,
                             observation_expired=drain_expired,
@@ -274,6 +304,8 @@ async def measure(samples):
                         await worker.stop()
                         if pool._foreground:
                             await pool._foreground.stop()
+                        if observer is not None:
+                            observer.close()
                         pool.close_all()
     upper_envelope = await measure_upper_envelope()
     summary = dict(window_start_utc=started, window_end_utc=utc(),
@@ -309,6 +341,17 @@ async def measure(samples):
     return output, summary
 
 
+def acceptance_failed(rows, report):
+    """Normal baselines must all accept; upper overload is not throughput."""
+    return (any(d['successes'] < 100 or d['admitted_over_budget']
+                for d in report['distributions'].values())
+            or any(r['http_status'] != 200 for r in rows if r['concurrency'] == 1)
+            or any(r['http_status'] not in {200, 429} for r in rows if r['concurrency'] > 1)
+            or any(r.get('rejected_no_mutation') is False for r in rows)
+            or any(d['observation_expired'] or d['failed_jobs'] for d in report['backlog'])
+            or not report['upper_envelope']['passed'])
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -324,7 +367,4 @@ if __name__ == '__main__':
         writer.writerows(rows)
     (args.output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report['distributions'], indent=2))
-    raise SystemExit(int(any(d['successes'] < 100 or d['admitted_over_budget']
-                             for d in report['distributions'].values())
-                         or any(d['observation_expired'] or d['failed_jobs'] for d in report['backlog'])
-                         or not report['upper_envelope']['passed']))
+    raise SystemExit(int(acceptance_failed(rows, report)))
