@@ -130,6 +130,7 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
                 raise AdmissionError('previous_memory_superseded', 409)
         stored = merged = blocked = 0
         ids = []
+        revision_receipt = {}
         required = ['embed'] if embed_required else []
         if graph_required:
             required.append('graph')
@@ -148,7 +149,7 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
                         raise
                     except ValueError:
                         raise AdmissionError('revision_conflict', 409) from None
-                    result['action'] = 'inserted'
+                    revision_receipt = {field: result[field] for field in ('action', 'supersedes')}
                 else:
                     result = storage.merge_or_store(
                         vector=None,
@@ -179,6 +180,9 @@ def accept(storage, *, namespace, operation, request_id, payload, rows, total, e
         receipt = dict(counts)
         if operation == 'store' and ids:
             receipt.update(id=ids[0], stored=bool(stored), merged=bool(merged), similarity=1.0 if merged else None)
+            # Preserve the existing store response; status remains an explicit,
+            # identifier-free projection and does not expose lineage metadata.
+            receipt.update(revision_receipt)
         conn.execute('INSERT INTO memory_operations VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                      (*key, fp, 'blocked' if blocked else 'accepted', 1,
                       json.dumps(receipt, separators=(',', ':')), json.dumps(list(dict.fromkeys(ids))),

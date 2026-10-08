@@ -40,6 +40,57 @@ async def test_identical_revision_request_id_replay_is_idempotent(client):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("explicit_identity", [False, True])
+async def test_revision_receipt_preserves_legacy_metadata_and_private_status(client, explicit_identity):
+    original = await client.post(
+        "/v1/store", json={"text": "The synthetic lineage begins with a copper dome."},
+    )
+    previous_id = original.json()["id"]
+    request = {"text": "The synthetic lineage now has a jade dome.",
+               "supersedes": previous_id, "valid_from": 1234.0}
+    if explicit_identity:
+        request["request_id"] = str(uuid.uuid4())
+    first = await client.post("/v1/store", json=request)
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["action"] == "inserted"
+    assert body["supersedes"] == previous_id
+    assert body["stored"] is True and body["merged"] is False
+    replacement = api._get_storage().get_memory(body["id"])
+    assert replacement is not None and replacement["supersedes"] == previous_id
+    key = body["request_id"]
+    persisted = api._get_storage()._get_conn().execute(
+        "SELECT receipt_json FROM memory_operations WHERE request_id=?", (key,),
+    ).fetchone()
+    saved = json.loads(persisted[0])
+    assert saved["action"] == "inserted" and saved["supersedes"] == previous_id
+    request["request_id"] = key
+    replay = await client.post("/v1/store", json=request)
+    assert replay.status_code == 200, replay.text
+    assert all(replay.json()[field] == body[field]
+               for field in ("action", "supersedes", "id", "stored", "merged"))
+    status = await client.get(f"/v1/operations/{key}", params={"operation": "store"})
+    assert status.status_code == 200, status.text
+    assert not ({"id", "supersedes", "action"} & status.json().keys())
+    assert previous_id not in status.text and body["id"] not in status.text
+    conflict = await client.post("/v1/store", json={**request, "text": "A changed lineage payload."})
+    assert conflict.status_code == 409
+    api._get_storage().forget_memory(body["id"])
+    blocked_replay = await client.post("/v1/store", json=request)
+    assert blocked_replay.status_code == 200, blocked_replay.text
+    assert blocked_replay.json()["state"] == "blocked"
+    assert blocked_replay.json()["action"] == "inserted"
+    assert blocked_replay.json()["supersedes"] == previous_id
+
+
+@pytest.mark.asyncio
+async def test_plain_store_receipt_does_not_gain_revision_metadata(client):
+    result = await client.post("/v1/store", json={"text": "An independent synthetic assertion."})
+    assert result.status_code == 200, result.text
+    assert not ({"action", "supersedes"} & result.json().keys())
+
+
+@pytest.mark.asyncio
 async def test_forgotten_revision_identity_replay_stays_blocked(client):
     original = await client.post(
         "/v1/store",
