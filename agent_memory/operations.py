@@ -74,7 +74,7 @@ def fingerprint(payload):
 def _jobs(conn, ids):
     if not ids:
         return []
-    return conn.execute('SELECT stage,state FROM memory_index_jobs WHERE memory_id IN ('
+    return conn.execute('SELECT stage,state,updated_at FROM memory_index_jobs WHERE memory_id IN ('
                         + ','.join('?' for _ in ids) + ')', ids).fetchall()
 
 
@@ -98,11 +98,12 @@ def public_status(storage, namespace, operation, request_id):
              'failed' if row['state'] == 'failed' or indexing == 'failed' else
              'accepted' if indexing in {'pending','running'} else 'completed')
     counts = {key: int(receipt.get(key, 0)) for key in ('stored','merged','blocked','total')}
+    latest_update = max([row['updated_at'], *(job['updated_at'] for job in jobs)])
     return {'request_id': request_id, 'operation': operation, 'state': state,
             'durable': bool(row['durable']), 'indexing_state': indexing, 'stage_states': stages,
             'error_code': ('source_blocked' if state == 'blocked' else
                            row['error_code'] or ('indexing_failed' if state == 'failed' else None)),
-            'counts': counts, 'timing': {'elapsed_seconds': max(0.0, row['updated_at'] - row['created_at'])}}
+            'counts': counts, 'timing': {'elapsed_seconds': max(0.0, latest_update - row['created_at'])}}
 
 
 def accept(storage, *, namespace, operation, request_id, payload, rows, total, embed_required,

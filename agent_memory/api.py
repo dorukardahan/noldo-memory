@@ -961,7 +961,7 @@ async def _foreground(agent, request, deadline, fn, *, write=False, invalidate=T
         # Shared event-loop objects never cross into a worker thread.
         existing = pool._storages.get(key)
         if existing is not None:
-            existing.cache_generation += 1
+            existing._advance_search_generation()
     return result
 
 

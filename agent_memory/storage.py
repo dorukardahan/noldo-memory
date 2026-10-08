@@ -16,14 +16,35 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 import uuid
+import weakref
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+class _SearchGeneration:
+    def __init__(self):
+        self.value = 0
+
+
+_SEARCH_GENERATIONS = weakref.WeakValueDictionary()
+_SEARCH_GENERATIONS_LOCK = threading.RLock()
+
+
+def _shared_search_generation(db_path):
+    key = str(Path(db_path).resolve())
+    with _SEARCH_GENERATIONS_LOCK:
+        state = _SEARCH_GENERATIONS.get(key)
+        if state is None:
+            state = _SearchGeneration()
+            _SEARCH_GENERATIONS[key] = state
+        return state
 
 SQLITE_VEC_MAX_K = 4096
 
@@ -195,11 +216,11 @@ class MemoryStorage:
         self._request_valid = lambda: cancelled is None or not cancelled.is_set()
         self._transaction_depth = 0
         self._graph_source = None
-        self.cache_generation = 0
         from .config import load_config
 
         cfg = load_config()
         self.db_path = db_path or cfg.db_path
+        self._search_generation = _shared_search_generation(self.db_path)
         self.dimensions = dimensions or cfg.embedding_dimensions
 
         # Ensure parent directory exists
@@ -270,7 +291,8 @@ class MemoryStorage:
         """Owned existing-shard connection: no schema, chmod, config or probe writes."""
         obj = cls.__new__(cls)
         obj.db_path, obj.dimensions = db_path, dimensions
-        obj._transaction_depth, obj._graph_source, obj.cache_generation = 0, None, 0
+        obj._transaction_depth, obj._graph_source = 0, None
+        obj._search_generation = _shared_search_generation(db_path)
         obj._deadline = deadline
         obj._request_valid = lambda: cancelled is None or not cancelled.is_set()
         mode = 'ro' if readonly else 'rw'
@@ -713,7 +735,7 @@ class MemoryStorage:
         from .metrics import record_job_metric
         for _, stage in blocked_jobs:
             record_job_metric(stage, 'blocked')
-        self.cache_generation += 1
+        self._advance_search_generation()
         return {"deleted": True, "source_keys": sorted(source_keys), "unidentified_records": unidentified}
 
     def update_memory(
@@ -1651,13 +1673,23 @@ class MemoryStorage:
         ).fetchone()
         return row["results_json"] if row else None
 
+    @property
+    def cache_generation(self):
+        """All thread-owned connections to this shard share invalidations."""
+        with _SEARCH_GENERATIONS_LOCK:
+            return self._search_generation.value
+
+    def _advance_search_generation(self):
+        with _SEARCH_GENERATIONS_LOCK:
+            self._search_generation.value += 1
+
     def invalidate_search_cache(self, agent: Optional[str] = None) -> None:
         """Delete cached searches, respecting any enclosing writer transaction.
 
         Per-agent DBs historically stored rows under agent='main'. Clear both the
         normalized agent key and legacy 'main' rows on any explicit invalidation.
         """
-        self.cache_generation += 1
+        self._advance_search_generation()
         conn = self._get_conn()
         if agent:
             agent_norm = str(agent or "main").strip().lower() or "main"
