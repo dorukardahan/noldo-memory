@@ -11,10 +11,39 @@ Note:
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+
+# Strict, public server controls. Values are never included in errors.
+SERVER_CONTROL_RANGES = {
+    "api_write_timeout_seconds": (float, 0.1, 6),
+    "api_recall_timeout_seconds": (float, 0.1, 6),
+    "api_status_timeout_seconds": (float, 0.1, 1),
+    "api_max_body_bytes": (int, 1024, 1048576),
+    "capture_max_total_chars": (int, 1000, 128000),
+    "embed_max_batch_items": (int, 1, 8),
+    "embed_max_batch_chars": (int, 1000, 16000),
+    "embed_timeout_seconds": (float, 0.1, 2),
+    "embed_max_retries": (int, 1, 2),
+    "index_job_timeout_seconds": (float, 1, 30),
+    "index_job_max_attempts": (int, 1, 3),
+    "index_queue_max_jobs": (int, 1, 1000),
+    "api_embedding_concurrency": (int, 1, 2),
+    "recall_max_agents": (int, 1, 32),
+}
+
+
+def _validate_control(field: str, value: Any) -> None:
+    kind, lower, upper = SERVER_CONTROL_RANGES[field]
+    valid_type = type(value) is int if kind is int else type(value) in (int, float)
+    if not valid_type or not lower <= value <= upper:
+        raise ValueError(f"invalid_config:{field}")
+    if not math.isfinite(value):
+        raise ValueError(f"invalid_config:{field}")
 
 
 @dataclass
@@ -35,6 +64,16 @@ class Config:
     api_host: str = "127.0.0.1"
     api_port: int = 8787
     api_key: str = ""  # Required for authenticated access
+    api_write_timeout_seconds: float = 2.0
+    api_recall_timeout_seconds: float = 6.0
+    api_status_timeout_seconds: float = 1.0
+    api_max_body_bytes: int = 262144
+    capture_max_total_chars: int = 128000
+    api_embedding_concurrency: int = 2
+    recall_max_agents: int = 32
+    index_job_timeout_seconds: float = 30.0
+    index_job_max_attempts: int = 3
+    index_queue_max_jobs: int = 1000
 
     # Search weights (5-layer hybrid search)
     weight_semantic: float = 0.50
@@ -81,7 +120,10 @@ class Config:
     batch_size: int = 50
 
     # Embedding retry
-    embed_max_retries: int = 3
+    embed_max_retries: int = 2  # Total attempts, not additional retries
+    embed_max_batch_items: int = 8
+    embed_max_batch_chars: int = 16000
+    embed_timeout_seconds: float = 2.0
     embed_cache_size: int = 1024
     max_embed_chars: int = 3500  # Truncate text before embedding (safe for ~1024 token slots)
 
@@ -89,9 +131,22 @@ class Config:
     embed_worker_enabled: bool = True
     embed_worker_interval: int = 300
 
+    def __post_init__(self) -> None:
+        self.validate_controls()
+
+    def validate_controls(self) -> None:
+        """Reject malformed or unbounded server controls with safe field codes."""
+        for field in SERVER_CONTROL_RANGES:
+            _validate_control(field, getattr(self, field))
+
     def validate(self) -> list[str]:
         """Return a list of validation errors (empty == OK)."""
         errors: list[str] = []
+        for field in SERVER_CONTROL_RANGES:
+            try:
+                _validate_control(field, getattr(self, field))
+            except ValueError:
+                errors.append(f"invalid_config:{field}")
         if not self.openrouter_api_key:
             errors.append("OPENROUTER_API_KEY is required")
         if self.embedding_dimensions < 1:
@@ -173,7 +228,10 @@ def load_config(config_path: Optional[str] = None) -> Config:
         with open(json_path, "r") as fh:
             data = json.load(fh)
         for key, val in data.items():
-            if hasattr(cfg, key):
+            if key in SERVER_CONTROL_RANGES:
+                _validate_control(key, val)
+                setattr(cfg, key, val)
+            elif hasattr(cfg, key):
                 expected_type = type(getattr(cfg, key))
                 try:
                     setattr(cfg, key, expected_type(val))
@@ -224,6 +282,10 @@ def load_config(config_path: Optional[str] = None) -> Config:
         "AGENT_MEMORY_EMBED_WORKER_INTERVAL": ("embed_worker_interval", int),
     }
 
+    # All bounded controls have matching AGENT_MEMORY_<FIELD> env names.
+    for field, (kind, _, _) in SERVER_CONTROL_RANGES.items():
+        env_map["AGENT_MEMORY_" + field.upper()] = (field, kind)
+
     # Legacy env var fallbacks (checked only if new name is not set)
     legacy_map: dict[str, str] = {
         "ASUMAN_MEMORY_DB": "AGENT_MEMORY_DB",
@@ -239,6 +301,14 @@ def load_config(config_path: Optional[str] = None) -> Config:
     for env_key, (attr, cast) in env_map.items():
         val = os.environ.get(env_key)
         if val is not None:
+            if attr in SERVER_CONTROL_RANGES:
+                try:
+                    converted = cast(val)
+                    _validate_control(attr, converted)
+                except (ValueError, TypeError, OverflowError):
+                    raise ValueError(f"invalid_config:{attr}") from None
+                setattr(cfg, attr, converted)
+                continue
             try:
                 setattr(cfg, attr, cast(val))
             except (ValueError, TypeError):
@@ -264,4 +334,5 @@ def load_config(config_path: Optional[str] = None) -> Config:
         else:
             cfg.db_path = str(new_dir / "memory.sqlite")
 
+    cfg.validate_controls()
     return cfg

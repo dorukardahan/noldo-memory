@@ -375,6 +375,7 @@ def test_embed_worker_skips_stale_vectorless_snapshot_without_orphan_vector(tmp_
         """
     )
     conn.execute("CREATE TABLE memory_vectors (embedding BLOB NOT NULL)")
+    conn.execute("CREATE TABLE memory_index_jobs (memory_id TEXT)")
     conn.execute("INSERT INTO memories(id, text, created_at) VALUES ('mem-1', 'text', ?)", (time.time(),))
     conn.commit()
 

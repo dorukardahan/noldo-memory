@@ -104,6 +104,19 @@ return or cache recalled context. A remote store or pin may therefore have an
 indeterminate backend outcome if shutdown wins that race. The real HTTP request
 remains bounded by `timeout_seconds`.
 
+For turn capture only, an HTTP timeout triggers one read-only
+`POST /v1/capture/status` with the identical batch and agent/namespace. The
+endpoint reuses capture normalization and checks every eligible row against the
+live exact-provenance store. `complete` means all admissible rows are durable,
+not that derived KG work has finished; `incomplete` means missing/partial/pending,
+and `blocked` means a source was forgotten. Only `complete` resolves the adapter's
+ambiguous timeout as a successful durable write. If the status call also times
+out, the endpoint is unavailable, or any row is absent, the adapter reports an
+ambiguous outcome rather than claiming a loss or retrying blindly. Graph work
+remains synchronous and may delay both responses on a single-worker server;
+this mechanism does not guarantee bounded graph latency or an immediate status
+answer. Status returns no memory text, identifiers, or session values.
+
 A provider instance can be initialized again after a clean shutdown. If the
 previous shutdown deadline expired while an admitted operation was still
 running, reinitialization fails closed until that operation has drained; this

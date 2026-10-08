@@ -608,13 +608,29 @@ class KnowledgeGraph:
         source_memory_id: Optional[str] = None,
     ) -> ExtractedEntities:
         """Extract entities and persist to storage + create co-occurrence links."""
+        prepared = self.prepare_text(text, source, timestamp)
+        return self.persist_prepared(prepared, source_memory_id=source_memory_id)
+
+    def prepare_text(self, text, source="", timestamp=""):
+        """Pure extraction: no SQLite access and no writer transaction."""
+        entities = self.extractor.extract(text, source, timestamp)
+        typed_rels = self.extractor.extract_typed_relations(text, entities)
+        return {"text": text, "entities": entities, "typed_rels": typed_rels}
+
+    def persist_prepared(self, prepared, source_memory_id=None):
+        """Persist already-extracted graph data inside the caller's fence."""
         if source_memory_id is not None:
             with self.storage.graph_source(source_memory_id):
-                return self._persist_text(text, source, timestamp, source_memory_id)
-        return self._persist_text(text, source, timestamp, None)
+                return self._persist_prepared(prepared, source_memory_id)
+        with self.storage.transaction():
+            return self._persist_prepared(prepared, None)
 
     def _persist_text(self, text, source, timestamp, source_memory_id):
-        entities = self.extractor.extract(text, source, timestamp)
+        return self.persist_prepared(self.prepare_text(text, source, timestamp), source_memory_id)
+
+    def _persist_prepared(self, prepared, source_memory_id):
+        text = prepared["text"]
+        entities = prepared["entities"]
         all_ents = entities.all_entities()
 
         # Store each entity (resolve aliases to canonical names)
@@ -650,7 +666,7 @@ class KnowledgeGraph:
                     )
 
         # Typed relations + Conflict Detection
-        typed_rels = self.extractor.extract_typed_relations(text, entities)
+        typed_rels = prepared["typed_rels"]
         detector = ConflictDetector(self.storage)
 
         for rel in typed_rels:

@@ -223,6 +223,7 @@ class EmbedWorker:
               FROM memories
              WHERE vector_rowid IS NULL
                AND deleted_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM memory_index_jobs j WHERE j.memory_id = memories.id)
             """
         ).fetchone()
         return int(row["count"]) if row else 0
@@ -235,6 +236,7 @@ class EmbedWorker:
               FROM memories
              WHERE vector_rowid IS NULL
                AND deleted_at IS NULL
+               AND NOT EXISTS (SELECT 1 FROM memory_index_jobs j WHERE j.memory_id = memories.id)
              ORDER BY created_at ASC
             """
         ).fetchall()
@@ -259,6 +261,7 @@ class EmbedWorker:
                  WHERE id = ?
                    AND vector_rowid IS NULL
                    AND deleted_at IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM memory_index_jobs j WHERE j.memory_id = memories.id)
                 """,
                 (vector_rowid, time.time(), memory_id),
             )

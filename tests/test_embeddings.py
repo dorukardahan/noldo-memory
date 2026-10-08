@@ -74,32 +74,23 @@ class TestCallAPI:
 
 @pytest.mark.asyncio
 class TestAsyncAPI:
-    @patch("agent_memory.embeddings.requests.post")
+    @patch('agent_memory.embeddings.OpenRouterEmbeddings._post')
     async def test_embed_uses_cache(self, mock_post, embedder):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "data": [{"index": 0, "embedding": [1.0, 2.0, 3.0, 4.0]}]
-        }
-        mock_post.return_value = mock_resp
+        mock_post.return_value = (200, [[1., 2., 3., 4.]])
+        try:
+            v1 = await embedder.embed('cached text')
+            v2 = await embedder.embed('cached text')
+            assert v1 == v2
+            assert mock_post.call_count == 1
+        finally:
+            await embedder.aclose()
 
-        v1 = await embedder.embed("cached text")
-        v2 = await embedder.embed("cached text")
-        assert v1 == v2
-        assert mock_post.call_count == 1  # only one API call
-
-    @patch("agent_memory.embeddings.requests.post")
+    @patch('agent_memory.embeddings.OpenRouterEmbeddings._post')
     async def test_embed_batch_partial_cache(self, mock_post, embedder):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "data": [{"index": 0, "embedding": [1.0, 2.0, 3.0, 4.0]}]
-        }
-        mock_post.return_value = mock_resp
-
-        # Pre-cache one
-        embedder._cache_put("cached", [9.0, 8.0, 7.0, 6.0])
-
-        result = await embedder.embed_batch(["cached", "not-cached"])
-        assert result[0] == [9.0, 8.0, 7.0, 6.0]
-        assert result[1] == [1.0, 2.0, 3.0, 4.0]
+        mock_post.return_value = (200, [[1., 2., 3., 4.]])
+        embedder._cache_put('cached', [9., 8., 7., 6.])
+        try:
+            result = await embedder.embed_batch(['cached', 'not-cached'])
+            assert result == [[9., 8., 7., 6.], [1., 2., 3., 4.]]
+        finally:
+            await embedder.aclose()

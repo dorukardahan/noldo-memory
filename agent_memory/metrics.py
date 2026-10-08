@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from collections import defaultdict
 from typing import Any, Dict, Tuple
@@ -9,6 +10,13 @@ from typing import Any, Dict, Tuple
 
 class MetricsCollector:
     """Thread-safe metrics collector for API/recall instrumentation."""
+
+    STAGES = frozenset({"queue", "normalize", "dedup", "persist", "embedding", "graph",
+                        "bm25", "vector", "rerank", "access", "total"})
+    OPERATIONS = frozenset({"capture", "store", "recall", "status", "backend", "index"})
+    OUTCOMES = frozenset({"accepted", "completed", "failed", "blocked", "timeout",
+                          "queue_full", "degraded", "cancelled", "rejected"})
+    JOB_STAGES = frozenset({"embed", "graph"})
 
     REQUEST_DURATION_BUCKETS = (
         0.005,
@@ -19,8 +27,11 @@ class MetricsCollector:
         0.25,
         0.5,
         1.0,
+        2.0,
         2.5,
         5.0,
+        6.0,
+        8.0,
         10.0,
     )
 
@@ -41,6 +52,14 @@ class MetricsCollector:
         self._memories_total_by_agent: Dict[str, int] = {}
         self._vectorless_total: int = 0
         self._embed_queue_depth: int = 0
+        self._stage_buckets: dict[tuple[str, str, str], list[int]] = {}
+        self._stage_sum: dict[tuple[str, str, str], float] = defaultdict(float)
+        self._stage_count: dict[tuple[str, str, str], int] = defaultdict(int)
+        self._stage_attempts: dict[str, int] = defaultdict(int)
+        self._stage_retries: dict[str, int] = defaultdict(int)
+        self._job_outcomes: dict[tuple[str, str], int] = defaultdict(int)
+        self._index_queue_depth = 0
+        self._index_inflight = 0
 
     def reset(self) -> None:
         """Reset all metrics (used by tests)."""
@@ -54,13 +73,62 @@ class MetricsCollector:
             self._memories_total_by_agent = {}
             self._vectorless_total = 0
             self._embed_queue_depth = 0
+            self._stage_buckets.clear()
+            self._stage_sum.clear()
+            self._stage_count.clear()
+            self._stage_attempts.clear()
+            self._stage_retries.clear()
+            self._job_outcomes.clear()
+            self._index_queue_depth = 0
+            self._index_inflight = 0
+
+    def record_stage(self, operation: str, stage: str, duration_seconds: float,
+                     outcome: str = "completed") -> None:
+        """Observe a finite duration using only fixed, low-cardinality labels."""
+        if (not isinstance(operation, str) or operation not in self.OPERATIONS
+                or not isinstance(stage, str) or stage not in self.STAGES
+                or not isinstance(outcome, str) or outcome not in self.OUTCOMES):
+            raise ValueError("invalid_metric_label")
+        duration = _safe_duration(duration_seconds)
+        key = (operation, stage, outcome)
+        with self._lock:
+            buckets = self._stage_buckets.setdefault(key, [0] * len(self.REQUEST_DURATION_BUCKETS))
+            for i, upper in enumerate(self.REQUEST_DURATION_BUCKETS):
+                if duration <= upper:
+                    buckets[i] += 1
+            self._stage_sum[key] += duration
+            self._stage_count[key] += 1
+
+    def record_attempt(self, stage: str, *, retry: bool = False) -> None:
+        if not isinstance(stage, str) or stage not in self.STAGES or type(retry) is not bool:
+            raise ValueError("invalid_metric_label")
+        with self._lock:
+            self._stage_attempts[stage] += 1
+            if retry:
+                self._stage_retries[stage] += 1
+
+    def record_job(self, stage: str, outcome: str) -> None:
+        if (not isinstance(stage, str) or stage not in self.JOB_STAGES
+                or not isinstance(outcome, str) or outcome not in {"completed", "failed", "blocked"}):
+            raise ValueError("invalid_metric_label")
+        with self._lock:
+            self._job_outcomes[(stage, outcome)] += 1
+
+    def set_index_gauges(self, *, queue_depth: int, inflight: int) -> None:
+        if type(queue_depth) is not int or type(inflight) is not int or min(queue_depth, inflight) < 0:
+            raise ValueError("invalid_metric_count")
+        with self._lock:
+            self._index_queue_depth = queue_depth
+            self._index_inflight = inflight
 
     def record_request(self, method: str, path: str, status: int, duration_seconds: float) -> None:
         """Record request counter and latency histogram observation."""
         method_norm = (method or "GET").upper()
-        path_norm = path or "/"
-        status_norm = str(status)
-        duration = max(0.0, float(duration_seconds))
+        if method_norm not in {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}:
+            method_norm = "OTHER"
+        path_norm = normalize_metric_path(path)
+        status_norm = str(status) if type(status) is int and 100 <= status <= 599 else "other"
+        duration = _safe_duration(duration_seconds)
 
         with self._lock:
             self._requests_total[(method_norm, path_norm, status_norm)] += 1
@@ -118,6 +186,14 @@ class MetricsCollector:
                 "memories_total_by_agent": dict(self._memories_total_by_agent),
                 "vectorless_total": int(self._vectorless_total),
                 "embed_queue_depth": int(self._embed_queue_depth),
+                "stage_buckets": {key: list(counts) for key, counts in self._stage_buckets.items()},
+                "stage_sum": dict(self._stage_sum),
+                "stage_count": dict(self._stage_count),
+                "stage_attempts": dict(self._stage_attempts),
+                "stage_retries": dict(self._stage_retries),
+                "job_outcomes": dict(self._job_outcomes),
+                "index_queue_depth": self._index_queue_depth,
+                "index_inflight": self._index_inflight,
             }
 
     def render_prometheus(self) -> str:
@@ -190,10 +266,85 @@ class MetricsCollector:
         lines.append("# TYPE agent_memory_embed_queue_depth gauge")
         lines.append(f"agent_memory_embed_queue_depth {int(snap['embed_queue_depth'])}")
 
+        lines.append("# HELP agent_memory_stage_duration_seconds Bounded operation stage duration.")
+        lines.append("# TYPE agent_memory_stage_duration_seconds histogram")
+        for key, buckets in sorted(snap["stage_buckets"].items()):
+            operation, stage, outcome = key
+            labels = f'operation="{operation}",stage="{stage}",outcome="{outcome}"'
+            for upper, count in zip(self.REQUEST_DURATION_BUCKETS, buckets):
+                lines.append(f'agent_memory_stage_duration_seconds_bucket{{{labels},le="{_format_bucket(upper)}"}} {count}')
+            lines.append(f'agent_memory_stage_duration_seconds_bucket{{{labels},le="+Inf"}} {snap["stage_count"][key]}')
+            lines.append(f'agent_memory_stage_duration_seconds_sum{{{labels}}} {_format_float(snap["stage_sum"][key])}')
+            lines.append(f'agent_memory_stage_duration_seconds_count{{{labels}}} {snap["stage_count"][key]}')
+        for metric, values in (("stage_attempts", snap["stage_attempts"]),
+                               ("stage_retries", snap["stage_retries"])):
+            lines.append(f"# TYPE agent_memory_{metric}_total counter")
+            for stage, count in sorted(values.items()):
+                lines.append(f'agent_memory_{metric}_total{{stage="{stage}"}} {count}')
+        lines.append("# TYPE agent_memory_index_jobs_total counter")
+        for (stage, outcome), count in sorted(snap["job_outcomes"].items()):
+            lines.append(f'agent_memory_index_jobs_total{{stage="{stage}",outcome="{outcome}"}} {count}')
+        for name in ("index_queue_depth", "index_inflight"):
+            lines.append(f"# TYPE agent_memory_{name} gauge")
+            lines.append(f"agent_memory_{name} {snap[name]}")
         return "\n".join(lines) + "\n"
 
 
 collector = MetricsCollector()
+
+
+def _safe_duration(value: float) -> float:
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise ValueError("invalid_metric_duration")
+    return float(value)
+
+
+_METRIC_PATHS = frozenset({
+    "/", "/docs", "/openapi.json", "/redoc",
+    *{"/v1/" + path for path in (
+        "recall", "relearn-source", "capture/status", "capture", "store", "rule", "pin", "unpin",
+        "forget", "search", "decay", "gc", "consolidate", "compress", "dashboard", "stats", "agents",
+        "health", "health/deep", "health/live", "health/backend", "health/doctor", "metrics/lessons",
+        "metrics/prometheus", "metrics", "export", "import", "amnesia-check", "solved", "admin/rotate-key",
+    )},
+})
+
+
+def normalize_metric_path(path: str) -> str:
+    """Never emit attacker-controlled paths or operation identities as labels."""
+    if isinstance(path, str) and path.startswith("/v1/operations/"):
+        return "/v1/operations/{request_id}"
+    return path if isinstance(path, str) and path in _METRIC_PATHS else "/other"
+
+
+def record_stage_metric(*, operation: str, stage: str, duration_seconds: float,
+                        outcome: str = "completed") -> None:
+    """Best-effort runtime observation; telemetry never changes product state."""
+    try:
+        collector.record_stage(operation, stage, duration_seconds, outcome)
+    except Exception:
+        return
+
+
+def record_attempt_metric(stage: str, *, retry: bool = False) -> None:
+    try:
+        collector.record_attempt(stage, retry=retry)
+    except Exception:
+        return
+
+
+def record_job_metric(stage: str, outcome: str) -> None:
+    try:
+        collector.record_job(stage, outcome)
+    except Exception:
+        return
+
+
+def set_index_metric_gauges(*, queue_depth: int, inflight: int) -> None:
+    try:
+        collector.set_index_gauges(queue_depth=queue_depth, inflight=inflight)
+    except Exception:
+        return
 
 
 def record_request_metric(*, method: str, path: str, status: int, duration_seconds: float) -> None:
