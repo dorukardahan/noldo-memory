@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [2.0.2] - 2026-10-10
+
+### Fixed
+- OpenClaw automatic recall keeps complete recalled records within the configured context budget instead of cutting each one at 500 characters, so the answer-bearing end of a memory reaches the model (#39).
+- Automatic recall (OpenClaw plugin and Hermes adapter) always sends `include_history: false`. Words such as "önceki" or "previously" in a user message no longer pull superseded memories into the prompt (#46).
+- Memories written by an agent through `noldomem_store` are labelled `assistant`/`inferred`/`generated` instead of being recorded as something the user reported. A new `user_said` flag marks a store that repeats what the user actually said, and a correction with `supersedes` keeps the `reported` label the server requires (#47).
+
+### Added
+- Hermes adapter `recall_all_namespaces` (default `false`): automatic recall can search all of the agent's own namespaces, matching the OpenClaw option from 2.0.1. Agent isolation is unchanged (#46).
+- Hermes adapter `mirror_builtin_writes` (default `true`): set it to `false` to stop copying Hermes built-in memory writes into NoldoMem when the built-in store is the primary memory (#46).
+
+All runtime manifests are coordinated at 2.0.2. No database migration is required. Publishing this release does not deploy it or change configuration in existing installations.
+
 ## [2.0.1] - 2026-09-15
 
 ### Fixed
