@@ -2111,3 +2111,34 @@ def test_builtin_write_mirroring_stays_on_by_default(monkeypatch, tmp_path):
     assert [b["text"] for b in stored] == ["Prefers short replies"]
     with pytest.raises(RuntimeError):
         provider.on_memory_write("replace", "user", "Prefers detailed replies")
+
+
+def _stored_body_for(monkeypatch, tmp_path, args):
+    provider = _configured_provider(monkeypatch, tmp_path)
+    stored = []
+
+    class FakeClient:
+        def store(self, body):
+            stored.append(body)
+            return {"stored": True}
+
+    provider._client = FakeClient()
+    result = json.loads(provider.handle_tool_call("noldomem_store", args))
+    assert result["success"] is True
+    return stored[0]
+
+
+def test_agent_store_is_labelled_inferred_by_default(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Two logins of one account conflict"})
+    assert body["evidence"] == {"role": "assistant", "assertion": "inferred", "delivery": "generated"}
+
+
+def test_store_of_a_user_statement_is_labelled_reported(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Prefers Turkish replies", "user_said": True})
+    assert body["evidence"] == {"role": "user", "assertion": "reported", "delivery": "received"}
+
+
+def test_correction_keeps_the_reported_label_the_server_requires(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Uses the personal account", "supersedes": "abc123"})
+    assert body["supersedes"] == "abc123"
+    assert body["evidence"]["assertion"] == "reported"

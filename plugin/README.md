@@ -3,7 +3,7 @@
 This native OpenClaw plugin exposes NoldoMem as agent tools:
 
 - `noldomem_recall` - search long-term memory
-- `noldomem_store` - store important facts, preferences, decisions, and lessons
+- `noldomem_store` - store important facts, preferences, decisions, and lessons. Writes are labelled inferred unless `user_said` is true or the write is a `supersedes` correction
 - `noldomem_pin` - protect critical memories from decay and cleanup
 - `noldomem_forget` - delete an assertion and its connected revision history
 - `noldomem_relearn_source` - explicitly unblock one forgotten source for future ingestion

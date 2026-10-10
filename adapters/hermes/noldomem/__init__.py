@@ -234,6 +234,15 @@ class NoldoMemHTTPClient:
         return self.post("/v1/pin", body)
 
 
+def _store_evidence(args: Dict[str, Any]) -> Dict[str, str]:
+    """Who stands behind an explicitly stored memory. Without this the server records every agent
+    write as reported by the user, so an agent's own inference is later recalled as the user's word."""
+    if args.get("user_said") is True or args.get("supersedes"):
+        # A correction (supersedes) is documented as a confirmed user correction.
+        return {"role": "user", "assertion": "reported", "delivery": "received"}
+    return {"role": "assistant", "assertion": "inferred", "delivery": "generated"}
+
+
 def _as_bool(value: Any, default: bool) -> bool:
     if value is None:
         return default
@@ -708,6 +717,7 @@ class NoldoMemProvider(MemoryProvider):
                         "namespace": {"type": "string"},
                         "source": {"type": "string"},
                         "supersedes": {"type": "string"},
+                        "user_said": {"type": "boolean", "description": "True only when the user stated this in this conversation (a preference, instruction or fact they reported). Leave false for your own conclusions, summaries, tool results or text forwarded from another session; those are stored as inferred."},
                         "valid_from": {"type": ["number", "null"], "description": "If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time."},
                     },
                     "required": ["text"],
@@ -795,6 +805,7 @@ class NoldoMemProvider(MemoryProvider):
                 for key in ("supersedes", "valid_from"):
                     if key in args:
                         body[key] = args[key]
+                body["evidence"] = _store_evidence(args)
                 if args.get("namespace"):
                     body["namespace"] = str(args["namespace"])
                 with self._network_operation(expected_generation=lifecycle_generation) as client:
