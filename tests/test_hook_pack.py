@@ -140,6 +140,24 @@ const expectedLabels = [
 if (JSON.stringify(labeledItems) !== JSON.stringify(expectedLabels)) {
   throw new Error(`structural handoff labels were not captured: ${JSON.stringify(labeledItems)}`);
 }
+
+const oldBoundaryBody = "x".repeat(80);
+const aboveOldBoundaryBody = `${"y".repeat(80)}-keep-the-acceptance-tail`;
+const overStorageLimitLine = `TODO: ${"z".repeat(180)}`;
+const boundaryItems = extractUnfinishedWork([
+  {
+    role: "assistant",
+    text: `TODO: ${oldBoundaryBody}\\nTODO: ${aboveOldBoundaryBody}\\n${overStorageLimitLine}`,
+  },
+]);
+const expectedBoundaryItems = [
+  `TODO: ${oldBoundaryBody}`,
+  `TODO: ${aboveOldBoundaryBody}`,
+  `${overStorageLimitLine.slice(0, 147)}...`,
+];
+if (JSON.stringify(boundaryItems) !== JSON.stringify(expectedBoundaryItems)) {
+  throw new Error(`long TODO boundary handling was unsafe: ${JSON.stringify(boundaryItems)}`);
+}
 """
 
     subprocess.run(

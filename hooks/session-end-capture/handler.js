@@ -326,14 +326,26 @@ function detectUserMood(messages) {
 
 export function extractUnfinishedWork(messages) {
   const items = [];
+  const maxItemLength = 150;
   // Require a line-level task marker; ordinary words such as "kalan" and
-  // "remaining" are not enough to make prose actionable.
+  // "remaining" are not enough to make prose actionable. Match the complete
+  // logical line before applying the storage limit so long tasks cannot become
+  // misleading, unmarked prefixes.
   const assistantMsgs = messages.filter((m) => m.role === "assistant");
   for (const msg of assistantMsgs.slice(-5)) {
     const todoMatches = msg.text.match(
-      /^[ \t]*(?:(?:(?:[-*+]|[0-9]{1,3}[.)])[ \t]+)?(?:(?:TODO|FIXME)(?:[ \t]*:)?|(?:REMAINING|UNFINISHED|KALAN|BEKL[İI]YOR)[ \t]*:)|[-*][ \t]+\[[ \t]\])[ \t]+[^\n]{5,80}/gim
+      /^[ \t]*(?:(?:(?:[-*+]|[0-9]{1,3}[.)])[ \t]+)?(?:(?:TODO|FIXME)(?:[ \t]*:)?|(?:REMAINING|UNFINISHED|KALAN|BEKL[İI]YOR)[ \t]*:)|[-*][ \t]+\[[ \t]\])[ \t]+[^\r\n]{5,}$/gim
     );
-    if (todoMatches) items.push(...todoMatches.map((m) => m.trim().slice(0, 150)));
+    if (todoMatches) {
+      items.push(
+        ...todoMatches.map((match) => {
+          const item = match.trim();
+          return item.length <= maxItemLength
+            ? item
+            : `${item.slice(0, maxItemLength - 3)}...`;
+        })
+      );
+    }
   }
   return items.slice(0, 5);
 }
