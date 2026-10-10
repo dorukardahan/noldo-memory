@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import types
+import urllib.error
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -115,6 +116,17 @@ def test_http_client_uses_x_api_key_header(monkeypatch):
         "body": {"id": "mem_1", "agent": "hermes"},
         "api_key": "test-api-key",
     }
+
+
+def test_http_client_reconciles_transport_timeout_classification(monkeypatch):
+    client = NoldoMemHTTPClient("https://example.test", "test-api-key", 1.25)
+
+    def timed_out(req, timeout):
+        raise urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr("urllib.request.urlopen", timed_out)
+    with pytest.raises(RuntimeError, match="API timed out"):
+        client.capture({"messages": []})
 
 
 def test_provider_exposes_stable_tool_names(monkeypatch, tmp_path):
@@ -1820,6 +1832,47 @@ def test_failed_voice_prefix_keeps_independent_text_and_plain_quotes(note):
     assert _without_failed_voice_prefix('"The dome is violet."') == '"The dome is violet."'
     assert _without_failed_voice_prefix('I was shown: ' + note) == 'I was shown: ' + note
     assert _without_failed_voice_prefix('"' + note + '"') == '"' + note + '"'
+
+
+def test_sync_timeout_reconciles_only_exact_complete_capture(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, sync_turns_enabled=True)
+    calls = []
+
+    class Client:
+        state = "complete"
+
+        def capture(self, body):
+            calls.append(body)
+            raise RuntimeError("NoldoMem API timed out")
+
+        def capture_status(self, body):
+            assert body == calls[-1]
+            return {"state": self.state}
+
+    client = Client()
+    provider._client = client
+    messages = [{"role": "user", "content": "Aurora dome opens on Friday"}]
+    provider.sync_turn("Aurora dome opens on Friday", "Acknowledged", messages=messages)
+    client.state = "incomplete"
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        provider.sync_turn("Aurora dome opens on Friday", "Acknowledged", messages=messages)
+    client.state = "blocked"
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        provider.sync_turn("Aurora dome opens on Friday", "Acknowledged", messages=messages)
+
+    def status_unavailable(body):
+        raise RuntimeError("NoldoMem API is unavailable")
+
+    client.capture_status = status_unavailable
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        provider.sync_turn("Aurora dome opens on Friday", "Acknowledged", messages=messages)
+
+    def precommit_failure(body):
+        raise RuntimeError("NoldoMem API request failed: storage error")
+
+    client.capture = precommit_failure
+    with pytest.raises(RuntimeError, match="storage error"):
+        provider.sync_turn("Aurora dome opens on Friday", "Acknowledged", messages=messages)
 
 
 @pytest.mark.parametrize('timestamp,event_id,expected', [

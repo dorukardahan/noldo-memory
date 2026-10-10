@@ -424,6 +424,35 @@ class TestRecall:
 
 @pytest.mark.asyncio
 class TestCapture:
+    async def test_capture_status_distinguishes_precommit_partial_and_complete(self, client):
+        body = {"agent": "alpha", "namespace": "receipts", "messages": [
+            {"text": "Aurora dome opens on Friday", "role": "user", "session": "s1"},
+            {"text": "Aurora telescope needs service", "role": "tool", "session": "s1"},
+        ]}
+        status = await client.post("/v1/capture/status", json=body)
+        assert status.status_code == 200
+        assert status.json()["state"] == "incomplete"
+        await client.post("/v1/capture", json={**body, "messages": body["messages"][:1]})
+        assert (await client.post("/v1/capture/status", json=body)).json()["state"] == "incomplete"
+        assert (await client.post("/v1/capture", json=body)).status_code == 200
+        assert (await client.post("/v1/capture/status", json=body)).json()["state"] == "complete"
+        assert (await client.post("/v1/capture/status", json={**body, "namespace": "elsewhere"})).json()["state"] == "incomplete"
+
+    async def test_capture_status_never_calls_embedding_or_graph(self, client, monkeypatch):
+        async def no_embedding(_):
+            raise AssertionError("status must not embed")
+        monkeypatch.setattr(api_module._embedder, "embed_batch", no_embedding)
+        body = {"messages": [{"text": "Aurora dome opens on Friday", "role": "user"}]}
+        assert (await client.post("/v1/capture/status", json=body)).json()["state"] == "incomplete"
+
+    async def test_capture_status_forgotten_source_not_success(self, client):
+        body = {"messages": [{"text": "Aurora dome opens on Friday", "role": "user", "session": "s2"}]}
+        assert (await client.post("/v1/capture", json=body)).status_code == 200
+        rows = (await client.get("/v1/export")).json()
+        assert len(rows) == 1
+        assert (await client.request("DELETE", "/v1/forget", json={"id": rows[0]["id"]})).status_code == 200
+        assert (await client.post("/v1/capture/status", json=body)).json()["state"] == "blocked"
+
     async def test_capture_messages(self, client):
         resp = await client.post("/v1/capture", json={
             "messages": [
