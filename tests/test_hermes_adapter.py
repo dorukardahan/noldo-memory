@@ -2046,3 +2046,68 @@ def test_native_document_read_extraction_excludes_failures_and_stale_guidance(mo
     provider.sync_turn(messages[0]['content'], messages[-1]['content'], session_id='s3', messages=messages)
     assert note in calls[-1]['messages'][0]['text']
     assert all(part['role']!='tool' for part in calls[-1]['messages'])
+
+
+def test_prefetch_never_requests_history_and_keeps_namespace_by_default(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, namespace="ops")
+    bodies = []
+
+    class FakeClient:
+        def recall(self, body):
+            bodies.append(dict(body))
+            return {"results": [{"text": "kept"}]}
+
+    provider._client = FakeClient()
+    assert "kept" in provider.prefetch("önceki karar neydi", session_id="s1")
+    assert bodies[0]["include_history"] is False
+    assert bodies[0]["namespace"] == "ops"
+
+
+def test_prefetch_can_search_all_namespaces_and_still_caches(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, namespace="ops", recall_all_namespaces=True)
+    bodies = []
+
+    class FakeClient:
+        def recall(self, body):
+            bodies.append(dict(body))
+            return {"results": [{"text": "from another namespace"}]}
+
+    provider._client = FakeClient()
+    first = provider.prefetch("which namespace", session_id="s1")
+    second = provider.prefetch("which namespace", session_id="s1")
+    assert "from another namespace" in first and first == second
+    assert len(bodies) == 1, "the all-namespaces snapshot must stay current so the cache is used"
+    assert "namespace" not in bodies[0]
+    assert bodies[0]["include_history"] is False
+
+
+def test_builtin_write_mirroring_can_be_disabled(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path, mirror_builtin_writes=False)
+    stored = []
+
+    class FakeClient:
+        def store(self, body):
+            stored.append(body)
+            return {"stored": True}
+
+    provider._client = FakeClient()
+    provider.on_memory_write("add", "user", "Prefers short replies")
+    provider.on_memory_write("replace", "user", "Prefers detailed replies")
+    provider.on_memory_write("remove", "memory", "old note")
+    assert stored == []
+
+
+def test_builtin_write_mirroring_stays_on_by_default(monkeypatch, tmp_path):
+    provider = _configured_provider(monkeypatch, tmp_path)
+    stored = []
+
+    class FakeClient:
+        def store(self, body):
+            stored.append(body)
+            return {"stored": True}
+
+    provider._client = FakeClient()
+    provider.on_memory_write("add", "user", "Prefers short replies")
+    assert [b["text"] for b in stored] == ["Prefers short replies"]
+    with pytest.raises(RuntimeError):
+        provider.on_memory_write("replace", "user", "Prefers detailed replies")
