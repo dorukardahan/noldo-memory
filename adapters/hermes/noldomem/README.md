@@ -52,9 +52,19 @@ Create `$HERMES_HOME/noldomem.json`:
   "sync_turns_enabled": false,
   "tools_enabled": true,
   "recall_cache_ttl_seconds": 0.0,
-  "recall_cache_max_entries": 128
+  "recall_cache_max_entries": 128,
+  "recall_all_namespaces": false,
+  "mirror_builtin_writes": true
 }
 ```
+
+`recall_all_namespaces` makes automatic prefetch search every namespace in this
+agent's store (writes still go to `namespace`). Automatic prefetch always sends
+`include_history: false`, so superseded rows never come back on their own.
+`mirror_builtin_writes: false` stops copying built-in MEMORY.md/USER.md `add`
+writes into NoldoMem. Mirroring cannot carry `replace` or `remove`, so when the
+built-in store is enabled next to NoldoMem, turn it off to keep one authority
+and avoid stale copies.
 
 Secrets can also be supplied through `NOLDOMEM_API_KEY` or
 `NOLDOMEM_API_KEY_FILE`. Do not put secrets in committed config files.

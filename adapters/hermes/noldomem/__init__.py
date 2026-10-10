@@ -131,12 +131,18 @@ class NoldoMemConfig:
     non_primary_writes_enabled: bool = False
     recall_cache_ttl_seconds: float = DEFAULT_RECALL_CACHE_TTL_SECONDS
     recall_cache_max_entries: int = DEFAULT_RECALL_CACHE_MAX_ENTRIES
+    # Automatic prefetch searches every namespace of this agent's store instead of only `namespace`.
+    # Writes still go to `namespace`.
+    recall_all_namespaces: bool = False
+    # Copy built-in MEMORY.md/USER.md `add` writes into NoldoMem. Replace/remove cannot be mirrored, so
+    # with both stores enabled a correction leaves the old copy behind; set false to keep one authority.
+    mirror_builtin_writes: bool = True
 
 
 @dataclass(frozen=True)
 class _RecallSnapshot:
     agent: str
-    namespace: str
+    namespace: Optional[str]
     limit: int
     max_chars: int
     session_id: str
@@ -146,7 +152,7 @@ class _RecallSnapshot:
     min_semantic_score: Optional[float] = None
 
     @property
-    def cache_key(self) -> tuple[str, str, int, int, str, str, Optional[float]]:
+    def cache_key(self) -> tuple[str, Optional[str], int, int, str, str, Optional[float]]:
         return (
             self.agent,
             self.namespace,
@@ -160,10 +166,14 @@ class _RecallSnapshot:
     def request_body(self) -> Dict[str, Any]:
         body: Dict[str, Any] = {
             "agent": self.agent,
-            "namespace": self.namespace,
             "query": self.query,
             "limit": self.limit,
+            # Automatic recall never pulls superseded rows; the server otherwise infers history from
+            # words such as "önceki" or "previously" in the user's message.
+            "include_history": False,
         }
+        if self.namespace is not None:
+            body["namespace"] = self.namespace
         if self.session_id:
             body["session_id"] = self.session_id
         if self.min_semantic_score is not None:
@@ -401,6 +411,14 @@ class NoldoMemProvider(MemoryProvider):
                 DEFAULT_RECALL_CACHE_MAX_ENTRIES,
                 minimum=1,
                 maximum=4096,
+            ),
+            recall_all_namespaces=_as_bool(
+                os.environ.get("NOLDOMEM_RECALL_ALL_NAMESPACES") or raw.get("recall_all_namespaces"),
+                False,
+            ),
+            mirror_builtin_writes=_as_bool(
+                os.environ.get("NOLDOMEM_MIRROR_BUILTIN_WRITES") or raw.get("mirror_builtin_writes"),
+                True,
             ),
         )
 
@@ -846,6 +864,8 @@ class NoldoMemProvider(MemoryProvider):
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
+        if not self._config.mirror_builtin_writes:
+            return  # the built-in store is the single authority; nothing is copied or refused
         if action in {"remove", "replace"}:
             # A substring is not an external memory ID. Never turn a deletion
             # into capture or pretend an ambiguous cross-store update succeeded.
@@ -1208,7 +1228,7 @@ class NoldoMemProvider(MemoryProvider):
             cfg = self._config
             return _RecallSnapshot(
                 agent=cfg.agent,
-                namespace=cfg.namespace,
+                namespace=None if cfg.recall_all_namespaces else cfg.namespace,
                 limit=cfg.recall_limit,
                 max_chars=cfg.recall_max_chars,
                 session_id=session_id or self._session_id,
@@ -1229,7 +1249,7 @@ class NoldoMemProvider(MemoryProvider):
             and snapshot.session_generation == self._session_generation
             and snapshot.write_generation == self._write_generation
             and snapshot.agent == cfg.agent
-            and snapshot.namespace == cfg.namespace
+            and snapshot.namespace == (None if cfg.recall_all_namespaces else cfg.namespace)
             and snapshot.limit == cfg.recall_limit
             and snapshot.max_chars == cfg.recall_max_chars
             and snapshot.min_semantic_score == cfg.recall_min_semantic_score
