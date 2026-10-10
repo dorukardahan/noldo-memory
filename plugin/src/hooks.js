@@ -269,6 +269,9 @@ export function registerAutoRecall(api, client, cfg) {
         // Cross-namespace recall is explicit; preserve existing workspace isolation.
         ...(cfg.recallAllNamespaces === true ? {} : { namespace: cfg.defaultNamespace }),
         max_tokens: cfg.recallMaxTokens,
+        // Automatic recall never pulls superseded rows; the server otherwise infers history from
+        // words such as "önceki" or "previously" in the prompt.
+        include_history: false,
         ...(cfg.recallMinSemanticScore != null ? { min_semantic_score: cfg.recallMinSemanticScore } : {}),
       });
 
