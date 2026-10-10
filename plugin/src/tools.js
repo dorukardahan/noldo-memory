@@ -62,6 +62,19 @@ function numberSchema(description) {
   return { type: "number", description };
 }
 
+function booleanSchema(description) {
+  return { type: "boolean", description };
+}
+
+// Who stands behind an explicitly stored memory. Without this the server records every agent
+// write as reported by the user, so an agent's own inference is later recalled as the user's word.
+export function storeEvidence(params) {
+  if (params.user_said === true || params.supersedes) {
+    return { role: "user", assertion: "reported", delivery: "received" };
+  }
+  return { role: "assistant", assertion: "inferred", delivery: "generated" };
+}
+
 export function registerTools(api, client, cfg) {
   // ── noldomem_recall ──
   api.registerTool(
@@ -160,6 +173,7 @@ export function registerTools(api, client, cfg) {
             namespace: stringSchema("Memory namespace (default: default)"),
             source: stringSchema("Source label (default: agent-tool)"),
             supersedes: stringSchema("Recalled ID of the assertion being explicitly corrected; leave unspecified for a new fact. Never invent an ID."),
+            user_said: booleanSchema("True only when the user stated this in this conversation (a preference, instruction or fact they reported). Leave false for your own conclusions, summaries, tool results or text forwarded from another session; those are stored as inferred."),
             valid_from: numberSchema("If the user did not explicitly give an effective date for this correction, omit this field or use null; do not calculate or invent Unix time. The server defaults to now. Use Unix seconds only for an explicitly given past or future effective date, not an event time or record creation time."),
           },
           ["content"]
@@ -174,6 +188,7 @@ export function registerTools(api, client, cfg) {
               session_id: ctx.sessionKey || ctx.sessionId,
               source: params.source || "agent-tool",
               namespace: params.namespace || cfg.defaultNamespace,
+              evidence: storeEvidence(params),
             });
             return {
               content: [

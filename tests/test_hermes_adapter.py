@@ -2046,3 +2046,34 @@ def test_native_document_read_extraction_excludes_failures_and_stale_guidance(mo
     provider.sync_turn(messages[0]['content'], messages[-1]['content'], session_id='s3', messages=messages)
     assert note in calls[-1]['messages'][0]['text']
     assert all(part['role']!='tool' for part in calls[-1]['messages'])
+
+
+def _stored_body_for(monkeypatch, tmp_path, args):
+    provider = _configured_provider(monkeypatch, tmp_path)
+    stored = []
+
+    class FakeClient:
+        def store(self, body):
+            stored.append(body)
+            return {"stored": True}
+
+    provider._client = FakeClient()
+    result = json.loads(provider.handle_tool_call("noldomem_store", args))
+    assert result["success"] is True
+    return stored[0]
+
+
+def test_agent_store_is_labelled_inferred_by_default(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Two logins of one account conflict"})
+    assert body["evidence"] == {"role": "assistant", "assertion": "inferred", "delivery": "generated"}
+
+
+def test_store_of_a_user_statement_is_labelled_reported(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Prefers Turkish replies", "user_said": True})
+    assert body["evidence"] == {"role": "user", "assertion": "reported", "delivery": "received"}
+
+
+def test_correction_keeps_the_reported_label_the_server_requires(monkeypatch, tmp_path):
+    body = _stored_body_for(monkeypatch, tmp_path, {"text": "Uses the personal account", "supersedes": "abc123"})
+    assert body["supersedes"] == "abc123"
+    assert body["evidence"]["assertion"] == "reported"

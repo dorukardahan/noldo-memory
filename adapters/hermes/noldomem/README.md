@@ -191,7 +191,7 @@ fetch attachments or transcribe media. `recall_min_semantic_score` is an optiona
 JSON-config admission floor for automatic prefetch; calibrate it for the actual
 embedding model. Explicit recall tools do not inherit that floor.
 
-Use `supersedes` on a store for a confirmed user correction. `valid_from` is Unix
+`noldomem_store` labels each write: `user_said: true` (the user stated it in this conversation) is stored as reported by the user; anything else (the agent's own conclusion, a summary, a tool result, text forwarded from another session) is stored as inferred, and recall shows that label. Use `supersedes` on a store for a confirmed user correction. `valid_from` is Unix
 seconds, defaulting to the server clock when omitted or null. If the user did not
 explicitly give an effective date, omit it or use null; do not generate a Unix
 timestamp for “now”. Explicit past/future effective dates remain supported. Event
